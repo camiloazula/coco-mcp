@@ -120,14 +120,25 @@ use:
 
 ## Install
 
-Cargo is the only supported way to install. There are no prebuilt binaries,
-packages, installers or store listings, and nothing is published to
-crates.io: `cargo install` builds from source on your machine. You need
-Rust 1.90 or newer.
+Coco is built from source on your machine; there are no prebuilt binaries,
+installers or store listings. Two ways to do that:
+
+**With Cargo** (Rust 1.90 or newer):
 
 ```bash
 cargo install --locked --git https://github.com/camiloazula/coco-mcp coco-mcp
 ```
+
+**With Homebrew**, on macOS or Linux, which installs a Rust toolchain for
+the build if you have none:
+
+```bash
+brew install camiloazula/coco/coco-mcp
+```
+
+The Homebrew formula builds the tagged source of the latest release;
+`brew upgrade coco-mcp` follows new releases. Its tap lives at
+[camiloazula/homebrew-coco](https://github.com/camiloazula/homebrew-coco).
 
 That puts one binary, `coco-mcp`, in `~/.cargo/bin`, with two modes:
 
@@ -141,8 +152,9 @@ coco-mcp --cli --help      # the command line; every command follows --cli
 
 `--locked` builds with the exact dependency versions in the committed
 `Cargo.lock`, the set the tests and the licence audit ran against. To
-update, run the install command again; `cargo install --list` shows what is
-installed and from which commit, and `cargo uninstall coco-mcp` removes it.
+update a Cargo install, run the install command again; `cargo install
+--list` shows what is installed and from which commit, and `cargo uninstall
+coco-mcp` removes it.
 From a checkout, `just run` opens the window and `just coco --help` the
 command line. Building needs a C toolchain and the system libraries GPUI
 and the keyring link against; the CI workflow in `.github/workflows/ci.yml`
