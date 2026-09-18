@@ -5,17 +5,42 @@
   </picture>
 </p>
 <h1 align="center">Coco MCP</h1>
-<p align="center">Debug MCP servers in depth, from the command line or a native window.</p>
+<p align="center">Inspect and debug MCP servers in depth, from the command line or a native window.</p>
 
-Coco MCP is a command-line tool for debugging
-[Model Context Protocol](https://modelcontextprotocol.io) servers in depth,
-with a native desktop window for when a screen beats a terminal. It is one
-binary, written in Rust and drawn by [GPUI](https://www.gpui.rs):
-`coco-mcp --cli` runs a command, `coco-mcp --desktop` opens the window, and
-both work from the same core, with persistent servers, call history with
-replay and snapshot diffs.
+Coco MCP is a tool for inspecting and debugging
+[Model Context Protocol](https://modelcontextprotocol.io) servers: connect
+to one, see what it offers, call it with any payload, read every message on
+the wire, and keep what you learned. It is one binary, written in Rust and
+drawn by [GPUI](https://www.gpui.rs): `coco-mcp --cli` runs a command,
+`coco-mcp --desktop` opens a native window, and both work from the same
+core.
 
 ![A tour of the window: adding a server, calling a tool, unfolding a log message, answering an elicitation, replaying from History, reading a diff, and the command palette](docs/tour.gif)
+
+## Why
+
+I wrote Coco because the way I was inspecting MCP servers kept getting in
+my way. I needed to send a raw JSON payload, not only what a form would let
+me type. I needed several servers connected at the same time, each with its
+own log. I needed the tool to stay fast with a long log and a large result
+on screen, and I needed it to remember the servers and the calls from
+yesterday. So Coco does those things first:
+
+- **Any payload.** The Raw tab next to the generated form takes whatever
+  JSON you paste, checks it against the tool's schema before it is sent,
+  and copies the request as JSON-RPC or `curl` exactly as it goes out.
+- **Many servers at once.** Every server in the sidebar has its own
+  session, wire log and history, all connected together; switching is a
+  click or `⌘K`.
+- **Fast, and still fast an hour later.** A native binary drawn on the GPU,
+  with lists that build only the rows in view and a drawing budget for big
+  results, so a long session costs no more per frame than a short one.
+- **Memory.** Servers, calls and snapshots persist, a call can be replayed
+  or opened back in the form, and each connect is diffed against the last
+  snapshot so a breaking change in a server is noticed, not discovered.
+
+The command line exists so the same things can be scripted, and so a
+breaking change can fail a CI job.
 
 ## Built in Rust, drawn by GPUI
 
