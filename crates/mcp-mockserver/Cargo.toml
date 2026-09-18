@@ -1,0 +1,35 @@
+[package]
+name = "mcp-mockserver"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Hermetic mock MCP server for tests, over stdio and HTTP"
+
+[dependencies]
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-streamable-http-server"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "io-util", "sync", "time", "net", "signal"] }
+tokio-util.workspace = true
+axum.workspace = true
+base64.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+mcp-core.workspace = true
+mcp-schema-form.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mcp-mockserver"
+path = "src/main.rs"

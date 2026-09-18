@@ -1,0 +1,45 @@
+# One job, on the cheapest runner: verify the tree as `just check` does
+# locally. Installation is `cargo install` on the user's own machine, so
+# nothing here builds for a platform or produces an artefact.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch cancels the run still going for the old one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      - name: System libraries GPUI and the keyring link against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libfreetype-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
+            libwayland-dev libvulkan-dev
+      - run: just fmt-check
+      - run: just clippy
+      - run: just test
+      - run: just clippy-app
+      - run: just test-app
+      - name: Licences, bans, sources and advisories
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: ""

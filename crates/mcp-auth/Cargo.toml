@@ -1,0 +1,31 @@
+[package]
+name = "mcp-auth"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "OS keyring secret store and OAuth 2.1 flow for MCP servers"
+
+[dependencies]
+uuid.workspace = true
+mcp-core.workspace = true
+rmcp = { workspace = true, features = ["client", "auth", "reqwest", "transport-streamable-http-client-reqwest"] }
+axum.workspace = true
+async-trait.workspace = true
+open.workspace = true
+keyring.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "net", "time"] }
+tokio-util.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+mcp-mockserver.workspace = true
+
+[lints]
+workspace = true

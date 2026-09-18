@@ -1,0 +1,60 @@
+[package]
+name = "coco-mcp"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Debug Model Context Protocol servers in depth, from the command line or a native desktop window"
+readme = "../../README.md"
+build = "build.rs"
+
+[lib]
+name = "coco_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "coco-mcp"
+path = "src/main.rs"
+
+[dependencies]
+coco-cli.workspace = true
+gpui-kit.workspace = true
+gpui.workspace = true
+mcp-core.workspace = true
+mcp-schema-form.workspace = true
+mcp-store.workspace = true
+mcp-auth.workspace = true
+mcp-diff.workspace = true
+mcp-exchange.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+futures.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+directories.workspace = true
+toml.workspace = true
+time.workspace = true
+open.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+# Needs the main thread (macOS platform) like gpui-kit's own rendering test.
+[[test]]
+name = "screenshots"
+path = "tests/screenshots.rs"
+harness = false
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+mcp-mockserver.workspace = true
+reqwest.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
+
+[lints]
+workspace = true

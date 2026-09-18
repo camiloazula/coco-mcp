@@ -1,0 +1,70 @@
+[
+  {
+    "name": "run_query",
+    "description": "rmcp / schemars style: definitions, type arrays for Option<T>, format hints, oneOf enums.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RunQueryArgs",
+      "type": "object",
+      "required": ["sql"],
+      "properties": {
+        "sql": { "description": "SQL to execute", "type": "string" },
+        "timeout_ms": { "description": "Per-query timeout", "type": ["integer", "null"], "format": "uint64", "minimum": 0.0 },
+        "params": { "type": "array", "items": { "$ref": "#/definitions/Param" } },
+        "mode": { "$ref": "#/definitions/Mode" },
+        "options": { "anyOf": [{ "$ref": "#/definitions/Options" }, { "type": "null" }] }
+      },
+      "definitions": {
+        "Param": {
+          "type": "object",
+          "required": ["name", "value"],
+          "properties": {
+            "name": { "type": "string" },
+            "value": { "$ref": "#/definitions/Scalar" }
+          }
+        },
+        "Scalar": {
+          "oneOf": [
+            { "type": "object", "required": ["Int"], "properties": { "Int": { "type": "integer", "format": "int64" } }, "additionalProperties": false },
+            { "type": "object", "required": ["Text"], "properties": { "Text": { "type": "string" } }, "additionalProperties": false },
+            { "type": "object", "required": ["Bool"], "properties": { "Bool": { "type": "boolean" } }, "additionalProperties": false }
+          ]
+        },
+        "Mode": {
+          "oneOf": [
+            { "type": "string", "enum": ["read_only"] },
+            { "type": "string", "enum": ["read_write"] }
+          ]
+        },
+        "Options": {
+          "type": "object",
+          "properties": {
+            "max_rows": { "type": "integer", "format": "uint32", "minimum": 0.0, "default": 1000 },
+            "explain": { "type": "boolean", "default": false }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "sum",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SumRequest",
+      "type": "object",
+      "required": ["a", "b"],
+      "properties": {
+        "a": { "description": "the left hand side number", "type": "integer", "format": "int32" },
+        "b": { "type": "integer", "format": "int32" }
+      }
+    }
+  },
+  {
+    "name": "empty",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "EmptyObject",
+      "type": "object"
+    }
+  }
+]

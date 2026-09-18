@@ -1,0 +1,111 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+# What a bare `cargo run`, `cargo build` or `cargo test` at the root means:
+# the one binary. The mock server is a binary too, and without this Cargo
+# refuses to pick. The `just` recipes name their packages with `-p`.
+default-members = ["apps/desktop"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Camilo Azula"]
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/camiloazula/coco-mcp"
+publish = false
+
+# Every third-party crate is declared once here with its version pinned by
+# caret and locked exactly in Cargo.lock (committed). Licence of each crate is
+# recorded in the commit that introduced it and enforced by deny.toml.
+[workspace.dependencies]
+# --- UI (apps/desktop only; nothing under crates/ may depend on these) ---
+gpui-kit = { version = "=0.6.1", default-features = false, features = ["component", "assets", "tree-sitter"] }
+# gpui-kit 0.6.1 depends on the published `gpui-pre` crate (Zed's GPUI, Apache-2.0)
+# with `^0.3.1`; its own Cargo.lock resolves 0.3.2. We pin that exact version so
+# the resolver can never float GPUI away from the combination gpui-kit was tested with.
+gpui = { package = "gpui-pre", version = "=0.3.2", default-features = false }
+
+# --- MCP ---
+rmcp = { version = "3.3", default-features = false }
+
+# --- async ---
+tokio = { version = "1.53", default-features = false }
+futures = "0.3"
+
+# --- serialization / schema ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+schemars = "1.2"
+jsonschema = { version = "0.56", default-features = false }
+
+# --- storage / secrets ---
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+keyring = "4.2"
+
+# --- auth / http ---
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "json", "form"] }
+async-trait = "0.1"
+tokio-util = "0.7"
+open = "5.4"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+url = "2"
+base64 = "0.23.1"
+
+# --- paths / config / logging ---
+directories = "6.0"
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
+
+# --- cli / errors / misc ---
+clap = { version = "4.6", features = ["derive"] }
+# Cargo's output style: palette (anstyle) and terminal-aware streams
+# (anstream). Both arrive with clap already.
+anstyle = "1.0"
+anstream = "1.0"
+# POSIX shell quoting for a stdio server's command line; already in the
+# graph through cc.
+shlex = "2.0"
+thiserror = "2.0"
+anyhow = "1.0"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros", "local-offset"] }
+uuid = { version = "1.26", features = ["v7", "serde"] }
+sha2 = "0.11"
+hex = "0.4"
+
+# --- internal ---
+mcp-core = { path = "crates/mcp-core" }
+mcp-schema-form = { path = "crates/mcp-schema-form" }
+mcp-store = { path = "crates/mcp-store" }
+mcp-auth = { path = "crates/mcp-auth" }
+mcp-diff = { path = "crates/mcp-diff" }
+mcp-exchange = { path = "crates/mcp-exchange" }
+mcp-mockserver = { path = "crates/mcp-mockserver" }
+coco-cli = { path = "apps/cli" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+# No unwrap()/expect() outside tests: propagate errors instead.
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "warn"   # allowed explicitly in the CLI
+print_stderr = "warn"
+
+[profile.dev]
+# GPUI + tree-sitter are slow to compile unoptimised; keep deps optimised.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

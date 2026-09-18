@@ -1,0 +1,71 @@
+[
+  {
+    "name": "create_user",
+    "description": "FastMCP / pydantic style: $defs, anyOf-null optionals, titles, null defaults.",
+    "inputSchema": {
+      "$defs": {
+        "Address": {
+          "properties": {
+            "street": { "title": "Street", "type": "string" },
+            "city": { "title": "City", "type": "string" },
+            "zip": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "title": "Zip" }
+          },
+          "required": ["street", "city"],
+          "title": "Address",
+          "type": "object"
+        },
+        "Role": {
+          "enum": ["admin", "member", "guest"],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "properties": {
+        "name": { "title": "Name", "type": "string", "minLength": 1 },
+        "age": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }], "default": null, "title": "Age" },
+        "role": { "$ref": "#/$defs/Role", "default": "member" },
+        "address": { "anyOf": [{ "$ref": "#/$defs/Address" }, { "type": "null" }], "default": null },
+        "tags": { "items": { "type": "string" }, "title": "Tags", "type": "array", "default": [] },
+        "score": { "title": "Score", "type": "number", "default": 0.5, "exclusiveMaximum": 1.0 },
+        "metadata": { "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }], "default": null, "title": "Metadata" }
+      },
+      "required": ["name"],
+      "title": "create_userArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "search",
+    "inputSchema": {
+      "properties": {
+        "query": { "title": "Query", "type": "string" },
+        "limit": { "default": 10, "title": "Limit", "type": "integer", "maximum": 100, "minimum": 1 },
+        "kind": {
+          "anyOf": [
+            { "const": "web", "title": "Web" },
+            { "const": "images", "title": "Images" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "filters": {
+          "anyOf": [
+            { "type": "string" },
+            { "items": { "type": "string" }, "type": "array" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Filters"
+        }
+      },
+      "required": ["query"],
+      "title": "searchArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "no_args",
+    "inputSchema": { "properties": {}, "title": "no_argsArguments", "type": "object" }
+  }
+]

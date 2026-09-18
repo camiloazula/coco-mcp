@@ -1,0 +1,82 @@
+# cargo-deny configuration. Enforced by `just deny` and in CI.
+# Policy: every dependency must be MIT, Apache-2.0, BSD, MPL-2.0, ISC or Zlib.
+# No GPL/AGPL/LGPL, no source-available, no "free for personal use".
+
+[graph]
+all-features = false
+# Audit the platforms we ship. Platform-specific deps (keyring stores, gpui
+# backends) are only pulled in for these targets.
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "aarch64-unknown-linux-gnu" },
+  { triple = "x86_64-pc-windows-msvc" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "MPL-2.0",
+  "ISC",
+  "Zlib",
+  # --- Permissive licences outside the original allow-list. ---
+  # All are OSI-approved or public-domain dedications with no copyleft and no
+  # use restriction. They are unavoidable in any Rust project (unicode-ident,
+  # the ICU crates behind `url`/`idna`) or come from the gpui tree.
+  # All OSI-approved or public-domain dedications; reviewed and accepted.
+  "Unicode-3.0",   # unicode-ident (via proc-macro2/syn), icu_* (via idna/url)
+  "0BSD",          # enum-iterator
+  "MIT-0",         # borrow-or-share
+  "CC0-1.0",       # hexf-parse, notify, tiny-keccak
+  "bzip2-1.0.6",   # libbz2-rs-sys
+]
+# Per-crate exceptions. Each entry names one crate and one licence that is
+# outside the allow-list. Keep this list short and justify every line.
+exceptions = [
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"   # gpui's tree has many duplicate versions; not our call.
+wildcards = "deny"
+allow-wildcard-paths = true   # internal path deps in [workspace.dependencies]
+highlight = "all"
+deny = [
+  # Hard constraint: no web engine in the binary.
+  { crate = "wry", reason = "no webview" },
+  { crate = "tao", reason = "no webview" },
+  { crate = "webview2-com", reason = "no webview" },
+  # TLS is rustls everywhere; avoid linking OpenSSL.
+  { crate = "openssl-sys", reason = "use rustls" },
+  { crate = "native-tls", reason = "use rustls" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[advisories]
+version = 2
+db-path = "$CARGO_HOME/advisory-dbs"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Unmaintained crates deep in the pinned gpui tree (text shaping and font
+# parsing). None is reachable from our code, none has a vulnerability, and
+# they leave only when gpui-pre moves; each entry is reviewed when the pin does.
+ignore = [
+  { id = "RUSTSEC-2024-0384", reason = "instant: via parking_lot in the gpui tree; no fix upstream" },
+  { id = "RUSTSEC-2024-0436", reason = "paste: proc-macro via gpui-pre; no runtime code" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: font parsing inside gpui-pre/cosmic-text" },
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: text shaping inside usvg/gpui-pre" },
+]
