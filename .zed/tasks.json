@@ -1,0 +1,23 @@
+[
+  {
+    "label": "Cargo Check (Workspace)",
+    "command": "cargo check --workspace --all-targets",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "Clippy (Workspace)",
+    "command": "cargo clippy --workspace --all-targets",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "Just Check (Full Lint & Tests)",
+    "command": "just check",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]

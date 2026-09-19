@@ -27,7 +27,7 @@ gpui-kit = { version = "=0.6.1", default-features = false, features = ["componen
 gpui = { package = "gpui-pre", version = "=0.3.2", default-features = false }
 
 # --- MCP ---
-rmcp = { version = "3.3", default-features = false }
+rmcp = { version = "3.4", default-features = false }
 
 # --- async ---
 tokio = { version = "1.53", default-features = false }
