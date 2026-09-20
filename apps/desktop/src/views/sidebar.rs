@@ -110,6 +110,7 @@ pub fn render(
                 Status::Off => theme.hair,
             };
             let entity = entity.clone();
+            let plug = entity.clone();
             // The row's own record, so a right-click on a server that is not
             // the selected one still copies that server.
             let config = mcp_exchange::client_config(std::slice::from_ref(&entry.record)).text();
@@ -150,11 +151,37 @@ pub fn render(
                 )
                 .child(
                     mono(cx, 12., entry.record.name.clone())
+                        .flex_1()
                         .min_w_0()
-                        .overflow_hidden() // Hides overflow
-                        .whitespace_nowrap() // Prevents text from wrapping
-                        .text_ellipsis(), // Shows ellipsis when text doesn't fit
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis(),
                 )
+                // The plug at the row's end connects an off or failed server
+                // and disconnects a running one, without the double click.
+                .child({
+                    let (icon, caption) = match entry.status {
+                        Status::Connected => (gpui_kit::assets::IconName::Unplug, "Disconnect"),
+                        Status::Connecting => (gpui_kit::assets::IconName::Unplug, "Connecting…"),
+                        Status::Off | Status::Error(_) => {
+                            (gpui_kit::assets::IconName::Plug, "Connect")
+                        }
+                    };
+                    div()
+                        .id(("server-plug", ix))
+                        .flex_none()
+                        .p(px(2.))
+                        .text_color(theme.muted)
+                        .hover(move |s| s.text_color(theme.fg))
+                        .cursor_pointer()
+                        .tooltip(move |window, cx| Tooltip::new(caption).build(window, cx))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            plug.update(cx, |state, cx| state.toggle_connection(ix, cx));
+                        })
+                        .child(Icon::new(icon).with_size(px(12.)))
+                        .test_support()
+                })
                 .test_support()
                 .on_mouse_down(gpui_kit::MouseButton::Right, move |event, _, cx| {
                     clip::open_menu(

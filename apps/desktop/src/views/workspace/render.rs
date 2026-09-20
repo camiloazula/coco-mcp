@@ -76,11 +76,24 @@ impl Render for Workspace {
         let t = *tokens(cx);
         self.sync_filter_placeholder(window, cx);
         self.sync_level_select(window, cx);
-        if self.state.read(cx).screen == Screen::AddServer && self.add_form.is_none() {
-            let form = cx.new(|cx| AddServerForm::new(self.state.clone(), window, cx));
-            form.update(cx, |f, cx| f.focus(window, cx));
+        let wanted = Self::wanted_form(self.state.read(cx));
+        // A form is built for one target: `+` while editing stays on the
+        // screen, but the old form would still save over the edited server.
+        if wanted != self.add_form_target {
+            self.add_form = None;
+            self.add_form_target = None;
+        }
+        if let Some((editing, opened)) = wanted
+            && self.add_form.is_none()
+        {
+            let form = cx.new(|cx| AddServerForm::new(self.state.clone(), editing, window, cx));
+            // A form opened on purpose takes the keyboard; one shown for an
+            // off server leaves it with the list, so ↑ ↓ still move.
+            if opened {
+                form.update(cx, |f, cx| f.focus(window, cx));
+            }
             self.add_form = Some(form);
-            self.add_form_editing = self.state.read(cx).editing;
+            self.add_form_target = wanted;
         }
         let drawer_open = self.state.read(cx).drawer_open;
         let dialogs = Root::render_dialog_layer(window, cx);

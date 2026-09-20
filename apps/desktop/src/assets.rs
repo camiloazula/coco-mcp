@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Result, SharedString};
 
-gpui_kit::assets::icon_assets!(pub ExtraIcons, [Trash, Pencil, Copy, Download]);
+gpui_kit::assets::icon_assets!(pub ExtraIcons, [Trash, Pencil, Copy, Download, Plug, Unplug]);
 
 /// The app's own SVGs, embedded by path.
 const BRAND: &[(&str, &[u8])] = &[
@@ -85,6 +85,8 @@ mod tests {
         }
         assert!(AppAssets.load("icons/trash.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/pencil.svg").unwrap().is_some());
+        assert!(AppAssets.load("icons/plug.svg").unwrap().is_some());
+        assert!(AppAssets.load("icons/unplug.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/copy.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/download.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/search.svg").unwrap().is_some());

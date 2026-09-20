@@ -22,7 +22,7 @@ use crate::actions::{
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, SelectServer, ShowHistory,
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleTheme, WORKSPACE,
 };
-use crate::state::{AppState, Changed, Gone, Mode, Screen};
+use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
 use crate::theme::{self, tokens};
 use crate::views::copy::Export;
 use crate::views::kept::Decoded;
@@ -52,8 +52,8 @@ pub struct Workspace {
     columns: Entity<ResizableState>,
     rows: Entity<ResizableState>,
     add_form: Option<Entity<AddServerForm>>,
-    /// The `AppState::editing` that `add_form` was built for.
-    add_form_editing: Option<usize>,
+    /// What `add_form` was built for (see [`Self::wanted_form`]).
+    add_form_target: Option<(Option<usize>, bool)>,
     filter_mode: Mode,
     /// Per-selection entities (form, argument inputs, collapse state).
     pub selection: crate::views::Selection,
@@ -165,7 +165,7 @@ impl Workspace {
             columns: cx.new(|_| ResizableState::default()),
             rows: cx.new(|_| ResizableState::default()),
             add_form: None,
-            add_form_editing: None,
+            add_form_target: None,
             filter_mode: Mode::Tools,
             selection: crate::views::Selection::default(),
             request_ui: None,
@@ -191,12 +191,11 @@ impl Workspace {
 
     /// Keep the theme and the form in step with the model.
     fn sync_after_change(&mut self, cx: &mut Context<Self>) {
-        let (dark, screen, editing, selection) = {
+        let (dark, wanted, selection) = {
             let s = self.state.read(cx);
             (
                 s.dark,
-                s.screen,
-                s.editing,
+                Self::wanted_form(s),
                 (s.selected_server, s.selected_item),
             )
         };
@@ -217,12 +216,32 @@ impl Workspace {
         if dark != tokens(cx).dark {
             theme::set_dark(dark, None, cx);
         }
-        // A form is built for one target: `+` while editing stays on the
-        // screen, but the old form would still save over the edited server.
-        if screen != Screen::AddServer || editing != self.add_form_editing {
+        // A form built for another target is dropped at the next draw
+        // (see `render`); this makes sure that draw comes.
+        if wanted != self.add_form_target {
             self.add_form = None;
         }
         cx.notify();
+    }
+
+    /// The server form built for this frame, if one is wanted.
+    pub(crate) fn server_form(&self) -> Option<Entity<AddServerForm>> {
+        self.add_form.clone()
+    }
+
+    /// The server form the detail pane shows, if any: the add screen's, for
+    /// the server it edits (`None` adds one), or the selected server's own
+    /// settings when it is off, ready to connect. The flag says which, so
+    /// opening the pane's form with the pencil, and cancelling back to the
+    /// pane, each start from the saved settings again. History stays
+    /// readable without a session, so it is not replaced.
+    fn wanted_form(state: &AppState) -> Option<(Option<usize>, bool)> {
+        if state.screen == Screen::AddServer {
+            return Some((state.editing, true));
+        }
+        let ix = state.selected_server?;
+        let entry = state.servers.get(ix)?;
+        (state.mode != Mode::History && entry.status == Status::Off).then_some((Some(ix), false))
     }
 
     /// The filter placeholder follows the mode; needs the window, so it runs in render.
@@ -261,12 +280,12 @@ impl Workspace {
     }
 
     fn on_call(&mut self, _: &Call, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).screen == Screen::AddServer {
-            if let Some(form) = &self.add_form {
-                form.update(cx, |f, cx| {
-                    f.submit(cx);
-                });
-            }
+        // A form on screen, opened or shown for an off server, is what ⌘⏎
+        // submits.
+        if let Some(form) = &self.add_form {
+            form.update(cx, |f, cx| {
+                f.submit(cx);
+            });
             return;
         }
         self.perform_call(window, cx);

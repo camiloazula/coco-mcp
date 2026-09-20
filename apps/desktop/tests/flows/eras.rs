@@ -140,9 +140,9 @@ pub fn auto_fallback_flow() {
     assert_eq!(live.text(), "after the handshake");
 }
 
-/// The server form's Protocol tabs choose the era a server is saved and
+/// The server form's Protocol menu chooses the era a server is saved and
 /// connected in, and editing starts from the saved one.
-pub fn protocol_tabs_flow() {
+pub fn protocol_select_flow() {
     let mock = mock_binary();
     let bridge = coco_mcp::bridge::Bridge::new().unwrap();
     let store = mcp_store::Store::open_in_memory().unwrap();
@@ -154,9 +154,19 @@ pub fn protocol_tabs_flow() {
         window.input("modern", cx);
         window.click("command", cx);
         window.input(&format!("{} --schema v1", mock.display()), cx);
-        window.click("protocol-modern", cx);
+        window.click("protocol", cx);
     });
-    snap(&mut live.cx, live.handle, "59-protocol-tabs");
+    // Past the menu's fade-in, so the picture shows every era explained.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    live.ui(|_, _| {});
+    snap(&mut live.cx, live.handle, "59-protocol-menu");
+    // The menu opens on its saved era; two rows down is Modern.
+    live.ui(|window, cx| {
+        window.press("down", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
+    });
+    snap(&mut live.cx, live.handle, "59-protocol-select");
     live.ui(|window, cx| window.click("connect", cx));
     live.wait("the server connects in the chosen era", |s| {
         s.servers
@@ -174,7 +184,12 @@ pub fn protocol_tabs_flow() {
     live.cx.update(|cx| {
         assert_eq!(live.state.read(cx).screen, Screen::AddServer);
     });
-    live.ui(|window, cx| window.click("protocol-legacy", cx));
+    live.ui(|window, cx| {
+        window.click("protocol", cx);
+        window.press("up", cx);
+        window.press("up", cx);
+        window.press("enter", cx);
+    });
     live.ui(|window, cx| window.click("connect", cx));
     live.wait("it reconnects with the handshake", |s| {
         s.servers[0].status == Status::Connected
