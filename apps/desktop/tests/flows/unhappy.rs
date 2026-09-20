@@ -89,8 +89,9 @@ pub fn crash_mid_session_flow() {
         assert!(said(s), "the log outlives the process");
         assert!(!s.response_pending());
     });
+    // Off, the server is shown as its settings, with Connect as the way back.
     live.ui(|window, _| {
-        assert!(window.try_find("connect-server").is_some(), "a way back");
+        assert!(window.try_find("connect").is_some(), "a way back");
     });
     snap(&mut live.cx, live.handle, "50-server-exited");
     live.cx

@@ -73,7 +73,14 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             };
             return connect_state(ws, cx, title, Some(e), "Retry", unauthorized);
         }
-        Status::Off => return connect_state(ws, cx, "Disconnected", None, "Connect", false),
+        // Off, the server is shown as its settings, ready to connect; the
+        // form is built by the workspace before the pane is drawn.
+        Status::Off => {
+            return match ws.server_form() {
+                Some(form) => form.into_any_element(),
+                None => connect_state(ws, cx, "Disconnected", None, "Connect", false),
+            };
+        }
         Status::Connected => {}
     }
     ws.sync_selection(window, cx);

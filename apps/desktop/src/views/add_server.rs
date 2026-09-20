@@ -1,21 +1,24 @@
 //! The "Add server" form (design screen 04), also used to edit an existing
-//! server: opened with `AppState::editing` set, it is prefilled and saves
-//! in place instead of adding. Lives in the detail pane.
+//! server: opened for one, it is prefilled and saves in place instead of
+//! adding. Lives in the detail pane, where it is also what a saved server
+//! that is not connected shows, ready to connect.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, Div, Entity, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, StatefulInteractiveElement, Styled, TestSupportExt as _, Window, div,
-    px,
+    App, AppContext as _, Context, Div, Entity, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt as _,
+    Window, div, px,
 };
 use mcp_core::{AuthRef, ProtocolMode, ServerSpec};
 
-use crate::state::AppState;
+use crate::state::{AppState, Screen};
 use crate::theme::tokens;
 use crate::views::server_fields::{self, Kept, join_pairs, parse_command, parse_cwd, parse_pairs};
 use crate::views::{accent_button, kbd, muted, text_tab};
@@ -25,6 +28,41 @@ mod view;
 
 /// Why a save waits: the stored bearer token is still being read.
 const READING_TOKEN: &str = "Reading the stored token…";
+
+/// A protocol era as a row of the Protocol menu: its name, and beside it
+/// what choosing it does. The closed field shows the name alone.
+#[derive(Clone)]
+struct ProtocolChoice(ProtocolMode);
+
+impl SearchableListItem for ProtocolChoice {
+    type Value = ProtocolMode;
+
+    fn title(&self) -> SharedString {
+        self.0.label().into()
+    }
+
+    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        h_flex()
+            .gap(px(12.))
+            .items_baseline()
+            .child(
+                div()
+                    .w(px(56.))
+                    .flex_none()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.0.label()),
+            )
+            .child(muted(cx, 12., view::protocol_note(self.0)))
+    }
+
+    fn value(&self) -> &ProtocolMode {
+        &self.0
+    }
+}
+
+/// The Protocol menu's state: the three eras, one selected.
+type ProtocolSelect = SelectState<SearchableVec<ProtocolChoice>>;
 
 /// Form state: one entity so its inputs keep focus across re-renders.
 pub struct AddServerForm {
@@ -40,6 +78,8 @@ pub struct AddServerForm {
     auth: AuthKind,
     /// The protocol era the server is connected in.
     protocol: ProtocolMode,
+    /// The menu that picks it; `protocol` follows its confirmations.
+    protocol_select: Entity<ProtocolSelect>,
     error: Option<String>,
     /// A save is on its way to the database.
     saving: bool,
@@ -81,11 +121,17 @@ impl std::fmt::Debug for AddServerForm {
 impl AddServerForm {
     /// Build the form with the design's placeholders, prefilled when the
     /// state says a server is being edited.
-    pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `editing` is the server whose settings the form starts from and
+    /// saves over; `None` adds a new one.
+    pub fn new(
+        state: Entity<AppState>,
+        editing: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let existing = {
             let s = state.read(cx);
-            s.editing
-                .and_then(|ix| s.servers.get(ix).map(|e| (ix, e.record.clone())))
+            editing.and_then(|ix| s.servers.get(ix).map(|e| (ix, e.record.clone())))
         };
         let (secrets, bridge) = {
             let s = state.read(cx);
@@ -196,6 +242,33 @@ impl AddServerForm {
             }
             (None, _) => None,
         };
+        // The header says whether the form was opened or is the off
+        // server's pane, which the model decides.
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let protocol_select = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(ProtocolMode::ALL.map(ProtocolChoice).to_vec()),
+                ProtocolMode::ALL
+                    .iter()
+                    .position(|mode| *mode == protocol)
+                    .map(IndexPath::new),
+                window,
+                cx,
+            )
+            .searchable(false)
+        });
+        cx.subscribe_in(
+            &protocol_select,
+            window,
+            |this, _, event: &SelectEvent<SearchableVec<ProtocolChoice>>, _window, cx| {
+                let SelectEvent::Confirm(value) = event;
+                if let Some(mode) = value {
+                    this.protocol = *mode;
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
         let form = Self {
             state,
             name: cx.new(|cx| {
@@ -220,6 +293,7 @@ impl AddServerForm {
             stdio,
             auth,
             protocol,
+            protocol_select,
             error: None,
             saving: false,
             token_pending: token_read.is_some(),

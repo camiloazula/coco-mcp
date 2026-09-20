@@ -662,16 +662,17 @@ mod macos {
         .unwrap();
         assert!(cx.update(|cx| state.read(cx).visible_diff().is_none()));
 
-        // Disconnect, then connect again from the button the pane shows for a
-        // saved server that is not running.
+        // Disconnect: the pane shows the server's settings, whose Connect
+        // button connects it again.
         let earlier = cx
             .update_window(handle.into(), |_, window, cx| {
                 window.press("cmd-shift-r", cx);
                 window.render_frame(cx);
                 assert_eq!(state.read(cx).servers[0].status, Status::Off);
+                assert!(window.try_find("connect").is_some(), "connect button shown");
                 assert!(
-                    window.try_find("connect-server").is_some(),
-                    "connect button shown"
+                    window.try_find("cancel-add").is_none(),
+                    "nothing to go back to"
                 );
                 log_lines(state.read(cx).servers[0].log())
             })
@@ -679,7 +680,7 @@ mod macos {
         assert!(!earlier.is_empty(), "the first session logged");
         snap(&mut cx, handle, "29-disconnected");
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("connect-server", cx);
+            window.click("connect", cx);
             window.render_frame(cx);
         })
         .unwrap();
@@ -3388,7 +3389,7 @@ mod macos {
         crate::protocol::authorize_flow();
         crate::eras::modern_session_flow();
         crate::eras::auto_fallback_flow();
-        crate::eras::protocol_tabs_flow();
+        crate::eras::protocol_select_flow();
         crate::eras::disabled_control_flow();
         crate::stored::clear_history_flow();
         crate::stored::forget_credentials_flow();

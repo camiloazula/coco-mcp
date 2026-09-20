@@ -2,12 +2,12 @@
 
 use super::*;
 
-/// What choosing `mode` means, beside its tabs.
-fn protocol_hint(mode: ProtocolMode) -> &'static str {
+/// What choosing `mode` does, beside its name in the Protocol menu.
+pub(super) fn protocol_note(mode: ProtocolMode) -> &'static str {
     match mode {
-        ProtocolMode::Legacy => "initialize handshake · 2025-11-25 and older",
-        ProtocolMode::Auto => "2026-07-28 when the server has it, else the handshake",
-        ProtocolMode::Modern => "2026-07-28 only",
+        ProtocolMode::Legacy => "Initialize handshake, 2025-11-25 or older.",
+        ProtocolMode::Auto => "2026-07-28 when the server has it, else the handshake.",
+        ProtocolMode::Modern => "2026-07-28 only. Fails on older servers.",
     }
 }
 
@@ -16,19 +16,24 @@ impl Render for AddServerForm {
         let t = *tokens(cx);
         let state = self.state.clone();
         let editing = self.is_editing();
-        let (title, subtitle, action) = if editing {
-            (
+        // Opened on purpose, the form can be left; shown because the server
+        // is off, it is the pane, and there is nothing to go back to.
+        let opened = self.state.read(cx).screen == Screen::AddServer;
+        let (title, subtitle) = match (editing, opened) {
+            (true, true) => (
                 "Edit server",
-                "Changes are saved and the server reconnects.",
-                "Save",
-            )
-        } else {
-            (
+                "Saved, then connected with the new settings.",
+            ),
+            (true, false) => (
+                "Disconnected",
+                "Connect with these settings, or change them first.",
+            ),
+            (false, _) => (
                 "Add server",
                 "Saved to the sidebar. Connection is attempted immediately.",
-                "Connect",
-            )
+            ),
         };
+        let action = "Connect";
         let mono_family = cx.theme().mono_font_family.clone();
         let mono_input = |input: Input| input.font_family(mono_family.clone()).text_size(px(12.));
         let header = h_flex()
@@ -43,19 +48,21 @@ impl Render for AddServerForm {
                     .font_weight(FontWeight::MEDIUM)
                     .child(title),
             )
-            .child(
-                h_flex()
-                    .id("cancel-add")
-                    .gap(px(4.))
-                    .text_size(px(12.))
-                    .text_color(t.muted)
-                    .cursor_pointer()
-                    .on_click(move |_, _, cx| {
-                        state.update(cx, |s, cx| s.cancel_add_server(cx));
-                    })
-                    .child("Cancel")
-                    .child(kbd(cx, "Esc")),
-            );
+            .when(opened, |el| {
+                el.child(
+                    h_flex()
+                        .id("cancel-add")
+                        .gap(px(4.))
+                        .text_size(px(12.))
+                        .text_color(t.muted)
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            state.update(cx, |s, cx| s.cancel_add_server(cx));
+                        })
+                        .child("Cancel")
+                        .child(kbd(cx, "Esc")),
+                )
+            });
         let transport = h_flex()
             .gap(px(16.))
             .child(
@@ -76,36 +83,18 @@ impl Render for AddServerForm {
                     }))
                     .test_support(),
             );
-        let protocol = h_flex()
-            .gap(px(16.))
+        // The closed field names the era; the open menu explains each one.
+        // Sized like the inputs beside it: their default type and padding,
+        // at their 26px height.
+        let protocol = div()
+            .id("protocol")
+            .w(px(160.))
             .child(
-                text_tab(cx, "Legacy", self.protocol == ProtocolMode::Legacy)
-                    .id("protocol-legacy")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.protocol = ProtocolMode::Legacy;
-                        cx.notify();
-                    }))
-                    .test_support(),
+                Select::new(&self.protocol_select)
+                    .h(px(26.))
+                    .menu_width(px(440.)),
             )
-            .child(
-                text_tab(cx, "Auto", self.protocol == ProtocolMode::Auto)
-                    .id("protocol-auto")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.protocol = ProtocolMode::Auto;
-                        cx.notify();
-                    }))
-                    .test_support(),
-            )
-            .child(
-                text_tab(cx, "Modern", self.protocol == ProtocolMode::Modern)
-                    .id("protocol-modern")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.protocol = ProtocolMode::Modern;
-                        cx.notify();
-                    }))
-                    .test_support(),
-            )
-            .child(muted(cx, 12., protocol_hint(self.protocol)));
+            .test_support();
         let mut grid = v_flex()
             .px(px(24.))
             .py(px(16.))

@@ -171,10 +171,12 @@ it, so an argument with a space in it is quoted (`"my notes"`), but it never
 runs through a shell: nothing is expanded. An HTTP server is a URL plus
 optional headers and an auth mode. The pencil next to it (`⌘E`), or Settings
 at the end of the Server view's list, opens the same form prefilled with the
-selected server's settings; saving reconnects. The bin
-deletes the selected server after a confirmation. Each icon shows its action
-on hover. Double-click a server to connect it, or to disconnect it when it is
-connected.
+selected server's settings; Connect saves them and reconnects. A server that
+is not connected shows that form as its pane, so it can be connected as it is
+or changed first. The bin deletes the selected server after a confirmation.
+Each icon shows its action on hover. The plug at the end of a server's row
+connects it, or disconnects it when it is connected; a double-click on the
+row does the same.
 
 ### Protocol eras
 
@@ -213,11 +215,11 @@ Keyboard:
 | `⌘K` | Command palette (switch server, views, connect, edit, theme, log) |
 | `⌘N` | Add server |
 | `⌘E` | Edit the selected server |
-| `⌘⏎` | Call the tool, read the resource, get the prompt, or replay; in the server form, connect or save |
+| `⌘⏎` | Call the tool, read the resource, get the prompt, or replay; in the server form, connect |
 | `⌘.` | Cancel the running request; the server is told |
 | `⌘1` … `⌘5` | Tools, Resources, Prompts, History, Server |
 | `⌘J` | Toggle the log drawer |
-| `⌘R` / `⌘⇧R` | Connect or reconnect / disconnect (a disconnected server also shows a Connect button) |
+| `⌘R` / `⌘⇧R` | Connect or reconnect / disconnect (the plug on the server's row does the same) |
 | `⌘⌫` | Delete the selected server (asks first; the bin next to `+` does the same) |
 | `⌘⇧C` | Copy the whole response |
 | `⌘T` | Dark or light theme (remembered) |
