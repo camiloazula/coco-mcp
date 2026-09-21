@@ -120,27 +120,49 @@ use:
 
 ## Install
 
-Coco is built from source on your machine; there are no prebuilt binaries,
-installers or store listings. Two ways to do that:
+Every release ships the binary for macOS (arm64 and x86_64), Linux
+(x86_64) and Windows (x86_64), built by the release workflow from the
+tagged source. Three ways to get it:
 
-**With Cargo** (Rust 1.90 or newer):
+**From the release page.** Download the archive for your platform from
+[the latest release](https://github.com/camiloazula/coco-mcp/releases/latest),
+check it against `SHA256SUMS`, and put `coco-mcp` somewhere on your `PATH`.
+A file saved by a browser is quarantined on macOS and refused until you
+allow it under Privacy & Security in System Settings, or clear the mark:
 
 ```bash
-cargo install --locked --git https://github.com/camiloazula/coco-mcp coco-mcp
+xattr -d com.apple.quarantine coco-mcp
 ```
 
-**With Homebrew**, on macOS or Linux, which installs a Rust toolchain for
-the build if you have none:
+Fetching the archive with `curl` sets no such mark. Windows asks once in
+the same way; "More info", then "Run anyway".
+
+**With Homebrew**, on macOS or Linux:
 
 ```bash
 brew install camiloazula/coco/coco-mcp
 ```
 
-The Homebrew formula builds the tagged source of the latest release;
-`brew upgrade coco-mcp` follows new releases. Its tap lives at
+The formula builds the tagged source of the latest release with Cargo,
+installing a Rust toolchain for the build if you have none; `brew upgrade
+coco-mcp` follows new releases. Its tap lives at
 [camiloazula/homebrew-coco](https://github.com/camiloazula/homebrew-coco).
 
-That puts one binary, `coco-mcp`, in `~/.cargo/bin`, with two modes:
+**With Cargo** (Rust 1.90 or newer), from source:
+
+```bash
+cargo install --locked --git https://github.com/camiloazula/coco-mcp coco-mcp
+```
+
+`--locked` builds with the exact dependency versions in the committed
+`Cargo.lock`, the set the tests and the licence audit ran against. To
+update a Cargo install, run the install command again; `cargo install
+--list` shows what is installed and from which commit, and `cargo uninstall
+coco-mcp` removes it. Building needs a C toolchain and the system libraries
+GPUI and the keyring link against; the CI workflow in
+`.github/workflows/ci.yml` lists the packages it installs.
+
+However it arrived, it is one binary, `coco-mcp`, with two modes:
 
 ```bash
 coco-mcp                   # the window (`--desktop` says the same)
@@ -150,15 +172,8 @@ coco-mcp                   # the window (`--desktop` says the same)
 coco-mcp --cli --help      # the command line; every command follows --cli
 ```
 
-`--locked` builds with the exact dependency versions in the committed
-`Cargo.lock`, the set the tests and the licence audit ran against. To
-update a Cargo install, run the install command again; `cargo install
---list` shows what is installed and from which commit, and `cargo uninstall
-coco-mcp` removes it.
 From a checkout, `just run` opens the window and `just coco --help` the
-command line. Building needs a C toolchain and the system libraries GPUI
-and the keyring link against; the CI workflow in `.github/workflows/ci.yml`
-lists the packages it installs.
+command line.
 
 ## The desktop mode
 
