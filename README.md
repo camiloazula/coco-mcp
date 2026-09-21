@@ -120,11 +120,25 @@ use:
 
 ## Install
 
-Every release ships the binary for macOS (arm64 and x86_64), Linux
+Every release ships prebuilt binaries for macOS (arm64 and x86_64), Linux
 (x86_64) and Windows (x86_64), built by the release workflow from the
-tagged source. Three ways to get it:
+tagged source, so installing takes seconds. Building it yourself is the
+other option.
 
-**From the release page.** Download the archive for your platform from
+### Quick install
+
+**Homebrew**, on macOS and Linux, installs the binary of the latest
+release and `brew upgrade coco-mcp` follows new ones:
+
+```bash
+brew install camiloazula/coco/coco-mcp
+```
+
+The tap lives at
+[camiloazula/homebrew-coco](https://github.com/camiloazula/homebrew-coco).
+
+**The release archive**, on any platform including Windows: download the
+one for your system from
 [the latest release](https://github.com/camiloazula/coco-mcp/releases/latest),
 check it against `SHA256SUMS`, and put `coco-mcp` somewhere on your `PATH`.
 A file saved by a browser is quarantined on macOS and refused until you
@@ -137,18 +151,10 @@ xattr -d com.apple.quarantine coco-mcp
 Fetching the archive with `curl` sets no such mark. Windows asks once in
 the same way; "More info", then "Run anyway".
 
-**With Homebrew**, on macOS or Linux:
+### From source
 
-```bash
-brew install camiloazula/coco/coco-mcp
-```
-
-The formula builds the tagged source of the latest release with Cargo,
-installing a Rust toolchain for the build if you have none; `brew upgrade
-coco-mcp` follows new releases. Its tap lives at
-[camiloazula/homebrew-coco](https://github.com/camiloazula/homebrew-coco).
-
-**With Cargo** (Rust 1.90 or newer), from source:
+**Cargo** (Rust 1.90 or newer) builds the current `main` on your machine;
+add `--tag vX.Y.Z` for a release:
 
 ```bash
 cargo install --locked --git https://github.com/camiloazula/coco-mcp coco-mcp
@@ -162,7 +168,9 @@ coco-mcp` removes it. Building needs a C toolchain and the system libraries
 GPUI and the keyring link against; the CI workflow in
 `.github/workflows/ci.yml` lists the packages it installs.
 
-However it arrived, it is one binary, `coco-mcp`, with two modes:
+### Two modes
+
+However it arrived, it is one binary, `coco-mcp`:
 
 ```bash
 coco-mcp                   # the window (`--desktop` says the same)
