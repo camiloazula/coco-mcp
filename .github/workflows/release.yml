@@ -1,0 +1,144 @@
+# Build the binaries of a release and attach them to its GitHub release.
+#
+# Runs only when a version tag is pushed, which `gh release create vX.Y.Z`
+# does (CONTRIBUTING.md, "Releasing"). Pushes to a branch and pull requests
+# never reach this file; `ci.yml` covers those. A manual run from the
+# Actions tab builds every target and keeps the results as workflow
+# artifacts without publishing anything, to prove the matrix before a tag.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The tag names the version; the workspace manifest is the version. A
+  # release where the two disagree is refused before anything is built.
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # One job per target. A failure on one platform does not cancel the
+  # others, so a partial matrix still shows which platform needs work.
+  build:
+    name: ${{ matrix.target }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          # Cross-compiled on the same arm64 runner; the toolchain there
+          # links both architectures.
+          - target: x86_64-apple-darwin
+            os: macos-15
+          # The oldest image on offer, so the binary asks for the oldest
+          # glibc it can.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARCHIVE: coco-mcp-v${{ needs.version.outputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: System libraries GPUI and the keyring link against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libfreetype-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
+            libwayland-dev libvulkan-dev
+      - name: Build
+        run: cargo build --release --locked -p coco-mcp --target ${{ matrix.target }}
+      - name: Smoke test
+        # The cross-compiled macOS binary cannot run on the arm64 runner.
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: |
+          bin=target/${{ matrix.target }}/release/coco-mcp
+          [[ "$RUNNER_OS" == Windows ]] && bin="$bin.exe"
+          "$bin" --version | grep -F "${{ needs.version.outputs.version }}"
+          "$bin" --cli --help | grep -F snapshot
+      - name: Package
+        run: |
+          mkdir -p dist/"$ARCHIVE"
+          cp LICENSE-MIT LICENSE-APACHE README.md dist/"$ARCHIVE"/
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cp target/${{ matrix.target }}/release/coco-mcp.exe dist/"$ARCHIVE"/
+            (cd dist && 7z a -tzip "$ARCHIVE.zip" "$ARCHIVE" > /dev/null)
+          else
+            cp target/${{ matrix.target }}/release/coco-mcp dist/"$ARCHIVE"/
+            tar -C dist -czf dist/"$ARCHIVE.tar.gz" "$ARCHIVE"
+          fi
+          rm -r dist/"$ARCHIVE"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Attach every archive and one checksum file to the release of the tag.
+  # `gh release create` makes the release before the tag reaches here, so
+  # this normally only uploads; a bare `git push origin vX.Y.Z` gets a
+  # release with generated notes instead.
+  publish:
+    name: publish
+    needs: [version, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum coco-mcp-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --generate-notes \
+              --title "Coco MCP ${{ needs.version.outputs.version }}"
+          fi
+          gh release upload "$tag" dist/* --clobber

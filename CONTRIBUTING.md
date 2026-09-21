@@ -23,8 +23,10 @@ two modes. These rules keep it that way.
 6. **The core is UI-free.** Nothing under `crates/` depends on `gpui` or
    `gpui-kit`; everything the app does is reachable from a test without a
    window.
-7. **No binaries.** Distribution is `cargo install --git …` of the one
-   package, `coco-mcp`. No installers, signing, or store pipelines, and no
+7. **One binary, plainly built.** `cargo build --release` of the package
+   `coco-mcp` is the whole build. The release workflow runs exactly that on
+   each platform and attaches the result to the GitHub release; there is
+   no installer, code signing, notarization or store pipeline, and no
    second binary: the command line is `coco-mcp --cli`.
 
 ## Working rules
@@ -63,8 +65,8 @@ two modes. These rules keep it that way.
   Do not invent visual values.
 - The native menu bar is built in `apps/desktop/src/menus.rs`; menu items
   dispatch the same actions as the key bindings, and `About` / `Quit` have
-  global handlers so they work from any window. The binary is run as Cargo
-  installs it; no platform packaging of any kind is assembled.
+  global handlers so they work from any window. The binary is run as the
+  release archive or Cargo leaves it; no platform packaging is assembled.
 - Brand assets live in `apps/desktop/assets/`: `icon.svg`, the mark, and
   the four `icons/coco-*.svg` masks the About window draws. GPUI tints an
   SVG with the element's text colour, so the outline and the eyes are
@@ -167,6 +169,34 @@ just run          # the window
 just coco <args>  # the command-line mode
 just screenshots  # headless UI flows + PNGs (macOS)
 ```
+
+## Releasing
+
+A release is a tag `vX.Y.Z` on `main` and the GitHub release that carries
+it. Tags never move: a wrong release gets the next patch version.
+
+1. Merge a PR that sets `version` in the workspace `Cargo.toml`.
+2. From an up-to-date `main`, create the tag and the release in one step:
+
+   ```bash
+   gh release create vX.Y.Z --title "Coco MCP X.Y.Z" --generate-notes
+   ```
+
+   `--draft` keeps it unpublished until you press the button on the site;
+   `--notes-file` replaces the generated notes. A bare
+   `git push origin vX.Y.Z` also works, and the workflow then creates the
+   release itself with generated notes. Never `git push --tags`.
+3. The tag starts `.github/workflows/release.yml`, which refuses a tag that
+   does not match `Cargo.toml`, builds the binary for macOS (arm64 and
+   x86_64), Linux (x86_64) and Windows (x86_64), and attaches the archives
+   and a `SHA256SUMS` file to the release.
+4. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
+   tag's archive and checksum, for example with
+   `brew bump-formula-pr --tag vX.Y.Z camiloazula/coco/coco-mcp`.
+
+To rehearse the matrix without a tag, run the workflow by hand from the
+Actions tab: it builds every target and keeps the archives as workflow
+artifacts, publishing nothing.
 
 ## Engineering notes
 

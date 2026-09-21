@@ -1,6 +1,6 @@
 # One job, on the cheapest runner: verify the tree as `just check` does
-# locally. Installation is `cargo install` on the user's own machine, so
-# nothing here builds for a platform or produces an artefact.
+# locally. Nothing here builds for a platform or produces an artefact;
+# `release.yml` does that, on version tags only.
 name: ci
 
 on:
