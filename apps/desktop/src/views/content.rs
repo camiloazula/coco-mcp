@@ -198,29 +198,34 @@ fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Bo
 fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
     let t = *tokens(cx);
     let mut parts: Vec<AnyElement> = Vec::new();
-    if let Some(desc) = raw.get("description").and_then(Value::as_str) {
+    let mut fills = false;
+    let description = raw.get("description").and_then(Value::as_str);
+    if let Some(desc) = description {
         parts.push(muted(cx, 12., desc.to_owned()).into_any_element());
     }
+    let messages = raw.get("messages").and_then(Value::as_array);
+    let rest = rest_fields(raw, &["description", "messages"]);
+    // The one message of a prompt with nothing else in it.
+    let lone = description.is_none()
+        && messages.is_some_and(|messages| messages.len() == 1)
+        && rest.is_none();
     let no_content = Value::Null;
-    for (i, message) in raw
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
+    for (i, message) in messages.into_iter().flatten().enumerate() {
         let role = message.get("role").and_then(Value::as_str).unwrap_or("?");
         let content = message.get("content").unwrap_or(&no_content);
+        let (block, full) = content_block(content, &format!("{prefix}m{i}"), draw, lone, cx);
+        fills |= full;
         parts.push(
             v_flex()
                 .gap(px(4.))
+                .when(full, |message| message.flex_1().min_h_0())
                 .child(
                     div()
                         .text_size(px(11.))
                         .text_color(t.muted)
                         .child(role.to_owned()),
                 )
-                .child(content_block(content, &format!("{prefix}m{i}"), draw, false, cx).0)
+                .child(block)
                 .into_any_element(),
         );
     }
@@ -229,8 +234,8 @@ fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body
         let tree = json_tree_rc(value, draw.folds, prefix, Fit::Fill, cx);
         return blocks_column(vec![tree], true);
     }
-    if let Some(rest) = rest_fields(raw, &["description", "messages"]) {
+    if let Some(rest) = rest {
         parts.push(other_fields(rest, prefix, draw, cx));
     }
-    blocks_column(parts, false)
+    blocks_column(parts, fills)
 }

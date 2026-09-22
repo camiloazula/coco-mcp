@@ -2759,6 +2759,21 @@ mod macos {
             state.read(cx).response().unwrap().raw["messages"][0]["content"]["text"].clone()
         });
         assert!(text.as_str().unwrap().contains("Ada"), "{text}");
+        // A prompt's one message fills the response panel, like a tool's
+        // one text block.
+        let message = cx.update(|cx| {
+            let (server, mode, name) = state.read(cx).response_key().unwrap();
+            format!("resp:{server}:{mode:?}:{name}m0txt")
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find(message).is_some(),
+                "the message's text area"
+            );
+        })
+        .unwrap();
+        snap(cx, handle, "65-prompt-answer");
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("log-header", cx);
             window.render_frame(cx);
