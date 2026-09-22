@@ -2651,6 +2651,18 @@ mod macos {
         })
         .unwrap();
         snap(cx, handle, "09-raw-json");
+        // The editor takes its colours from the theme, in light as well.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.press("cmd-t", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        snap(cx, handle, "09-raw-json-light");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.press("cmd-t", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
         // The Schema tab: what the server declared about the tool, foldable.
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("tab-schema", cx);
