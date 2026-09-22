@@ -176,7 +176,14 @@ A release is a tag `vX.Y.Z` on `main` and the GitHub release that carries
 it. Tags never move: a wrong release gets the next patch version.
 
 1. Merge a PR that sets `version` in the workspace `Cargo.toml`.
-2. From an up-to-date `main`, create the tag and the release in one step:
+2. Check that every PR merged since the last tag carries one label:
+   `enhancement`, `bug` or `documentation`. The generated notes list the
+   merged PRs by title under a section per label, in the order
+   `.github/release.yml` gives; an unlabelled PR lands under "Other", and
+   `skip-changelog` leaves one out. There is no changelog file: the
+   Releases page is the changelog, one line per PR, so a PR title says
+   what changed for a user.
+3. From an up-to-date `main`, create the tag and the release in one step:
 
    ```bash
    gh release create vX.Y.Z --title "Coco MCP X.Y.Z" --generate-notes
@@ -186,11 +193,11 @@ it. Tags never move: a wrong release gets the next patch version.
    `--notes-file` replaces the generated notes. A bare
    `git push origin vX.Y.Z` also works, and the workflow then creates the
    release itself with generated notes. Never `git push --tags`.
-3. The tag starts `.github/workflows/release.yml`, which refuses a tag that
+4. The tag starts `.github/workflows/release.yml`, which refuses a tag that
    does not match `Cargo.toml`, builds the binary for macOS (arm64 and
    x86_64), Linux (x86_64) and Windows (x86_64), and attaches the archives
    and a `SHA256SUMS` file to the release.
-4. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
+5. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
    tag's archive and checksum, for example with
    `brew bump-formula-pr --tag vX.Y.Z camiloazula/coco/coco-mcp`.
 
