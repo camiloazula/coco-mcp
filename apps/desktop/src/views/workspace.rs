@@ -78,11 +78,8 @@ pub struct Workspace {
     /// prefix plus the node's path. One set so the log drawer, a tool's
     /// schema and a response can each keep their own folds.
     pub collapsed: HashSet<String>,
-    /// Nodes a tree's line budget folded that the user opened, by the same
-    /// keys. A key here never folds anything, and `collapsed` still wins.
-    pub unfolded: HashSet<String>,
-    /// Bumped on every fold so the log drawer's list re-measures the row
-    /// whose payload changed height.
+    /// Bumped on every fold, so a tree plans its lines again and the log
+    /// drawer's list re-measures the row whose payload changed height.
     pub collapse_rev: u64,
     /// Response prefixes whose large result the user asked to see. Kept per
     /// selection, like folds, so running the same item again stays shown.
@@ -179,7 +176,6 @@ impl Workspace {
             followed: (None, None),
             log_list: LogList::default(),
             collapsed: HashSet::new(),
-            unfolded: HashSet::new(),
             collapse_rev: 0,
             revealed: HashSet::new(),
             decoded: Decoded::default(),

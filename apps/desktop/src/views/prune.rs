@@ -12,7 +12,7 @@ use crate::views::log_list::fold_row;
 impl Workspace {
     /// Drop what the workspace kept for rows or a server that are gone.
     pub(crate) fn forget(&mut self, gone: &Gone) {
-        for keys in [&mut self.collapsed, &mut self.unfolded, &mut self.revealed] {
+        for keys in [&mut self.collapsed, &mut self.revealed] {
             retain_live(keys, gone);
         }
         self.splits.forget(gone);

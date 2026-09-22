@@ -53,10 +53,10 @@ pub(super) fn content_block(
             } else if let (Some(blob), Some(inner)) = (field("blob"), inner) {
                 render_blob(blob, mime, &blob_stem(inner), prefix, draw.decoded, cx)
             } else {
-                json_tree(block, draw.folds, prefix, cx)
+                json_tree(block, draw.folds, prefix, Fit::Rows, cx)
             }
         }
-        _ => json_tree(block, draw.folds, prefix, cx),
+        _ => json_tree(block, draw.folds, prefix, Fit::Rows, cx),
     };
     (element, false)
 }
@@ -115,7 +115,8 @@ pub(super) fn render_text(
         && let Some(value) = draw.decoded.json(prefix, text)
     {
         // Parsed once while drawn, so the tree shares it without a clone.
-        return (json_tree_rc(value, draw.folds, prefix, cx), false);
+        let fit = if lone { Fit::Fill } else { Fit::Rows };
+        return (json_tree_rc(value, draw.folds, prefix, fit, cx), lone);
     }
     let shared = draw.decoded.shared(prefix, text);
     // Text is the answer itself in most tool results, so it copies as text

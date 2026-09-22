@@ -33,8 +33,8 @@ yesterday. So Coco does those things first:
   session, wire log and history, all connected together; switching is a
   click or `⌘K`.
 - **Fast, and still fast an hour later.** A native binary drawn on the GPU,
-  with lists that build only the rows in view and a drawing budget for big
-  results, so a long session costs no more per frame than a short one.
+  where every list, tree and text builds only the lines in view, so a
+  result of a hundred thousand rows costs a frame what ten rows do.
 - **Memory.** Servers, calls and snapshots persist, a call can be replayed
   or opened back in the form, and each connect is diffed against the last
   snapshot so a breaking change in a server is noticed, not discovered.

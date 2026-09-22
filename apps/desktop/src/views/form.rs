@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, TestSupportExt as _, Window, div, px,
+    relative,
 };
 use mcp_schema_form::{FormModel, FormState, validate};
 use serde_json::{Map, Value};
@@ -66,7 +67,8 @@ impl ToolForm {
         let raw = cx.new(|cx| {
             let mut editor = EditorState::new(window, cx)
                 .language("json")
-                .line_number(false);
+                .line_number(false)
+                .folding(false);
             editor.set_value(seed, window, cx);
             editor
         });
@@ -164,19 +166,21 @@ impl ToolForm {
         }
     }
 
-    /// The raw editor (for the `Raw` tab).
+    /// The raw editor (for the `Raw` tab), filling the height it is given.
     pub fn render_raw(&self, cx: &Context<Self>) -> AnyElement {
         let t = *tokens(cx);
         div()
+            .flex_1()
+            .min_h_0()
             .rounded(px(3.))
             .bg(t.field)
             .border_1()
             .border_color(t.hair)
-            .px(px(12.))
-            .py(px(10.))
+            .px(px(4.))
+            .py(px(6.))
             .child(
                 Editor::new(&self.raw)
-                    .h(px(240.))
+                    .h(relative(1.))
                     .appearance(false)
                     .bordered(false),
             )

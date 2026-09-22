@@ -102,6 +102,7 @@ pub(super) fn row(
                 &row.payload,
                 &ws.folds(&toggle),
                 &fold_prefix(server, id),
+                Fit::Rows,
                 cx,
             )))
             .into_any_element()

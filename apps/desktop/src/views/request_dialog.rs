@@ -20,7 +20,7 @@ use serde_json::Value;
 use crate::actions::{DIALOG, DialogAccept};
 use crate::features::{DEPRECATED, Feature};
 use crate::theme::tokens;
-use crate::views::json::{json_tree, json_tree_rc};
+use crate::views::json::{Fit, json_tree, json_tree_rc};
 use crate::views::{Workspace, accent_button, mono, muted, tree_section};
 
 mod kinds;
@@ -181,7 +181,13 @@ fn body(
     let detail = kind_body(ws, kind, window, cx);
     let payload = Rc::new(crate::state::server_request_payload(kind));
     let toggle = ws.collapse_toggle(cx);
-    let tree = json_tree_rc(payload.clone(), &ws.folds(&toggle), REQUEST_TREE, cx);
+    let tree = json_tree_rc(
+        payload.clone(),
+        &ws.folds(&toggle),
+        REQUEST_TREE,
+        Fit::Rows,
+        cx,
+    );
     v_flex()
         .gap(px(10.))
         .child(detail)

@@ -67,6 +67,13 @@ struct Text {
     mirrors: Option<bool>,
 }
 
+/// Which value of which answer a tree's `Rc` was cloned from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ValueStamp {
+    answer: u64,
+    at: usize,
+}
+
 /// The decoded blobs and parsed text blocks of the responses on screen, by
 /// element id.
 ///
@@ -77,6 +84,9 @@ struct Text {
 pub struct Decoded {
     blobs: HashMap<String, Blob>,
     texts: HashMap<String, Text>,
+    /// Values drawn as trees, each cloned once into the `Rc` its tree and
+    /// copy button share, with what it was cloned from.
+    values: HashMap<String, (ValueStamp, Rc<Value>)>,
     drawn: HashSet<String>,
     /// The answer the texts drawn next belong to (`Response::answer`).
     answer: u64,
@@ -103,6 +113,7 @@ impl Decoded {
         let drawn = &self.drawn;
         self.blobs.retain(|id, _| drawn.contains(id));
         self.texts.retain(|id, _| drawn.contains(id));
+        self.values.retain(|id, _| drawn.contains(id));
     }
 
     /// Name the answer whose texts are drawn next: a text under an id is only
@@ -184,6 +195,44 @@ impl Decoded {
         )
             .hash(&mut hasher);
         hasher.finish()
+    }
+
+    /// `value`, drawn as the tree `id`, cloned once into an `Rc` for as long
+    /// as `id` shows this value of this answer, so the tree plans it once.
+    pub fn value(&mut self, id: &str, value: &Value) -> Rc<Value> {
+        self.mark(id);
+        let stamp = ValueStamp {
+            answer: self.answer,
+            at: std::ptr::from_ref(value) as usize,
+        };
+        match self.values.entry(id.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().0 != stamp {
+                    entry.insert((stamp, Rc::new(value.clone())));
+                }
+                entry.get().1.clone()
+            }
+            Entry::Vacant(entry) => entry.insert((stamp, Rc::new(value.clone()))).1.clone(),
+        }
+    }
+
+    /// `value`, built for this frame and drawn as the tree `id`, kept from
+    /// the frame that first built it while it comes out the same.
+    pub fn owned(&mut self, id: &str, value: Value) -> Rc<Value> {
+        self.mark(id);
+        let stamp = ValueStamp {
+            answer: self.answer,
+            at: 0,
+        };
+        match self.values.entry(id.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().0 != stamp || *entry.get().1 != value {
+                    entry.insert((stamp, Rc::new(value)));
+                }
+                entry.get().1.clone()
+            }
+            Entry::Vacant(entry) => entry.insert((stamp, Rc::new(value))).1.clone(),
+        }
     }
 
     /// `text`, drawn as `id`, parsed once as JSON; `None` when it is not.
@@ -284,6 +333,35 @@ mod tests {
             decoded.stamp("respc0", &text),
             "the same text in a newer answer"
         );
+    }
+
+    #[test]
+    fn a_tree_value_is_cloned_once_per_answer() {
+        let mut decoded = Decoded::default();
+        let value = serde_json::json!({"rows": [1, 2, 3]});
+        decoded.begin_frame();
+        decoded.answer(1);
+        let first = decoded.value("resps", &value);
+        assert!(Rc::ptr_eq(&first, &decoded.value("resps", &value)));
+        decoded.answer(2);
+        assert!(
+            !Rc::ptr_eq(&first, &decoded.value("resps", &value)),
+            "another answer at the same address"
+        );
+        let rest = || serde_json::json!({"isError": true});
+        let kept = decoded.owned("respo", rest());
+        assert!(
+            Rc::ptr_eq(&kept, &decoded.owned("respo", rest())),
+            "the same fields"
+        );
+        assert!(!Rc::ptr_eq(
+            &kept,
+            &decoded.owned("respo", serde_json::json!({"x": 1}))
+        ));
+        decoded.end_frame();
+        decoded.begin_frame();
+        decoded.end_frame();
+        assert!(decoded.values.is_empty(), "not drawn, dropped");
     }
 
     #[test]

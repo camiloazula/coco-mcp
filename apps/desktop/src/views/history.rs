@@ -16,7 +16,7 @@ use mcp_store::{CallKind, CallStatus};
 use crate::state::Status;
 use crate::theme::tokens;
 use crate::views::content::Draw;
-use crate::views::json::{Folds, json_tree_rc};
+use crate::views::json::{Fit, Folds, json_tree_rc};
 use crate::views::response::Shown;
 use crate::views::{
     Workspace, accent_button, detail_header, kbd, mono, muted, response, split, tree_section,
@@ -148,18 +148,28 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
     // Field by field, so the blob cache can be borrowed mutably beside them.
     let folds = Folds {
         collapsed: &ws.collapsed,
-        unfolded: &ws.unfolded,
+        rev: ws.collapse_rev,
         toggle: &toggle,
     };
     let sent = Rc::new(record.args.clone());
-    let args_tree = json_tree_rc(sent.clone(), &folds, &format!("args:{}", record.id), cx);
-    let args = v_flex().px(px(24.)).py(px(16.)).child(tree_section(
+    let args_tree = json_tree_rc(
+        sent.clone(),
+        &folds,
+        &format!("args:{}", record.id),
+        Fit::Fill,
         cx,
-        "ARGUMENTS",
-        SharedString::from(format!("args-copy:{}", record.id)),
-        sent,
-        args_tree,
-    ));
+    );
+    let args = v_flex().px(px(24.)).py(px(16.)).flex_1().min_h_0().child(
+        tree_section(
+            cx,
+            "ARGUMENTS",
+            SharedString::from(format!("args-copy:{}", record.id)),
+            sent,
+            args_tree,
+        )
+        .flex_1()
+        .min_h_0(),
+    );
     let mut draw = Draw {
         folds: &folds,
         decoded: &mut ws.decoded,
@@ -177,6 +187,7 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
                 ws,
                 key,
                 vec![args.into_any_element()],
+                true,
                 Some(response),
                 cx,
             ))

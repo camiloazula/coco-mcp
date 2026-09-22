@@ -19,7 +19,7 @@ use crate::calls::{Response, ResponseStatus, Waiting};
 use crate::theme::tokens;
 use crate::views::content::{self, Body, Draw, laid_out_size};
 use crate::views::history::method;
-use crate::views::json::json_tree;
+use crate::views::json::{Fit, json_tree};
 use crate::views::{Workspace, accent_button, kbd, mono, muted};
 use crate::{clip, state};
 
@@ -201,7 +201,7 @@ pub fn render(
                 if held {
                     show_result(prefix, cx)
                 } else {
-                    json_tree(&shown.raw, draw.folds, prefix, cx)
+                    json_tree(&shown.raw, draw.folds, prefix, Fit::Rows, cx)
                 }
             });
             v_flex()

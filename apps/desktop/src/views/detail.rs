@@ -15,7 +15,7 @@ use crate::clip;
 use crate::state::{Mode, Status};
 use crate::theme::tokens;
 use crate::views::content::Draw;
-use crate::views::json::{Folds, json_tree, json_tree_rc};
+use crate::views::json::{Fit, Folds, json_tree, json_tree_rc};
 use crate::views::list_failures::detail_note;
 use crate::views::response::Shown;
 use crate::views::{
@@ -100,7 +100,11 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             Mode::History | Mode::Server => None,
         }
     };
-    let Parts { pinned, body } = match selection {
+    let Parts {
+        pinned,
+        body,
+        fills,
+    } = match selection {
         Some(Selection::Tool(tool)) => tool_detail(ws, &tool, &meta, window, cx),
         Some(Selection::Resource(r)) => {
             let declared = serde_json::to_value(&r).unwrap_or_default();
@@ -158,7 +162,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         // Field by field, so the blob cache can be borrowed mutably beside them.
         let folds = Folds {
             collapsed: &ws.collapsed,
-            unfolded: &ws.unfolded,
+            rev: ws.collapse_rev,
             toggle: &toggle,
         };
         let mut draw = Draw {
@@ -179,15 +183,17 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         .size_full()
         .min_h_0()
         .children(pinned)
-        .child(split::render(ws, key, body, response, cx))
+        .child(split::render(ws, key, body, fills, response, cx))
         .into_any_element()
 }
 
 /// A detail's pieces: what stays above the split (header, description,
-/// toolbar), and the body of the active tab, which scrolls under it.
+/// toolbar), and the body of the active tab under it, which scrolls, or,
+/// when it `fills` (one tree), takes the height and scrolls inside.
 struct Parts {
     pinned: Vec<AnyElement>,
     body: Vec<AnyElement>,
+    fills: bool,
 }
 
 enum Selection {

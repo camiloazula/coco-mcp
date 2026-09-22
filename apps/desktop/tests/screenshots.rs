@@ -2165,8 +2165,6 @@ mod macos {
                 ] {
                     ws.collapsed.insert(key);
                 }
-                ws.unfolded.insert(format!("resp:{id}:Tools:log$"));
-                ws.unfolded.insert(format!("resp:{quiet}:Tools:log$"));
                 ws.revealed.insert(format!("resp:{id}:Tools:log"));
                 ws.revealed.insert("hist:call-chatty".to_owned());
             });
@@ -2210,7 +2208,7 @@ mod macos {
             assert!(s.responses.get(&elicit).is_none());
             assert!(!s.responses.is_pending(&elicit));
             let ws = workspace.read(cx);
-            for keys in [&ws.collapsed, &ws.unfolded, &ws.revealed] {
+            for keys in [&ws.collapsed, &ws.revealed] {
                 assert!(
                     keys.iter()
                         .all(|k| !k.contains(&id) && !k.contains("call-chatty")),
@@ -2218,14 +2216,13 @@ mod macos {
                 );
             }
             assert!(ws.collapsed.contains(&format!("schema:{quiet}:log$")));
-            assert!(ws.unfolded.contains(&format!("resp:{quiet}:Tools:log$")));
         })
         .unwrap();
     }
 
     /// A result too large to draw waits for Show result with its size in the
-    /// header, and a tree longer than the line budget starts with its later
-    /// containers folded, which still open, fold again and copy.
+    /// header; drawn, every container of its tree is open, only the lines in
+    /// view are built, and the tree scrolls, folds and copies.
     fn large_result_flow() {
         use coco_mcp::views::LARGE_RESULT_BYTES;
         use mcp_store::{CallKind, CallRecord, CallStatus};
@@ -2245,8 +2242,7 @@ mod macos {
             elapsed_ms: 40,
             at: time::OffsetDateTime::UNIX_EPOCH,
         };
-        // Twenty thousand rows, led by an index long enough that the line
-        // budget folds it as well.
+        // Twenty thousand rows, led by an index longer than a screen.
         let rows: Vec<_> = (0..20_000).map(|i| json!({"id": i, "ok": true})).collect();
         let large = json!({"ids": (0..2_100).collect::<Vec<_>>(), "rows": rows});
         assert!(mcp_exchange::json_size(&large) > LARGE_RESULT_BYTES);
@@ -2298,6 +2294,9 @@ mod macos {
         );
         snap(&mut cx, handle, "37-large-result");
 
+        let row = |i: usize| format!("rowhist:call-large$.rows[{i}]");
+        let ids = "hist:call-large$.ids";
+        let first_id = "rowhist:call-large$.ids[0]";
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(reveal, cx);
             window.render_frame(cx);
@@ -2306,28 +2305,34 @@ mod macos {
                 "Show result draws the tree"
             );
             assert!(window.try_find(reveal).is_none());
+            // Every container starts open, and only the lines in view are
+            // built: the index fills the panel, and the rows are below it.
+            assert!(window.try_find(first_id).is_some());
+            assert!(window.try_find(row(0)).is_none(), "out of view");
+            assert!(window.try_find(row(19_999)).is_none());
+            // Folding the index brings the rows up; opening it again does
+            // the reverse.
+            window.click(ids, cx);
+            window.render_frame(cx);
+            assert!(window.try_find(first_id).is_none(), "folded");
             assert!(
-                window.try_find("hist:call-large-folded").is_some(),
-                "the tree says how much the budget folded"
+                window.try_find(row(0)).is_some(),
+                "the rows follow the folded index"
             );
-            // Both lists are past the budget. Opening the index draws its
-            // first entry; folding it again hides it.
-            let ids = "hist:call-large$.ids";
-            let first = "rowhist:call-large$.ids[0]";
-            assert!(window.try_find(first).is_none(), "folded by the budget");
+            assert!(window.try_find(row(19_999)).is_none(), "still out of view");
             window.click(ids, cx);
             window.render_frame(cx);
-            assert!(window.try_find(first).is_some(), "a budget fold opens");
+            assert!(window.try_find(first_id).is_some(), "open again");
+            assert!(window.try_find(row(0)).is_none());
             window.click(ids, cx);
             window.render_frame(cx);
-            assert!(window.try_find(first).is_none(), "and folds again");
             window.right_click("rowhist:call-large$.rows", cx);
             window.render_frame(cx);
         })
         .unwrap();
         let entries = cx
             .update(|cx| coco_mcp::clip::menu(cx))
-            .expect("a folded line still has its copy menu")
+            .expect("a line has its copy menu")
             .0;
         let path = entries
             .iter()
@@ -2336,43 +2341,48 @@ mod macos {
         assert_eq!(path.as_deref(), Some("$.rows"));
         cx.update(coco_mcp::clip::close_menu);
 
-        // Opening the twenty thousand rows paints a budget of them, not all,
-        // and the line under them paints the next budget.
+        // A wheel brings the end of the rows into view, and folding the rows
+        // takes them all away.
         let rows = "hist:call-large$.rows";
-        let row = |i: usize| format!("rowhist:call-large$.rows[{i}]");
-        let more = |from: usize| format!("hist:call-large$.rows[+{from}]");
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click(rows, cx);
-            window.render_frame(cx);
-            assert!(window.try_find(row(0)).is_some(), "the fold opens");
-            assert!(window.try_find(row(1_999)).is_some());
-            assert!(window.try_find(row(2_000)).is_none(), "a budget of rows");
-            assert!(window.try_find(row(19_999)).is_none(), "not all of them");
-            assert!(window.try_find(more(2_000)).is_some());
-            let bottom = gpui_kit::point(px(0.), px(-400_000.));
+            let bottom = gpui_kit::point(px(0.), px(-4_000_000.));
             window.scroll(row(0), gpui_kit::ScrollDelta::Pixels(bottom), cx);
-            window.click(more(2_000), cx);
             window.render_frame(cx);
-            assert!(window.try_find(row(2_000)).is_some(), "the next budget");
-            assert!(window.try_find(row(3_999)).is_some());
-            assert!(window.try_find(row(4_000)).is_none());
-            assert!(window.try_find(more(4_000)).is_some());
-            let top = gpui_kit::point(px(0.), px(400_000.));
-            window.scroll(row(2_000), gpui_kit::ScrollDelta::Pixels(top), cx);
+            assert!(
+                window.try_find(row(19_999)).is_some(),
+                "scrolled to the end"
+            );
+            assert!(
+                window.try_find(row(0)).is_none(),
+                "the start is out of view"
+            );
+            let top = gpui_kit::point(px(0.), px(4_000_000.));
+            window.scroll(row(19_999), gpui_kit::ScrollDelta::Pixels(top), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(row(0)).is_some(), "and back");
             window.click(rows, cx);
             window.render_frame(cx);
-            assert!(window.try_find(row(0)).is_none(), "and folds again");
+            assert!(window.try_find(row(0)).is_none(), "folded");
+            assert!(window.try_find(rows).is_some(), "on its one line");
         })
         .unwrap();
+        snap(&mut cx, handle, "38-large-result-shown");
 
-        // A result small in bytes is drawn at once, folded by the budget.
+        // A result small in bytes is drawn at once, every container open,
+        // and still only as far as the view reaches.
         let small_row = item_index(&mut cx, &state, "list_values");
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(("item", small_row), cx);
             window.render_frame(cx);
             assert!(window.try_find("hist:call-small$").is_some());
-            assert!(window.try_find("hist:call-small-folded").is_some());
             assert!(window.try_find("hist:call-small-reveal").is_none());
+            assert!(window.try_find("rowhist:call-small$.values[0]").is_some());
+            assert!(
+                window
+                    .try_find("rowhist:call-small$.values[2999]")
+                    .is_none(),
+                "only the lines in view are built"
+            );
         })
         .unwrap();
         // Show result is remembered for the row, like its folds.
@@ -2387,7 +2397,7 @@ mod macos {
 
     /// A tool whose answer is too large to draw, called live: the response
     /// waits for Show result with its size measured on the runtime, still
-    /// copies whole, and once shown is drawn folded by the line budget.
+    /// copies whole, and once shown is drawn open from its first row.
     fn live_large_result_flow() {
         use coco_mcp::calls::ResponseStatus;
         use coco_mcp::views::LARGE_RESULT_BYTES;
@@ -2474,8 +2484,12 @@ mod macos {
             );
             assert!(window.try_find(reveal.clone()).is_none());
             assert!(
-                window.try_find(format!("{prefix}c0-folded")).is_some(),
-                "the tree says how much the budget folded"
+                window.try_find(format!("row{prefix}c0$[0]")).is_some(),
+                "open from the first row"
+            );
+            assert!(
+                window.try_find(format!("row{prefix}c0$[19999]")).is_none(),
+                "only the lines in view are built"
             );
         })
         .unwrap();
@@ -2687,7 +2701,7 @@ mod macos {
             window.render_frame(cx);
             let server_id = state.read(cx).servers[0].record.id.clone();
             let root = format!("schema:{server_id}:complex$");
-            let props = format!("{root}.properties");
+            let props = format!("{root}.$defs");
             assert!(window.try_find(root.clone()).is_some(), "schema tree shown");
             assert!(
                 window.try_find(props.clone()).is_some(),

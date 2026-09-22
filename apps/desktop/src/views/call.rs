@@ -16,7 +16,6 @@ use crate::views::Workspace;
 use crate::views::form::ToolForm;
 use crate::views::item_list;
 use crate::views::json::{Folds, Toggle};
-use crate::views::json_budget::apply_toggle;
 use mcp_store::CallKind;
 
 mod perform;
@@ -203,7 +202,11 @@ impl Workspace {
         let this = cx.entity();
         Rc::new(move |key: String, open: bool, _window, cx| {
             this.update(cx, |ws, cx| {
-                apply_toggle(key, open, &mut ws.collapsed, &mut ws.unfolded);
+                if open {
+                    ws.collapsed.insert(key);
+                } else {
+                    ws.collapsed.remove(&key);
+                }
                 ws.collapse_rev = ws.collapse_rev.wrapping_add(1);
                 cx.notify();
             });
@@ -215,7 +218,7 @@ impl Workspace {
     pub fn folds<'a>(&'a self, toggle: &'a Toggle) -> Folds<'a> {
         Folds {
             collapsed: &self.collapsed,
-            unfolded: &self.unfolded,
+            rev: self.collapse_rev,
             toggle,
         }
     }

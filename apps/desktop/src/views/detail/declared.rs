@@ -46,7 +46,11 @@ pub(super) fn resource_detail(
             "template"
         };
         body.push(declaration(ws, facts.declared, what, &facts.uri, cx));
-        return Parts { pinned, body };
+        return Parts {
+            pinned,
+            body,
+            fills: true,
+        };
     }
     if !vars.is_empty() {
         let rows: Vec<AnyElement> = vars
@@ -76,7 +80,11 @@ pub(super) fn resource_detail(
                 .into_any_element(),
         );
     }
-    Parts { pinned, body }
+    Parts {
+        pinned,
+        body,
+        fills: false,
+    }
 }
 
 pub(super) fn prompt_detail(
@@ -95,7 +103,11 @@ pub(super) fn prompt_detail(
     if ws.selection.schema_tab {
         let declared = serde_json::to_value(prompt).unwrap_or_default();
         body.push(declaration(ws, declared, "prompt", &prompt.name, cx));
-        return Parts { pinned, body };
+        return Parts {
+            pinned,
+            body,
+            fills: true,
+        };
     }
     let rows: Vec<AnyElement> = prompt
         .arguments
@@ -126,7 +138,11 @@ pub(super) fn prompt_detail(
             .children(rows)
             .into_any_element(),
     );
-    Parts { pinned, body }
+    Parts {
+        pinned,
+        body,
+        fills: false,
+    }
 }
 
 /// Everything the server declared about a resource, template or prompt, as
@@ -142,17 +158,23 @@ pub(super) fn declaration(
     let toggle = ws.collapse_toggle(cx);
     let prefix = format!("decl:{}:{what}:{name}", ws.server_scope(cx));
     let value = Rc::new(value);
-    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, cx);
+    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, Fit::Fill, cx);
     v_flex()
         .px(px(24.))
         .py(px(16.))
-        .child(tree_section(
-            cx,
-            what.to_owned(),
-            SharedString::from(format!("{prefix}-copy")),
-            value,
-            body,
-        ))
+        .flex_1()
+        .min_h_0()
+        .child(
+            tree_section(
+                cx,
+                what.to_owned(),
+                SharedString::from(format!("{prefix}-copy")),
+                value,
+                body,
+            )
+            .flex_1()
+            .min_h_0(),
+        )
         .into_any_element()
 }
 

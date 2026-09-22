@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use crate::clip;
 use crate::theme::tokens;
-use crate::views::json::json_tree_rc;
+use crate::views::json::{Fit, json_tree_rc};
 use crate::views::{Workspace, fold_icon, mono, tree_section};
 
 /// The banner for the selected server, when its last connect found changes.
@@ -214,7 +214,7 @@ pub(crate) fn change_row(
     let value = |label: &'static str, v: &Option<Value>, prefix: String| {
         v.as_ref().map(|v| {
             let v = Rc::new(v.clone());
-            let body = json_tree_rc(v.clone(), &folds, &prefix, cx);
+            let body = json_tree_rc(v.clone(), &folds, &prefix, Fit::Rows, cx);
             tree_section(
                 cx,
                 label,

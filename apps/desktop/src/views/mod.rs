@@ -14,7 +14,6 @@ pub mod form;
 pub mod history;
 mod item_list;
 pub mod json;
-mod json_budget;
 mod kept;
 mod list_failures;
 mod log_drawer;

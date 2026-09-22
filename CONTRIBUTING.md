@@ -78,18 +78,18 @@ two modes. These rules keep it that way.
   unique within one server (log row ids, tool names). `json.rs` owns the
   chevron and the `{ … N keys }` / `[ … N items ]` summaries; the generated
   form reuses both through `views::fold_icon`. There is no non-interactive
-  tree renderer: do not add one. A tree starts with about
-  `TREE_NODE_BUDGET` lines painted: `json_budget.rs` works out from the value
-  alone which containers would pass it, and those start folded. An open
-  container paints its children a budget at a time, under a `… N more` line
-  that paints the next budget when pressed, so opening a fold paints at most
-  about twice the budget however wide the container is. A line under the tree
-  says how many nodes the folds and the unpainted children hide. A budget
-  fold the user opens, and each `… more` pressed, is kept in
-  `Workspace.unfolded`, and a fold in `collapsed` always wins. A result that
-  lays out more than `LARGE_RESULT_BYTES` (base64 drawn as an image or a save
-  button does not count) is not drawn until Show result is pressed; its
-  header gives its size and top-level shape instead.
+  tree renderer: do not add one. A tree is a list of its lines: the value is
+  walked once into a plan of lines under the folds in force (`json/lines.rs`,
+  one small entry per line, what a line says being read from the value when
+  it is drawn), kept until the value or `Workspace.collapse_rev` changes,
+  and a uniform list builds only the lines in view from it. Every container
+  starts open; only `Workspace.collapsed` folds one. A tree takes its rows
+  up to `json::MAX_TREE_ROWS` and scrolls inside past that (`Fit::Rows`),
+  or, as the one thing in a panel (a response that is one tree, the schema
+  tab, a recorded call's arguments), the panel's height (`Fit::Fill`). A
+  result that lays out more than `LARGE_RESULT_BYTES` (base64 drawn as an
+  image or a save button does not count) is not drawn until Show result is
+  pressed; its header gives its size and top-level shape instead.
 - A selected response is drawn on every frame, so nothing it shows may cost
   per frame what it can cost once: a result is measured on the runtime when
   it arrives (`Response.size`), and a stored call where its history is read

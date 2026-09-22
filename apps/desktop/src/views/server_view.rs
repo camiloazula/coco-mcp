@@ -20,7 +20,7 @@ use crate::state::SETTINGS_SECTION;
 use crate::theme::tokens;
 use crate::views::banner;
 use crate::views::history::when_label;
-use crate::views::json::json_tree_rc;
+use crate::views::json::{Fit, json_tree_rc};
 use crate::views::{
     Workspace, accent_button, detail_header, labelled, mono, muted, text_tab, tree_section,
 };
@@ -143,7 +143,7 @@ fn tree(
     let toggle = ws.collapse_toggle(cx);
     let prefix = format!("server:{server_id}:{what}");
     let value = Rc::new(value);
-    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, cx);
+    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, Fit::Rows, cx);
     let id = SharedString::from(format!("{prefix}-copy"));
     div()
         .px(px(24.))

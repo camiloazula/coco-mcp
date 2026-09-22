@@ -5,8 +5,6 @@
 //! is a read-only text area (`plain.rs`), which lays out only the lines in
 //! view.
 
-use std::rc::Rc;
-
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{ActiveTheme as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -16,7 +14,7 @@ use serde_json::Value;
 use crate::clip;
 use crate::theme::tokens;
 use crate::views::blob::{blob_stem, render_blob};
-use crate::views::json::{Folds, json_tree, json_tree_rc};
+use crate::views::json::{Fit, Folds, json_tree, json_tree_rc};
 use crate::views::kept::Decoded;
 use crate::views::plain::PlainText;
 use crate::views::{labelled, muted, tree_section};
@@ -115,28 +113,14 @@ pub fn body(method: &str, raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &A
 }
 
 fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
-    let mut parts: Vec<AnyElement> = Vec::new();
     let mut fills = false;
     let structured = raw.get("structuredContent");
     let blocks = raw.get("content").and_then(Value::as_array);
+    let rest = rest_fields(raw, &["content", "structuredContent"]);
     // The one content block of a result with nothing else in it.
-    let lone = structured.is_none()
-        && blocks.is_some_and(|blocks| blocks.len() == 1)
-        && rest_fields(raw, &["content", "structuredContent"]).is_none();
-    if let Some(value) = structured {
-        let value = Rc::new(value.clone());
-        let tree = json_tree_rc(value.clone(), draw.folds, &format!("{prefix}s"), cx);
-        parts.push(
-            tree_section(
-                cx,
-                "structuredContent",
-                SharedString::from(format!("{prefix}s-copy")),
-                value,
-                tree,
-            )
-            .into_any_element(),
-        );
-    }
+    let lone =
+        structured.is_none() && blocks.is_some_and(|blocks| blocks.len() == 1) && rest.is_none();
+    let mut shown: Vec<AnyElement> = Vec::new();
     if let Some(blocks) = blocks {
         for (i, block) in blocks.iter().enumerate() {
             let id = format!("{prefix}c{i}");
@@ -152,19 +136,40 @@ fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
             }
             let (block, full) = content_block(block, &id, draw, lone, cx);
             fills |= full;
-            parts.push(block);
+            shown.push(block);
         }
     }
+    let mut parts: Vec<AnyElement> = Vec::new();
+    if let Some(value) = structured {
+        // The tree of a result that is nothing but its structuredContent
+        // has the whole panel.
+        let fit = if shown.is_empty() && rest.is_none() {
+            fills = true;
+            Fit::Fill
+        } else {
+            Fit::Rows
+        };
+        let value = draw.decoded.value(&format!("{prefix}s"), value);
+        let tree = json_tree_rc(value.clone(), draw.folds, &format!("{prefix}s"), fit, cx);
+        parts.push(
+            tree_section(
+                cx,
+                "structuredContent",
+                SharedString::from(format!("{prefix}s-copy")),
+                value,
+                tree,
+            )
+            .when(fit == Fit::Fill, |section| section.flex_1().min_h_0())
+            .into_any_element(),
+        );
+    }
+    parts.extend(shown);
     if parts.is_empty() {
-        parts.push(json_tree(raw, draw.folds, prefix, cx));
-    } else {
-        parts.extend(other_fields(
-            raw,
-            &["content", "structuredContent"],
-            prefix,
-            draw,
-            cx,
-        ));
+        let value = draw.decoded.value(prefix, raw);
+        parts.push(json_tree_rc(value, draw.folds, prefix, Fit::Fill, cx));
+        fills = true;
+    } else if let Some(rest) = rest {
+        parts.push(other_fields(rest, prefix, draw, cx));
     }
     blocks_column(parts, fills)
 }
@@ -196,28 +201,24 @@ fn rest_fields(raw: &Value, shown: &[&str]) -> Option<serde_json::Map<String, Va
     (!rest.is_empty()).then_some(rest)
 }
 
-/// The tree of [`rest_fields`], when there are any.
+/// The tree of the [`rest_fields`] `rest`.
 fn other_fields(
-    raw: &Value,
-    shown: &[&str],
+    rest: serde_json::Map<String, Value>,
     prefix: &str,
-    draw: &Draw<'_>,
+    draw: &mut Draw<'_>,
     cx: &App,
-) -> Option<AnyElement> {
-    let rest = rest_fields(raw, shown)?;
-    let value = Rc::new(Value::Object(rest));
+) -> AnyElement {
     let id = format!("{prefix}o");
-    let tree = json_tree_rc(value.clone(), draw.folds, &id, cx);
-    Some(
-        tree_section(
-            cx,
-            "Other fields",
-            SharedString::from(format!("{id}-copy")),
-            value,
-            tree,
-        )
-        .into_any_element(),
+    let value = draw.decoded.owned(&id, Value::Object(rest));
+    let tree = json_tree_rc(value.clone(), draw.folds, &id, Fit::Rows, cx);
+    tree_section(
+        cx,
+        "Other fields",
+        SharedString::from(format!("{id}-copy")),
+        value,
+        tree,
     )
+    .into_any_element()
 }
 
 fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
@@ -226,11 +227,14 @@ fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Bo
         .and_then(Value::as_array)
         .filter(|contents| !contents.is_empty());
     let Some(contents) = contents else {
-        return blocks_column(vec![json_tree(raw, draw.folds, prefix, cx)], false);
+        let value = draw.decoded.value(prefix, raw);
+        let tree = json_tree_rc(value, draw.folds, prefix, Fit::Fill, cx);
+        return blocks_column(vec![tree], true);
     };
     let mut parts: Vec<AnyElement> = Vec::new();
     let mut fills = false;
-    let lone = contents.len() == 1 && rest_fields(raw, &["contents"]).is_none();
+    let rest = rest_fields(raw, &["contents"]);
+    let lone = contents.len() == 1 && rest.is_none();
     for (i, c) in contents.iter().enumerate() {
         let mime = c.get("mimeType").and_then(Value::as_str).unwrap_or("");
         let p = format!("{prefix}x{i}");
@@ -241,10 +245,12 @@ fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Bo
         } else if let Some(blob) = c.get("blob").and_then(Value::as_str) {
             render_blob(blob, mime, &blob_stem(c), &p, draw.decoded, cx)
         } else {
-            json_tree(c, draw.folds, &p, cx)
+            json_tree(c, draw.folds, &p, Fit::Rows, cx)
         });
     }
-    parts.extend(other_fields(raw, &["contents"], prefix, draw, cx));
+    if let Some(rest) = rest {
+        parts.push(other_fields(rest, prefix, draw, cx));
+    }
     blocks_column(parts, fills)
 }
 
@@ -278,15 +284,12 @@ fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body
         );
     }
     if parts.is_empty() {
-        parts.push(json_tree(raw, draw.folds, prefix, cx));
-    } else {
-        parts.extend(other_fields(
-            raw,
-            &["description", "messages"],
-            prefix,
-            draw,
-            cx,
-        ));
+        let value = draw.decoded.value(prefix, raw);
+        let tree = json_tree_rc(value, draw.folds, prefix, Fit::Fill, cx);
+        return blocks_column(vec![tree], true);
+    }
+    if let Some(rest) = rest_fields(raw, &["description", "messages"]) {
+        parts.push(other_fields(rest, prefix, draw, cx));
     }
     blocks_column(parts, false)
 }

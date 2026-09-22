@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     Pixels, StatefulInteractiveElement, Styled, TestSupportExt as _, div, px, relative,
@@ -59,28 +60,33 @@ fn keeps((server, mode, name): &ResponseKey, gone: &Gone) -> bool {
     }
 }
 
-/// The scroll view of the input, the tab body under the toolbar.
-fn input_view(body: Vec<AnyElement>) -> AnyElement {
+/// The view of the input, the tab body under the toolbar: a scroll view,
+/// or, for a body that fills (one tree, which scrolls inside), a column
+/// that gives it the height.
+fn input_view(body: Vec<AnyElement>, fills: bool) -> AnyElement {
     div()
         .id("detail-input")
         .size_full()
         .min_h_0()
-        .overflow_y_scroll()
+        .when(!fills, |view| view.overflow_y_scroll())
+        .when(fills, |view| view.flex().flex_col())
         .children(body)
         .test_support()
         .into_any_element()
 }
 
 /// `body` above `response`, split by the separator of `key`; `body` alone,
-/// filling the pane, while there is no response.
+/// filling the pane, while there is no response. `fills` says the body
+/// takes the height it is given rather than scrolling in it.
 pub(crate) fn render(
     ws: &mut Workspace,
     key: Option<ResponseKey>,
     body: Vec<AnyElement>,
+    fills: bool,
     response: Option<AnyElement>,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
-    let input = input_view(body);
+    let input = input_view(body, fills);
     let (Some(response), Some(key)) = (response, key) else {
         return div().flex_1().min_h_0().child(input).into_any_element();
     };
