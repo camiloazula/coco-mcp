@@ -144,7 +144,6 @@ pub(super) fn render_text(
             .font_family(cx.theme().font_family.clone())
             .text_size(px(13.))
             .line_height(px(crate::views::BODY_LINE_HEIGHT))
-            .max_w(px(640.))
             .when(lone, |block| block.flex_1().min_h_0().flex().flex_col())
             .when(!lone && long, |block| block.h(px(SCROLLED_MARKDOWN_HEIGHT)))
             .child(view)

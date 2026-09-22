@@ -71,7 +71,6 @@ pub(super) fn resource_detail(
                 .px(px(24.))
                 .py(px(16.))
                 .gap(px(10.))
-                .max_w(px(640.))
                 .children(rows)
                 .child(mono(cx, 11., expanded).text_color(t.muted))
                 .into_any_element(),
@@ -121,7 +120,6 @@ pub(super) fn prompt_detail(
             .px(px(24.))
             .py(px(16.))
             .gap(px(10.))
-            .max_w(px(640.))
             .when(rows.is_empty(), |el| {
                 el.child(muted(cx, 12., "No arguments"))
             })

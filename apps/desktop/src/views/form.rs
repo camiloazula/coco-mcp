@@ -168,7 +168,6 @@ impl ToolForm {
     pub fn render_raw(&self, cx: &Context<Self>) -> AnyElement {
         let t = *tokens(cx);
         div()
-            .max_w(px(640.))
             .rounded(px(3.))
             .bg(t.field)
             .border_1()
@@ -205,11 +204,7 @@ impl ToolForm {
             }
             _ => vec![self.node(&model, &state, "$", "value", window, cx)],
         };
-        v_flex()
-            .gap(px(10.))
-            .max_w(px(640.))
-            .children(rows)
-            .into_any_element()
+        v_flex().gap(px(10.)).children(rows).into_any_element()
     }
 
     /// Focus the input of the first top-level field that has one.
