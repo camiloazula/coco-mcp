@@ -2107,7 +2107,7 @@ mod macos {
                 window.click(("log-row", request), cx);
                 window.render_frame(cx);
                 let row_id = state.read(cx).servers[0].log()[request].row_id;
-                assert_eq!(state.read(cx).expanded_log, Some(row_id));
+                assert!(state.read(cx).expanded_log.contains(&row_id));
                 let root = format!("{}$", fold_prefix(&id, row_id));
                 window.click(root.clone(), cx);
                 window.render_frame(cx);
@@ -2128,7 +2128,7 @@ mod macos {
                 !workspace.read(cx).collapsed.contains(&root),
                 "Clear let go of its rows' folds"
             );
-            assert_eq!(state.read(cx).expanded_log, None);
+            assert!(state.read(cx).expanded_log.is_empty());
         });
         // Row ids are per server, so another server's log opens with none.
         cx.update(|cx| {
@@ -2136,7 +2136,7 @@ mod macos {
                 s.toggle_log_row(s.servers[0].next_log_id(), cx);
                 s.select_server(1, cx);
             });
-            assert_eq!(state.read(cx).expanded_log, None);
+            assert!(state.read(cx).expanded_log.is_empty());
             state.update(cx, |s, cx| s.select_server(0, cx));
         });
 
@@ -2855,7 +2855,7 @@ mod macos {
             let entry = &state.read(cx).servers[0];
             let first = entry.log()[0].row_id;
             assert!(first > 0, "ids carry on after Clear");
-            assert_eq!(state.read(cx).expanded_log, Some(first));
+            assert_eq!(state.read(cx).expanded_log, [first].into());
             assert!(
                 window.try_find(("log-row", 1usize)).is_some(),
                 "next row still rendered"
@@ -2884,10 +2884,35 @@ mod macos {
         })
         .unwrap();
         snap(cx, handle, "28-log-expanded");
+        // Rows open independently: the second joins the first, and each
+        // closes on its own.
+        let ids: Vec<u64> = cx.update(|cx| {
+            state.read(cx).servers[0].log()[..2]
+                .iter()
+                .map(|r| r.row_id)
+                .collect()
+        });
         cx.update_window(handle.into(), |_, window, cx| {
+            window.click(("log-row", 1usize), cx);
+            window.render_frame(cx);
+            assert_eq!(
+                state.read(cx).expanded_log,
+                ids.iter().copied().collect(),
+                "both rows open"
+            );
+        })
+        .unwrap();
+        snap(cx, handle, "62-log-two-rows");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click(("log-row", 1usize), cx);
+            window.render_frame(cx);
+            assert_eq!(state.read(cx).expanded_log, [ids[0]].into());
             window.click(("log-row", 0usize), cx);
             window.render_frame(cx);
-            assert_eq!(state.read(cx).expanded_log, None, "second click collapses");
+            assert!(
+                state.read(cx).expanded_log.is_empty(),
+                "second click collapses"
+            );
         })
         .unwrap();
         snap(cx, handle, "12-prompt-and-log");
@@ -3424,7 +3449,7 @@ mod macos {
         capture("01-connected", s, true);
         let mut s = demo_state(true);
         s.drawer_open = true;
-        s.expanded_log = None;
+        s.expanded_log.clear();
         capture("02-log-open", s, true);
         let mut s = demo_state(true);
         s.screen = Screen::AddServer;

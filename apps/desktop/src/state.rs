@@ -799,8 +799,9 @@ pub struct AppState {
     pub drawer_open: bool,
     /// Whether the open drawer covers the columns, for reading the log alone.
     pub drawer_zoomed: bool,
-    /// Id of the expanded row of the selected server's log.
-    pub expanded_log: Option<u64>,
+    /// Ids of the open rows of the selected server's log. Rows open and
+    /// close independently of each other.
+    pub expanded_log: BTreeSet<u64>,
     /// Detail pane content.
     pub screen: Screen,
     /// Dark (true) or light theme.
@@ -977,7 +978,7 @@ impl AppState {
             filter: String::new(),
             drawer_open: false,
             drawer_zoomed: false,
-            expanded_log: None,
+            expanded_log: BTreeSet::new(),
             screen: Screen::Detail,
             dark: true,
             responses: Responses::default(),
@@ -1053,7 +1054,7 @@ impl AppState {
     /// Change the log filter.
     pub fn set_log_filter(&mut self, filter: LogFilter, cx: &mut Context<Self>) {
         self.log_filter = filter;
-        self.expanded_log = None;
+        self.expanded_log.clear();
         self.changed(cx);
     }
 
@@ -1061,7 +1062,7 @@ impl AppState {
     /// every level. Nothing is asked of the server.
     pub fn set_log_min_level(&mut self, level: Option<&'static str>, cx: &mut Context<Self>) {
         self.log_min_level = level;
-        self.expanded_log = None;
+        self.expanded_log.clear();
         self.changed(cx);
     }
 
@@ -1336,7 +1337,7 @@ impl AppState {
         if ix < self.servers.len() {
             // Row ids are per server: another server's row may share the id.
             if self.selected_server != Some(ix) {
-                self.expanded_log = None;
+                self.expanded_log.clear();
             }
             self.selected_server = Some(ix);
             self.selected_item = None;
@@ -1456,13 +1457,12 @@ impl AppState {
         self.changed(cx);
     }
 
-    /// Expand the log row with id `id` (or collapse it when already expanded).
+    /// Open the log row with id `id`, or close it when open. The other open
+    /// rows stay as they are: a request reads beside its response.
     pub fn toggle_log_row(&mut self, id: u64, cx: &mut Context<Self>) {
-        self.expanded_log = if self.expanded_log == Some(id) {
-            None
-        } else {
-            Some(id)
-        };
+        if !self.expanded_log.remove(&id) {
+            self.expanded_log.insert(id);
+        }
         self.changed(cx);
     }
 
@@ -1530,7 +1530,7 @@ impl AppState {
                 server_id: entry.record.id.clone(),
                 before: entry.first_log_id(),
             };
-            self.expanded_log = None;
+            self.expanded_log.clear();
             cx.emit(gone);
             self.changed(cx);
         }
@@ -1548,11 +1548,11 @@ impl AppState {
         Some(before)
     }
 
-    /// The rows with ids below `before` left server `ix`'s log: the expanded
-    /// row stays on its row, and closes when it was one of them.
+    /// The rows with ids below `before` left server `ix`'s log: an open row
+    /// stays on its row, and is forgotten when it was one of them.
     fn log_rows_left(&mut self, ix: usize, before: u64) {
-        if self.selected_server == Some(ix) && self.expanded_log.is_some_and(|id| id < before) {
-            self.expanded_log = None;
+        if self.selected_server == Some(ix) {
+            self.expanded_log.retain(|&id| id >= before);
         }
     }
 
@@ -2203,7 +2203,7 @@ impl AppState {
         self.selected_server = match self.selected_server {
             Some(s) if s == ix => {
                 self.selected_item = None;
-                self.expanded_log = None;
+                self.expanded_log.clear();
                 (!self.servers.is_empty()).then(|| ix.min(self.servers.len() - 1))
             }
             Some(s) if s > ix => Some(s - 1),
@@ -4178,11 +4178,11 @@ mod tests {
         }
         let ids: Vec<u64> = state.servers[0].log.iter().map(|r| r.row_id).collect();
         assert_eq!(ids, (0..MAX_LOG_ROWS as u64).collect::<Vec<_>>());
-        state.expanded_log = Some(10);
+        state.expanded_log = [10].into();
         assert_eq!(state.append_log(0, stderr_row("newest")), Some(1));
         assert_eq!(
             state.expanded_log,
-            Some(10),
+            [10].into(),
             "an older row left, not this one"
         );
         assert_eq!(
@@ -4191,9 +4191,13 @@ mod tests {
         );
         assert_eq!(state.log_row_by_id(&id, 10).unwrap().0.body, "10");
 
-        state.expanded_log = Some(1);
+        state.expanded_log = [1, 10].into();
         assert_eq!(state.append_log(0, stderr_row("newer")), Some(2));
-        assert_eq!(state.expanded_log, None, "its row was dropped");
+        assert_eq!(
+            state.expanded_log,
+            [10].into(),
+            "the row that left is forgotten, the other stays open"
+        );
 
         // Clear empties the log, and ids carry on rather than start again.
         let next = state.servers[0].next_log_id();
@@ -4206,13 +4210,13 @@ mod tests {
         // Another server's log does not touch the selected one's expanded row,
         // even once that server's ids have passed it.
         let other = state.add_demo_server("other", stdio("other"), Status::Off);
-        state.expanded_log = Some(next);
+        state.expanded_log = [next].into();
         let row = stderr_row("other");
         for _ in 0..next as usize + MAX_LOG_ROWS + 1 {
             state.append_log(other, row.clone());
         }
         assert!(state.servers[other].first_log_id() > next);
-        assert_eq!(state.expanded_log, Some(next));
+        assert_eq!(state.expanded_log, [next].into());
     }
 
     #[test]
@@ -4268,11 +4272,11 @@ mod tests {
 
         // Rows a batch pushes past the cap are reported once, and close the
         // expanded row when it was one of them.
-        state.expanded_log = Some(1);
+        state.expanded_log = [1].into();
         let applied = state.apply_events(&id, 0, lines(0..MAX_LOG_ROWS));
         assert_eq!(state.servers[0].first_log_id(), 53, "53 rows made room");
         assert_eq!(applied.rows_left_before, Some(53));
-        assert_eq!(state.expanded_log, None);
+        assert!(state.expanded_log.is_empty());
     }
 
     #[test]
@@ -4338,7 +4342,7 @@ mod tests {
         for server in [&id, &kept] {
             state.responses.begin(key(server), "tools/call").unwrap();
         }
-        state.expanded_log = Some(3);
+        state.expanded_log = [3].into();
 
         let removed = state.finish_delete(&id, Some(Ok(true)), None);
         assert_eq!(
@@ -4354,7 +4358,10 @@ mod tests {
             state.responses.is_pending(&key(&kept)),
             "another server keeps its own"
         );
-        assert_eq!(state.expanded_log, None, "the row was the deleted server's");
+        assert!(
+            state.expanded_log.is_empty(),
+            "the row was the deleted server's"
+        );
     }
 
     fn stdio(command: &str) -> ServerSpec {
