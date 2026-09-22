@@ -138,8 +138,8 @@ fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
             if duplicate {
                 continue;
             }
-            let (block, plain) = content_block(block, &id, draw, lone, cx);
-            fills |= lone && plain;
+            let (block, full) = content_block(block, &id, draw, lone, cx);
+            fills |= full;
             parts.push(block);
         }
     }
@@ -223,8 +223,8 @@ fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Bo
         let mime = c.get("mimeType").and_then(Value::as_str).unwrap_or("");
         let p = format!("{prefix}x{i}");
         parts.push(if let Some(text) = c.get("text").and_then(Value::as_str) {
-            let (text, plain) = render_text(text, mime, &p, draw, lone, cx);
-            fills |= lone && plain;
+            let (text, full) = render_text(text, mime, &p, draw, lone, cx);
+            fills |= full;
             text
         } else if let Some(blob) = c.get("blob").and_then(Value::as_str) {
             render_blob(blob, mime, &blob_stem(c), &p, draw.decoded, cx)

@@ -455,7 +455,14 @@ artifacts, publishing nothing.
   only when `kept::Decoded` stamps it as another text. A text that is the
   whole response fills the response panel; beside other blocks it takes its
   own rows, up to `plain::MAX_ROWS`, and scrolls inside. JSON text is still
-  a tree and Markdown still the text view.
+  a tree.
+- Markdown is gpui-kit's text view, which lays out every block of a
+  document on every frame unless it scrolls, when it draws the blocks in
+  view through a list. So a document scrolls: in the whole panel when it is
+  the response, in a box of its own beside other blocks once it is longer
+  than `SCROLLED_MARKDOWN_BYTES`, and at its own height only when short and
+  beside others. The view parses a long document in the background, so it
+  is blank for a moment after the answer.
 - The log drawer opens and closes only by its header buttons, `⌘J` and
   `⌘⇧J`, the View menu and the palette, never by Esc: reading a log must not
   end by accident. Zoomed (`drawer_zoomed`), it takes the columns' place

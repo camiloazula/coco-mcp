@@ -261,6 +261,29 @@ pub fn plain_text_flow() {
     snap(&mut live.cx, live.handle, "63-text-result");
 }
 
+/// A long Markdown result is rendered in a scrolling document that fills
+/// the response panel, drawn a block at a time as it comes into view.
+pub fn markdown_result_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.call("markdown", json!({"kilobytes": 64}));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
+    let doc = live.cx.update(|cx| {
+        let (server, mode, name) = live.state.read(cx).response_key().unwrap();
+        format!("resp:{server}:{mode:?}:{name}c0mdbox")
+    });
+    // A document this long is parsed in the background; give it a moment.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        live.cx.run_until_parked();
+        live.ui(|window, cx| window.render_frame(cx));
+    }
+    live.ui(|window, _| {
+        assert!(window.try_find(doc.clone()).is_some(), "the document box");
+        assert!(window.try_find("response-body").is_some());
+    });
+    snap(&mut live.cx, live.handle, "64-markdown-result");
+}
+
 /// The zoomed drawer takes the columns' place until it is restored; hiding
 /// it drops the zoom; and Esc leaves the drawer as it is.
 pub fn log_zoom_flow() {

@@ -5,9 +5,16 @@ use super::*;
 
 use gpui_kit::{InteractiveElement, TestSupportExt as _};
 
+/// A Markdown text longer than this scrolls even beside other blocks: about
+/// five hundred lines, past which laying out every block costs a frame.
+const SCROLLED_MARKDOWN_BYTES: usize = 32 * 1024;
+
+/// The height of a Markdown document scrolling beside other blocks.
+const SCROLLED_MARKDOWN_HEIGHT: f32 = 480.;
+
 /// One MCP content block (`text`, `image`, `audio`, `resource`,
-/// `resource_link`), and whether it was drawn as plain text. `lone` says it
-/// is the only block, so plain text may fill the height given.
+/// `resource_link`), and whether it fills the height it is given. `lone`
+/// says it is the only block, so a text may.
 pub(super) fn content_block(
     block: &Value,
     prefix: &str,
@@ -83,8 +90,9 @@ pub(super) fn resource_link(block: &Value, prefix: &str, cx: &App) -> AnyElement
 
 /// Text by mime: JSON becomes a tree (under any type but Markdown, when the
 /// text parses as JSON), Markdown is rendered, everything else is a
-/// read-only text area. The flag says it was the last: `lone` lets that
-/// text area fill the height given.
+/// read-only text area. The flag says the block fills the height it is
+/// given, which `lone` (the only block of the response) lets a text area
+/// or a document do.
 pub(super) fn render_text(
     text: &str,
     mime: &str,
@@ -112,19 +120,32 @@ pub(super) fn render_text(
     );
     let label = if mime.is_empty() { "text" } else { mime };
     if mime.contains("markdown") {
+        // The text view lays out every block of a document on every frame
+        // unless it scrolls, when it draws the blocks in view through a
+        // list. So a document scrolls, in the whole panel when it is the
+        // response and in a box of its own beside other blocks, except a
+        // short one beside others, which reads better at its own height.
+        let long = text.len() > SCROLLED_MARKDOWN_BYTES;
+        let scrolls = lone || long;
+        let view = TextView::markdown(SharedString::from(format!("{prefix}md")), shared)
+            .selectable(true)
+            .scrollable(scrolls);
         let body = div()
+            .id(SharedString::from(format!("{prefix}mdbox")))
             .font_family(cx.theme().font_family.clone())
             .text_size(px(13.))
             .line_height(px(crate::views::BODY_LINE_HEIGHT))
             .max_w(px(640.))
-            .child(
-                TextView::markdown(SharedString::from(format!("{prefix}md")), shared)
-                    .selectable(true),
-            )
+            .when(lone, |block| block.flex_1().min_h_0().flex().flex_col())
+            .when(!lone && long, |block| block.h(px(SCROLLED_MARKDOWN_HEIGHT)))
+            .child(view)
+            .test_support()
             .into_any_element();
         return (
-            labelled(cx, label.to_owned(), copy, body).into_any_element(),
-            false,
+            labelled(cx, label.to_owned(), copy, body)
+                .when(lone, |block| block.flex_1().min_h_0())
+                .into_any_element(),
+            lone,
         );
     }
     let stamp = draw.decoded.stamp(prefix, text);
@@ -140,6 +161,6 @@ pub(super) fn render_text(
         labelled(cx, label.to_owned(), copy, body)
             .when(lone, |block| block.flex_1().min_h_0())
             .into_any_element(),
-        true,
+        lone,
     )
 }
