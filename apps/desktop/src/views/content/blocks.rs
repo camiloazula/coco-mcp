@@ -88,6 +88,15 @@ pub(super) fn resource_link(block: &Value, prefix: &str, cx: &App) -> AnyElement
     labelled(cx, "Resource link", copy, body).into_any_element()
 }
 
+/// Whether `text`, of type `mime`, is read as JSON: under a JSON type
+/// always, under Markdown never, and otherwise when it starts like a
+/// document or an array. What [`render_text`] draws as a tree, and what
+/// [`laid_out_size`] counts.
+pub(super) fn is_json_text(text: &str, mime: &str) -> bool {
+    mime.contains("json")
+        || (!mime.contains("markdown") && text.trim_start().starts_with(['{', '[']))
+}
+
 /// Text by mime: JSON becomes a tree (under any type but Markdown, when the
 /// text parses as JSON), Markdown is rendered, everything else is a
 /// read-only text area. The flag says the block fills the height it is
@@ -102,9 +111,9 @@ pub(super) fn render_text(
     cx: &App,
 ) -> (AnyElement, bool) {
     let t = *tokens(cx);
-    let is_json = mime.contains("json")
-        || (!mime.contains("markdown") && text.trim_start().starts_with(['{', '[']));
-    if is_json && let Some(value) = draw.decoded.json(prefix, text) {
+    if is_json_text(text, mime)
+        && let Some(value) = draw.decoded.json(prefix, text)
+    {
         // Parsed once while drawn, so the tree shares it without a clone.
         return (json_tree_rc(value, draw.folds, prefix, cx), false);
     }

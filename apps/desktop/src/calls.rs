@@ -728,6 +728,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::laid_out_size;
 
     fn key() -> ResponseKey {
         ("server".into(), Mode::Tools, "sleep".into())
@@ -910,7 +911,7 @@ mod tests {
         };
         let (response, result) = run(true, Ok((raw.clone(), Duration::from_millis(2), false)));
         assert_eq!(response.raw, raw);
-        assert_eq!(response.size, raw.to_string().len());
+        assert_eq!(response.size, laid_out_size("tools/call", &raw));
         assert_eq!(result, Some(raw.clone()), "the history row's own copy");
         let (_, unrecorded) = run(false, Ok((raw.clone(), Duration::ZERO, false)));
         assert_eq!(unrecorded, None, "nothing is copied without a database");
@@ -930,7 +931,7 @@ mod tests {
 
     #[test]
     fn every_response_carries_the_size_of_its_result() {
-        let size = |r: &Response| (r.size, r.raw.to_string().len());
+        let size = |r: &Response| (r.size, laid_out_size("tools/call", &r.raw));
         let mut responses = Responses::default();
         let (stamp, _) = responses.begin(key(), "tools/call").unwrap();
         let (pending, expected) = size(responses.get(&key()).unwrap());
@@ -943,7 +944,7 @@ mod tests {
             Ok((sent, Duration::from_millis(3), true))
         }));
         let answered = outcome("tools/call", Some(result));
-        assert_eq!(answered.size, raw.to_string().len());
+        assert_eq!(answered.size, laid_out_size("tools/call", &raw));
         assert_eq!(answered.status, ResponseStatus::ToolError);
         assert!(responses.finish(&key(), stamp, answered));
         let (stored, expected) = size(responses.get(&key()).unwrap());

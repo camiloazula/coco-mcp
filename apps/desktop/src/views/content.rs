@@ -34,9 +34,10 @@ pub struct Draw<'a> {
     pub decoded: &'a mut Decoded,
 }
 
-/// The bytes of `raw`, a `method` result, as compact JSON, less the base64
-/// the body draws as an image or a save button: a blob is decoded once
-/// however long it is, so only what trees and text lay out counts.
+/// The bytes of `raw`, a `method` result, as compact JSON, less what the
+/// body draws at a flat cost however long it is: the base64 of a blob,
+/// decoded once, and the text of a text area or a Markdown document, laid
+/// out only where it is in view. Only what trees lay out counts.
 pub fn laid_out_size(method: &str, raw: &Value) -> usize {
     let list = |name: &str| {
         raw.get(name)
@@ -44,36 +45,47 @@ pub fn laid_out_size(method: &str, raw: &Value) -> usize {
             .map(|items| items.as_slice())
             .unwrap_or_default()
     };
-    let blobs: usize = match method {
+    let flat: usize = match method {
         "resources/read" => list("contents")
             .iter()
-            .filter(|c| c.get("text").and_then(Value::as_str).is_none())
-            .filter_map(|c| c.get("blob").and_then(Value::as_str))
+            .filter_map(|c| {
+                let mime = text_field(c, "mimeType").unwrap_or("");
+                match text_field(c, "text") {
+                    Some(text) => (!is_json_text(text, mime)).then_some(text),
+                    None => text_field(c, "blob"),
+                }
+            })
             .map(str::len)
             .sum(),
         "prompts/get" => list("messages")
             .iter()
             .filter_map(|m| m.get("content"))
-            .filter_map(block_blob)
+            .filter_map(block_flat)
             .map(str::len)
             .sum(),
         _ => list("content")
             .iter()
-            .filter_map(block_blob)
+            .filter_map(block_flat)
             .map(str::len)
             .sum(),
     };
-    mcp_exchange::json_size(raw).saturating_sub(blobs)
+    mcp_exchange::json_size(raw).saturating_sub(flat)
 }
 
-/// The base64 [`content_block`] draws as a blob, if any.
-fn block_blob(block: &Value) -> Option<&str> {
+/// The base64 [`content_block`] draws as a blob, or the text it draws as a
+/// text area or a document, if either.
+fn block_flat(block: &Value) -> Option<&str> {
     match block.get("type").and_then(Value::as_str) {
+        Some("text") => {
+            let text = text_field(block, "text")?;
+            (!is_json_text(text, "")).then_some(text)
+        }
         Some("image" | "audio") => text_field(block, "data"),
         Some("resource") => {
             let inner = block.get("resource")?;
+            let mime = text_field(inner, "mimeType").unwrap_or("");
             match text_field(inner, "text") {
-                Some(_) => None,
+                Some(text) => (!is_json_text(text, mime)).then_some(text),
                 None => text_field(inner, "blob"),
             }
         }
@@ -293,10 +305,11 @@ mod tests {
             {"type": "image", "data": data, "mimeType": "image/png"},
         ]});
         let size = laid_out_size("tools/call", &image);
-        assert_eq!(size, mcp_exchange::json_size(&image) - data.len());
+        let caption = "a picture".len();
+        assert_eq!(size, mcp_exchange::json_size(&image) - data.len() - caption);
         assert!(size < mcp_exchange::json_size(&text) + 64, "{size}");
         // A resource read and an embedded resource likewise; a blob beside
-        // text is not drawn as one, so it counts.
+        // text is not drawn as one, so it counts, and the text does not.
         let read = json!({"contents": [{"uri": "a", "blob": data}]});
         assert_eq!(
             laid_out_size("resources/read", &read),
@@ -305,7 +318,7 @@ mod tests {
         let both = json!({"contents": [{"uri": "a", "text": "t", "blob": data}]});
         assert_eq!(
             laid_out_size("resources/read", &both),
-            mcp_exchange::json_size(&both)
+            mcp_exchange::json_size(&both) - 1
         );
         let embedded = json!({"messages": [{"role": "user", "content":
             {"type": "resource", "resource": {"uri": "a", "blob": data}}}]});
@@ -324,6 +337,42 @@ mod tests {
         assert_eq!(
             laid_out_size("tools/call", &rows),
             mcp_exchange::json_size(&rows)
+        );
+    }
+
+    #[test]
+    fn text_drawn_as_text_or_a_document_is_not_counted_either() {
+        let prose = "line\n".repeat(60_000);
+        let plain = json!({"content": [{"type": "text", "text": prose}]});
+        assert_eq!(
+            laid_out_size("tools/call", &plain),
+            mcp_exchange::json_size(&plain) - prose.len(),
+            "a text area lays out only what is in view"
+        );
+        let md = json!({"content": [{"type": "resource", "resource":
+            {"uri": "a", "mimeType": "text/markdown", "text": prose}}]});
+        assert_eq!(
+            laid_out_size("tools/call", &md),
+            mcp_exchange::json_size(&md) - prose.len()
+        );
+        let read = json!({"contents": [{"uri": "a", "mimeType": "text/plain", "text": prose}]});
+        assert_eq!(
+            laid_out_size("resources/read", &read),
+            mcp_exchange::json_size(&read) - prose.len()
+        );
+        // JSON in a text block becomes a tree, which lays out its lines.
+        let rows = format!("[{}]", "{\"id\":1},".repeat(20_000).trim_end_matches(','));
+        let tree = json!({"content": [{"type": "text", "text": rows}]});
+        assert_eq!(
+            laid_out_size("tools/call", &tree),
+            mcp_exchange::json_size(&tree)
+        );
+        let said =
+            json!({"contents": [{"uri": "a", "mimeType": "application/json", "text": "plain"}]});
+        assert_eq!(
+            laid_out_size("resources/read", &said),
+            mcp_exchange::json_size(&said),
+            "a JSON type is parsed whatever the text"
         );
     }
 }
