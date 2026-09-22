@@ -242,6 +242,21 @@ pub struct RowsArgs {
 /// Most rows one `rows` call returns.
 pub const MAX_ROWS: u32 = 100_000;
 
+/// Arguments for `text` and `markdown`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ProseArgs {
+    /// About how many kilobytes to return (default 256, at most
+    /// [`MAX_PROSE_KB`]).
+    #[serde(default)]
+    pub kilobytes: Option<u32>,
+}
+
+/// Most kilobytes one `text` or `markdown` call returns.
+pub const MAX_PROSE_KB: u32 = 8 * 1024;
+
+/// Kilobytes `text` and `markdown` return when not told how many.
+pub const DEFAULT_PROSE_KB: u32 = 256;
+
 /// Arguments for `progress`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ProgressArgs {
@@ -713,6 +728,27 @@ impl MockServer {
         serde_json::Value::Array(rows).to_string()
     }
 
+    /// Return about `kilobytes` of plain text as one text block, so a client
+    /// can be tested against a long answer that is not JSON.
+    #[tool]
+    fn text(&self, Parameters(args): Parameters<ProseArgs>) -> String {
+        prose(prose_bytes(&args))
+    }
+
+    /// Return about `kilobytes` of Markdown as an embedded `text/markdown`
+    /// resource, so a client can be tested against a long rendered answer.
+    #[tool]
+    fn markdown(&self, Parameters(args): Parameters<ProseArgs>) -> CallToolResult {
+        CallToolResult::success(vec![ContentBlock::resource(
+            ResourceContents::TextResourceContents {
+                uri: "mock://md/long".into(),
+                mime_type: Some("text/markdown".into()),
+                text: markdown(prose_bytes(&args)),
+                meta: None,
+            },
+        )])
+    }
+
     /// Report `steps` progress notifications against the request's progress
     /// token, one every `delay_ms`, then answer. Stops early when the client
     /// cancels the request.
@@ -1156,6 +1192,50 @@ fn is_modern(context: &RequestContext<RoleServer>) -> bool {
         .is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
 }
 
+/// The bytes `text` and `markdown` were asked for.
+fn prose_bytes(args: &ProseArgs) -> usize {
+    let kilobytes = args.kilobytes.unwrap_or(DEFAULT_PROSE_KB).min(MAX_PROSE_KB);
+    usize::try_from(kilobytes)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(1024)
+}
+
+/// At least `bytes` of numbered lines of plain text.
+fn prose(bytes: usize) -> String {
+    let mut text = String::with_capacity(bytes + 128);
+    let mut line = 1;
+    while text.len() < bytes {
+        text.push_str(&format!(
+            "Line {line}: the quick brown fox jumps over the lazy dog, \
+             then reads the log, checks the schema and calls the tool again.\n"
+        ));
+        line += 1;
+    }
+    text
+}
+
+/// At least `bytes` of Markdown: numbered sections with a paragraph, a
+/// list, a code block and a table each.
+fn markdown(bytes: usize) -> String {
+    let mut text = String::with_capacity(bytes + 512);
+    text.push_str("# A long document\n\n");
+    let mut section = 1;
+    while text.len() < bytes {
+        text.push_str(&format!(
+            "## Section {section}\n\n\
+             This is paragraph {section}, with **bold**, _italic_ and `code` in it, \
+             long enough to wrap in a column of ordinary width.\n\n\
+             - first point of section {section}\n\
+             - second point\n\
+             - third point, with a [link](https://example.com/{section})\n\n\
+             ```json\n{{\"section\": {section}, \"ok\": true}}\n```\n\n\
+             | key | value |\n|---|---|\n| section | {section} |\n| ok | true |\n\n"
+        ));
+        section += 1;
+    }
+    text
+}
+
 fn text_result(text: impl Into<String>) -> CallToolResponse {
     CallToolResult::success(vec![ContentBlock::text(text.into())]).into()
 }
@@ -1347,6 +1427,28 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "echo"));
         assert!(server.read("mock://text/hello").is_some());
         assert!(server.read("mock://item/42").is_some());
+    }
+
+    #[test]
+    fn prose_and_markdown_reach_the_size_asked_for() {
+        let asked = 64 * 1024;
+        let plain = prose(asked);
+        assert!(
+            plain.len() >= asked && plain.len() < asked + 256,
+            "{}",
+            plain.len()
+        );
+        assert!(plain.starts_with("Line 1: "));
+        let md = markdown(asked);
+        assert!(md.len() >= asked && md.len() < asked + 1024, "{}", md.len());
+        assert!(md.starts_with("# A long document"));
+        assert!(md.contains("## Section 2"));
+        let default = ProseArgs { kilobytes: None };
+        assert_eq!(prose_bytes(&default), 256 * 1024);
+        let capped = ProseArgs {
+            kilobytes: Some(u32::MAX),
+        };
+        assert_eq!(prose_bytes(&capped), 8 * 1024 * 1024);
     }
 
     #[test]

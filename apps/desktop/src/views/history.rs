@@ -19,7 +19,7 @@ use crate::views::content::Draw;
 use crate::views::json::{Folds, json_tree_rc};
 use crate::views::response::Shown;
 use crate::views::{
-    Workspace, accent_button, detail_header, kbd, mono, muted, response, tree_section,
+    Workspace, accent_button, detail_header, kbd, mono, muted, response, split, tree_section,
 };
 
 /// JSON-RPC method of a call kind.
@@ -43,7 +43,7 @@ pub(crate) fn when_label(at: time::OffsetDateTime) -> String {
 ///
 /// The record and its result are borrowed from the model, not copied, for
 /// as long as the row stays selected.
-pub fn render(ws: &mut Workspace, cx: &Context<Workspace>) -> Option<AnyElement> {
+pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElement> {
     let t = *tokens(cx);
     // Both trees are keyed by the call id, so a replay keeps the folds.
     let toggle = ws.collapse_toggle(cx);
@@ -164,17 +164,22 @@ pub fn render(ws: &mut Workspace, cx: &Context<Workspace>) -> Option<AnyElement>
         folds: &folds,
         decoded: &mut ws.decoded,
     };
+    let response = response::render(shown, &prefix, revealed, &mut draw, cx);
+    let key = ws.state.read(cx).response_key();
     Some(
         v_flex()
             .id("detail")
-            .flex_1()
+            .size_full()
             .min_h_0()
-            .overflow_y_scroll()
             .child(header)
             .child(toolbar)
-            .child(args)
-            .child(div().flex_1())
-            .child(response::render(shown, &prefix, revealed, &mut draw, cx))
+            .child(split::render(
+                ws,
+                key,
+                vec![args.into_any_element()],
+                Some(response),
+                cx,
+            ))
             .into_any_element(),
     )
 }

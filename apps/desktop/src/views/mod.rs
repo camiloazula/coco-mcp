@@ -28,6 +28,7 @@ mod response;
 mod server_fields;
 mod server_view;
 mod sidebar;
+mod split;
 mod status_bar;
 mod workspace;
 

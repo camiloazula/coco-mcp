@@ -87,7 +87,8 @@ use:
   (nested objects, arrays, enums, `oneOf`), or edit the raw JSON. Arguments
   are validated against the schema before they are sent.
 - **See** responses as collapsible JSON, text, Markdown or images, with
-  round-trip times, and every wire message in a filterable log drawer (`⌘J`,
+  round-trip times, in a panel of their own under the form, split by a
+  separator you drag, and every wire message in a filterable log drawer (`⌘J`,
   zoomed over the columns with `⌘⇧J`),
   where rows unfold, each on its own, into the same tree as a response,
   and a toggled row moves to the top of the drawer. A reconnect keeps

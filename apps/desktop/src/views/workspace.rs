@@ -90,6 +90,8 @@ pub struct Workspace {
     /// Decoded blobs and parsed text of the responses on screen, dropped
     /// once not drawn.
     pub decoded: Decoded,
+    /// Where the separator between input and response sits, per selection.
+    pub(crate) splits: crate::views::split::Splits,
     /// The diff-banner row whose before/after values are open, identified by
     /// the change itself so it cannot follow an index onto another server.
     pub expanded_change: Option<String>,
@@ -181,6 +183,7 @@ impl Workspace {
             collapse_rev: 0,
             revealed: HashSet::new(),
             decoded: Decoded::default(),
+            splits: Default::default(),
             expanded_change: None,
             roots_editor: None,
             _subscriptions: subscriptions,

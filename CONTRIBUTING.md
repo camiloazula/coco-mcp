@@ -440,6 +440,13 @@ artifacts, publishing nothing.
   open, under the `Dialog` key context: Enter and `⌘⏎` accept, Esc cancels,
   and the window's shortcuts are bound to `NoAction` there, so they wait
   until it closes. Closing it gives focus back to the list.
+- The detail pane is split once a selection has a response: the header,
+  description and toolbar stay put, and the input (form, arguments or
+  declaration) and the response scroll each on their own, with a draggable
+  separator between them (`views/split.rs`). It starts halfway and is
+  remembered per selection, like folds, so the split that suits one tool's
+  form is not forced on another's; a deleted server or a cleared call takes
+  its splits with it. Before the first call the input has the whole pane.
 - The log drawer opens and closes only by its header buttons, `⌘J` and
   `⌘⇧J`, the View menu and the palette, never by Esc: reading a log must not
   end by accident. Zoomed (`drawer_zoomed`), it takes the columns' place
@@ -467,6 +474,8 @@ artifacts, publishing nothing.
   `--stalled-resources`, `--ignore-pings`, `--paged-resources`) and tools
   (`progress`, `stderr`, `exit`, `elicit` with a `url`) give each unhappy
   path a test. `exit` only ends a server serving its own process over stdio.
+  `rows`, `text` and `markdown` return results as large as asked, for
+  trying the window against a long answer of each kind.
 - The mock server speaks both eras from one binary, over stdio and HTTP. On
   a 2026-07-28 request `elicit`, `sample` and `roots` answer `input_required`
   (`elicit` with `repeat` keeps asking, to reach the round limit), `bump` and

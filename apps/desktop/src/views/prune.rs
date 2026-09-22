@@ -15,6 +15,7 @@ impl Workspace {
         for keys in [&mut self.collapsed, &mut self.unfolded, &mut self.revealed] {
             retain_live(keys, gone);
         }
+        self.splits.forget(gone);
     }
 }
 

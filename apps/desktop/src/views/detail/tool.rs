@@ -21,11 +21,12 @@ pub(super) fn tool_detail(
     meta: &str,
     window: &mut Window,
     cx: &mut Context<Workspace>,
-) -> Vec<AnyElement> {
+) -> Parts {
     let title = tool.title.clone().unwrap_or_else(|| tool.name.clone());
-    let mut parts: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
-    parts.extend(description(cx, tool.description.as_deref()).map(IntoElement::into_any_element));
-    parts.push(toolbar(ws, cx, Tabs::Tool, "Call").into_any_element());
+    let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
+    pinned.extend(description(cx, tool.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.push(toolbar(ws, cx, Tabs::Tool, "Call").into_any_element());
+    let mut body: Vec<AnyElement> = Vec::new();
     if ws.selection.schema_tab {
         // Everything the server declared about the tool, foldable. Nothing
         // else in the app shows the output schema or the annotations.
@@ -57,7 +58,7 @@ pub(super) fn tool_detail(
         for (name, value) in &tool.extra {
             trees.push((name.clone(), Rc::new(value.clone()), key(name)));
         }
-        parts.push(
+        body.push(
             v_flex()
                 .px(px(24.))
                 .py(px(16.))
@@ -79,20 +80,26 @@ pub(super) fn tool_detail(
             let f = form.read(cx);
             (f.raw_mode, f.errors.clone())
         };
-        let body = form.update(cx, |f, cx| {
+        let fields = form.update(cx, |f, cx| {
             if raw {
                 f.render_raw(cx)
             } else {
                 f.render_fields(window, cx)
             }
         });
-        parts.push(div().px(px(24.)).py(px(16.)).child(body).into_any_element());
-        parts.extend(errors(cx, &errs).map(IntoElement::into_any_element));
+        body.push(
+            div()
+                .px(px(24.))
+                .py(px(16.))
+                .child(fields)
+                .into_any_element(),
+        );
+        body.extend(errors(cx, &errs).map(IntoElement::into_any_element));
     } else {
         // No form for this schema: show it as a tree the user can fold.
         let toggle = ws.collapse_toggle(cx);
         let scope = ws.server_scope(cx);
-        parts.push(
+        body.push(
             div()
                 .px(px(24.))
                 .py(px(16.))
@@ -105,5 +112,5 @@ pub(super) fn tool_detail(
                 .into_any_element(),
         );
     }
-    parts
+    Parts { pinned, body }
 }

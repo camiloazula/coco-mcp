@@ -2570,6 +2570,12 @@ mod macos {
             window.render_frame(cx);
             window.click(("item", add), cx);
             window.render_frame(cx);
+            // Before the first call the form has the whole pane to itself.
+            assert!(window.try_find("detail-input").is_some());
+            assert!(
+                window.try_find("response").is_none(),
+                "nothing to split yet"
+            );
             window.click("$.a", cx);
             window.input("2", cx);
             window.click("$.b", cx);
@@ -2578,6 +2584,18 @@ mod macos {
         })
         .unwrap();
         assert_eq!(wait_for_response(cx, handle, state), ResponseStatus::Ok);
+        // Answered, the pane splits: the form and the response each scroll
+        // on their own under the pinned header and toolbar.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("detail-input").is_some());
+            assert!(
+                window.try_find("response-body").is_some(),
+                "its own scroll view"
+            );
+            assert!(window.try_find("call").is_some(), "the toolbar stays put");
+        })
+        .unwrap();
         let structured = cx.update(|cx| {
             state.read(cx).response().unwrap().raw["structuredContent"]["value"].clone()
         });

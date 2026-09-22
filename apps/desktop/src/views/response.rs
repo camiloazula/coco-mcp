@@ -232,21 +232,35 @@ pub fn render(
             .children(shown.issues.iter().cloned())
             .test_support()
     });
+    // The header stays put; the body scrolls under it, apart from the input
+    // above the split.
     v_flex()
+        .id("response")
+        .size_full()
+        .min_h_0()
         .border_t_1()
         .border_color(t.hair)
         .child(header)
         .child(
-            v_flex()
-                .px(px(24.))
-                .pb(px(20.))
-                .gap(px(12.))
-                .font_family(cx.theme().mono_font_family.clone())
-                .text_size(px(12.))
-                .line_height(px(19.2))
-                .children(issues)
-                .child(body),
+            div()
+                .id("response-body")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(
+                    v_flex()
+                        .px(px(24.))
+                        .pb(px(20.))
+                        .gap(px(12.))
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(px(12.))
+                        .line_height(px(19.2))
+                        .children(issues)
+                        .child(body),
+                )
+                .test_support(),
         )
+        .test_support()
         .into_any_element()
 }
 
