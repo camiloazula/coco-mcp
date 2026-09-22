@@ -86,16 +86,15 @@ two modes. These rules keep it that way.
   starts open; only `Workspace.collapsed` folds one. A tree takes its rows
   up to `json::MAX_TREE_ROWS` and scrolls inside past that (`Fit::Rows`),
   or, as the one thing in a panel (a response that is one tree, the schema
-  tab, a recorded call's arguments), the panel's height (`Fit::Fill`). A
-  result that lays out more than `LARGE_RESULT_BYTES` (base64 drawn as an
-  image or a save button does not count) is not drawn until Show result is
-  pressed; its header gives its size and top-level shape instead.
+  tab, a recorded call's arguments), the panel's height (`Fit::Fill`).
+  Nothing is held back for its size: a result is drawn as it arrives, and a
+  hundred thousand rows are parsed and planned in one frame.
 - A selected response is drawn on every frame, so nothing it shows may cost
-  per frame what it can cost once: a result is measured on the runtime when
-  it arrives (`Response.size`), and a stored call where its history is read
-  off the GPUI thread (`persistence::measured`); copy buttons build their
-  text when pressed; and decoded images, and text blocks parsed and copied
-  once, stay in `Workspace.decoded` until a frame no longer draws them.
+  per frame what it can cost once: copy buttons build their text when
+  pressed; decoded images, text blocks parsed and copied once, and the
+  `Rc` a tree's value is cloned into once per answer stay in
+  `Workspace.decoded` until a frame no longer draws them; and a tree's line
+  plan is kept in `views::json` until its value or the folds change.
 - Everything on screen has a way out, and a client configuration has a way
   in; `mcp-exchange` owns every shared format, in both directions, so the app
   and the CLI cannot disagree. A JSON tree line carries a right-click

@@ -138,13 +138,9 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
     // A replay shown under this row wins over the stored result.
     let shown = match state.response() {
         Some(live) => Shown::live(live).waiting(state.response_waiting()),
-        None => {
-            let measured = state.server().and_then(|s| s.result_size(&record.id));
-            Shown::stored(record, measured)
-        }
+        None => Shown::stored(record),
     };
     let prefix = format!("hist:{}", record.id);
-    let revealed = ws.revealed.contains(&prefix);
     // Field by field, so the blob cache can be borrowed mutably beside them.
     let folds = Folds {
         collapsed: &ws.collapsed,
@@ -174,7 +170,7 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
         folds: &folds,
         decoded: &mut ws.decoded,
     };
-    let response = response::render(shown, &prefix, revealed, &mut draw, cx);
+    let response = response::render(shown, &prefix, &mut draw, cx);
     let key = ws.state.read(cx).response_key();
     Some(
         v_flex()

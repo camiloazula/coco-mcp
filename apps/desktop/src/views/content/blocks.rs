@@ -90,9 +90,8 @@ pub(super) fn resource_link(block: &Value, prefix: &str, cx: &App) -> AnyElement
 
 /// Whether `text`, of type `mime`, is read as JSON: under a JSON type
 /// always, under Markdown never, and otherwise when it starts like a
-/// document or an array. What [`render_text`] draws as a tree, and what
-/// [`laid_out_size`] counts.
-pub(super) fn is_json_text(text: &str, mime: &str) -> bool {
+/// document or an array.
+fn is_json_text(text: &str, mime: &str) -> bool {
     mime.contains("json")
         || (!mime.contains("markdown") && text.trim_start().starts_with(['{', '[']))
 }

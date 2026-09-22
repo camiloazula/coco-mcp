@@ -81,9 +81,6 @@ pub struct Workspace {
     /// Bumped on every fold, so a tree plans its lines again and the log
     /// drawer's list re-measures the row whose payload changed height.
     pub collapse_rev: u64,
-    /// Response prefixes whose large result the user asked to see. Kept per
-    /// selection, like folds, so running the same item again stays shown.
-    pub revealed: HashSet<String>,
     /// Decoded blobs and parsed text of the responses on screen, dropped
     /// once not drawn.
     pub decoded: Decoded,
@@ -177,7 +174,6 @@ impl Workspace {
             log_list: LogList::default(),
             collapsed: HashSet::new(),
             collapse_rev: 0,
-            revealed: HashSet::new(),
             decoded: Decoded::default(),
             splits: Default::default(),
             expanded_change: None,

@@ -2165,8 +2165,6 @@ mod macos {
                 ] {
                     ws.collapsed.insert(key);
                 }
-                ws.revealed.insert(format!("resp:{id}:Tools:log"));
-                ws.revealed.insert("hist:call-chatty".to_owned());
             });
         });
         // A request the server is waiting on when it is deleted.
@@ -2208,23 +2206,22 @@ mod macos {
             assert!(s.responses.get(&elicit).is_none());
             assert!(!s.responses.is_pending(&elicit));
             let ws = workspace.read(cx);
-            for keys in [&ws.collapsed, &ws.revealed] {
-                assert!(
-                    keys.iter()
-                        .all(|k| !k.contains(&id) && !k.contains("call-chatty")),
-                    "{keys:?}"
-                );
-            }
+            assert!(
+                ws.collapsed
+                    .iter()
+                    .all(|k| !k.contains(&id) && !k.contains("call-chatty")),
+                "{:?}",
+                ws.collapsed
+            );
             assert!(ws.collapsed.contains(&format!("schema:{quiet}:log$")));
         })
         .unwrap();
     }
 
-    /// A result too large to draw waits for Show result with its size in the
-    /// header; drawn, every container of its tree is open, only the lines in
-    /// view are built, and the tree scrolls, folds and copies.
+    /// A large result is drawn as soon as it is selected: every container of
+    /// its tree open, only the lines in view built, and the tree scrolls,
+    /// folds and copies.
     fn large_result_flow() {
-        use coco_mcp::views::LARGE_RESULT_BYTES;
         use mcp_store::{CallKind, CallRecord, CallStatus};
 
         let mut cx = context();
@@ -2245,10 +2242,8 @@ mod macos {
         // Twenty thousand rows, led by an index longer than a screen.
         let rows: Vec<_> = (0..20_000).map(|i| json!({"id": i, "ok": true})).collect();
         let large = json!({"ids": (0..2_100).collect::<Vec<_>>(), "rows": rows});
-        assert!(mcp_exchange::json_size(&large) > LARGE_RESULT_BYTES);
         // Three thousand numbers: small in bytes, long in lines.
         let small = json!({"values": (0..3_000).collect::<Vec<_>>()});
-        assert!(mcp_exchange::json_size(&small) < LARGE_RESULT_BYTES);
         state.servers[0].push_call(call("call-large", "list_rows", large));
         state.servers[0].push_call(call("call-small", "list_values", small));
 
@@ -2267,44 +2262,15 @@ mod macos {
         })
         .unwrap();
 
-        let reveal = "hist:call-large-reveal";
         let root = "hist:call-large$";
         let large_row = item_index(&mut cx, &state, "list_rows");
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.click(("item", large_row), cx);
-            window.render_frame(cx);
-            assert!(
-                window.try_find(reveal).is_some(),
-                "a large result waits to be asked for"
-            );
-            assert!(window.try_find(root).is_none(), "nothing of it is drawn");
-        })
-        .unwrap();
-        // The header gives the size, measured once for the recorded call.
-        let measured = cx.update(|cx| {
-            state
-                .read(cx)
-                .servers
-                .iter()
-                .find_map(|s| s.result_size("call-large"))
-        });
-        assert!(
-            measured.is_some_and(|size| size > LARGE_RESULT_BYTES),
-            "{measured:?}"
-        );
-        snap(&mut cx, handle, "37-large-result");
-
         let row = |i: usize| format!("rowhist:call-large$.rows[{i}]");
         let ids = "hist:call-large$.ids";
         let first_id = "rowhist:call-large$.ids[0]";
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click(reveal, cx);
+            window.click(("item", large_row), cx);
             window.render_frame(cx);
-            assert!(
-                window.try_find(root).is_some(),
-                "Show result draws the tree"
-            );
-            assert!(window.try_find(reveal).is_none());
+            assert!(window.try_find(root).is_some(), "drawn as selected");
             // Every container starts open, and only the lines in view are
             // built: the index fills the panel, and the rows are below it.
             assert!(window.try_find(first_id).is_some());
@@ -2366,7 +2332,7 @@ mod macos {
             assert!(window.try_find(rows).is_some(), "on its one line");
         })
         .unwrap();
-        snap(&mut cx, handle, "38-large-result-shown");
+        snap(&mut cx, handle, "37-large-result");
 
         // A result small in bytes is drawn at once, every container open,
         // and still only as far as the view reaches.
@@ -2375,7 +2341,6 @@ mod macos {
             window.click(("item", small_row), cx);
             window.render_frame(cx);
             assert!(window.try_find("hist:call-small$").is_some());
-            assert!(window.try_find("hist:call-small-reveal").is_none());
             assert!(window.try_find("rowhist:call-small$.values[0]").is_some());
             assert!(
                 window
@@ -2385,22 +2350,20 @@ mod macos {
             );
         })
         .unwrap();
-        // Show result is remembered for the row, like its folds.
+        // The folds are remembered for the row.
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(("item", large_row), cx);
             window.render_frame(cx);
             assert!(window.try_find(root).is_some(), "still shown");
-            assert!(window.try_find(reveal).is_none());
+            assert!(window.try_find(row(0)).is_none(), "still folded");
         })
         .unwrap();
     }
 
-    /// A tool whose answer is too large to draw, called live: the response
-    /// waits for Show result with its size measured on the runtime, still
-    /// copies whole, and once shown is drawn open from its first row.
+    /// A tool with a large answer, called live: the response is drawn as it
+    /// arrives, open from its first row, and copies whole.
     fn live_large_result_flow() {
         use coco_mcp::calls::ResponseStatus;
-        use coco_mcp::views::LARGE_RESULT_BYTES;
         use std::time::Duration;
 
         let mock = mock_binary();
@@ -2446,22 +2409,25 @@ mod macos {
             wait_for_response(&mut cx, handle, &state),
             ResponseStatus::Ok
         );
-        let (prefix, size) = cx.update(|cx| {
-            let s = state.read(cx);
-            let (server, mode, name) = s.response_key().unwrap();
-            let size = s.response().unwrap().size;
-            (format!("resp:{server}:{mode:?}:{name}"), size)
+        let prefix = cx.update(|cx| {
+            let (server, mode, name) = state.read(cx).response_key().unwrap();
+            format!("resp:{server}:{mode:?}:{name}")
         });
-        assert!(size > LARGE_RESULT_BYTES, "{size}");
-        let reveal = format!("{prefix}-reveal");
         let tree = format!("{prefix}c0$");
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(
-                window.try_find(reveal.clone()).is_some(),
-                "a large answer waits to be asked for"
+                window.try_find(tree.clone()).is_some(),
+                "drawn as it arrives"
             );
-            assert!(window.try_find(tree.clone()).is_none(), "nothing is drawn");
+            assert!(
+                window.try_find(format!("row{prefix}c0$[0]")).is_some(),
+                "open from the first row"
+            );
+            assert!(
+                window.try_find(format!("row{prefix}c0$[19999]")).is_none(),
+                "only the lines in view are built"
+            );
             window.click(format!("{prefix}-copy"), cx);
             window.render_frame(cx);
         })
@@ -2475,24 +2441,6 @@ mod macos {
             Some(20_000),
             "the header copies the whole answer"
         );
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.click(reveal.clone(), cx);
-            window.render_frame(cx);
-            assert!(
-                window.try_find(tree.clone()).is_some(),
-                "Show result draws it"
-            );
-            assert!(window.try_find(reveal.clone()).is_none());
-            assert!(
-                window.try_find(format!("row{prefix}c0$[0]")).is_some(),
-                "open from the first row"
-            );
-            assert!(
-                window.try_find(format!("row{prefix}c0$[19999]")).is_none(),
-                "only the lines in view are built"
-            );
-        })
-        .unwrap();
         cx.update(|cx| state.update(cx, |s, cx| s.disconnect(0, cx)));
         cx.run_until_parked();
     }
@@ -3427,7 +3375,166 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
+    /// TEMPORARY: frame timings over large results.
+    fn timing_flow() {
+        use mcp_store::{CallKind, CallRecord, CallStatus};
+        let mut cx = context();
+        let mut state = demo_state(true);
+        let server_id = state.servers[0].record.id.clone();
+        let call = |id: &str, name: &str, result: serde_json::Value| CallRecord {
+            id: id.into(),
+            server_id: server_id.clone(),
+            kind: CallKind::Tool,
+            name: name.into(),
+            args: json!({}),
+            result: Some(result),
+            status: CallStatus::Ok,
+            error: None,
+            elapsed_ms: 40,
+            at: time::OffsetDateTime::UNIX_EPOCH,
+        };
+        let rows = |n: usize| -> serde_json::Value {
+            serde_json::Value::Array((0..n).map(|i| json!({"id": i, "ok": true})).collect())
+        };
+        let text = |n: usize| json!({"content": [{"type": "text", "text": rows(n).to_string()}]});
+        let structured = |n: usize| {
+            let v = json!({"rows": rows(n)});
+            json!({"structuredContent": v, "content": [{"type": "text", "text": v.to_string()}]})
+        };
+        state.servers[0].push_call(call(
+            "call-base",
+            "baseline",
+            json!({"content": [{"type": "text", "text": "hi"}]}),
+        ));
+        state.servers[0].push_call(call("call-t1k", "text_1k", text(1_000)));
+        state.servers[0].push_call(call("call-t8k", "text_8k", text(8_000)));
+        state.servers[0].push_call(call("call-t100k", "text_100k", text(100_000)));
+        state.servers[0].push_call(call("call-s8k", "structured_8k", structured(8_000)));
+        let prose = |bytes: usize| {
+            let mut s = String::new();
+            let mut n = 1;
+            while s.len() < bytes {
+                s.push_str(&format!("Line {n}: the quick brown fox jumps over the lazy dog and reads the log again.\n"));
+                n += 1;
+            }
+            s
+        };
+        let plain = |bytes: usize| json!({"content": [{"type": "text", "text": prose(bytes)}]});
+        let md = |bytes: usize| {
+            let mut s = String::from("# Long\n\n");
+            let mut n = 1;
+            while s.len() < bytes {
+                s.push_str(&format!("## Section {n}\n\nParagraph {n} with **bold** and `code`.\n\n- one\n- two\n\n```json\n{{\"n\": {n}}}\n```\n\n"));
+                n += 1;
+            }
+            json!({"content": [{"type": "resource", "resource": {"uri": "mock://md/long", "mimeType": "text/markdown", "text": s}}]})
+        };
+        state.servers[0].push_call(call("call-p256", "plain_256k", plain(256 * 1024)));
+        state.servers[0].push_call(call("call-p2m", "plain_2m", plain(2 * 1024 * 1024)));
+        state.servers[0].push_call(call("call-m256", "markdown_256k", md(256 * 1024)));
+        let state = cx.update(|cx| cx.new(|_| state));
+        let state_for_window = state.clone();
+        let handle = cx
+            .open_window(size(px(1200.), px(760.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(state_for_window, window, cx));
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("mode", 3usize), cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        let cases: [(&str, &str, &str); 7] = [
+            ("baseline", "call-base", "c0"),
+            ("text_1k", "call-t1k", "c0"),
+            ("text_8k", "call-t8k", "c0"),
+            ("text_100k", "call-t100k", "c0"),
+            ("structured_8k", "call-s8k", "s"),
+            ("plain_2m", "call-p2m", "c0"),
+            ("markdown_256k", "call-m256", "c0"),
+        ];
+        for (name, id, tree) in cases {
+            let row = item_index(&mut cx, &state, name);
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("item", row), cx);
+                window.render_frame(cx);
+                let reveal = gpui_kit::SharedString::from(format!("hist:{id}-reveal"));
+                if window.try_find(reveal.clone()).is_some() {
+                    let t = std::time::Instant::now();
+                    window.click(reveal.clone(), cx);
+                    let clicked = t.elapsed();
+                    window.render_frame(cx);
+                    eprintln!(
+                        "TIMING {name:<14} first frame {:?} (click {clicked:?})",
+                        t.elapsed()
+                    );
+                }
+            })
+            .unwrap();
+            // Whatever the result parses in the background, let it finish.
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                    .unwrap();
+            }
+            cx.update_window(handle.into(), |_, window, cx| {
+                let time = |window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, label: &str| {
+                    let mut worst = std::time::Duration::ZERO;
+                    let frames: u32 = std::env::var("COCO_TIMING_FRAMES")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(10);
+                    let start = std::time::Instant::now();
+                    for _ in 0..frames {
+                        let t = std::time::Instant::now();
+                        window.render_frame(cx);
+                        worst = worst.max(t.elapsed());
+                    }
+                    let avg = start.elapsed() / frames;
+                    eprintln!("TIMING {name:<14} {label:<10} avg {avg:?} worst {worst:?}");
+                };
+                time(window, cx, "as drawn");
+                if name == "markdown_256k" {
+                    assert!(
+                        window
+                            .try_find(gpui_kit::SharedString::from(format!("hist:{id}c0mdbox")))
+                            .is_some(),
+                        "the document box is drawn"
+                    );
+                }
+                let root = format!("hist:{id}{tree}$");
+                let key = gpui_kit::SharedString::from(if tree == "c0" {
+                    root.clone()
+                } else {
+                    format!("{root}.rows")
+                });
+                if window.try_find(key.clone()).is_some() {
+                    window.click(key.clone(), cx);
+                    window.render_frame(cx);
+                    time(window, cx, "root folded");
+                    let deeper = gpui_kit::SharedString::from(format!("{key}[+2000]"));
+                    if false && window.try_find(deeper.clone()).is_some() {
+                        window.click(deeper.clone(), cx);
+                        window.render_frame(cx);
+                        time(window, cx, "4000 rows");
+                    }
+                }
+            })
+            .unwrap();
+            if name == "markdown_256k" {
+                snap(&mut cx, handle, "timing-markdown");
+            }
+        }
+    }
+
     pub fn run() {
+        if std::env::var_os("COCO_TIMING").is_some() {
+            timing_flow();
+            return;
+        }
         copy_and_export_flow();
         http_bearer_flow();
         add_server_flow();

@@ -158,7 +158,6 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
     let response = {
         let toggle = ws.collapse_toggle(cx);
         let prefix = ws.response_prefix(cx);
-        let revealed = ws.revealed.contains(&prefix);
         // Field by field, so the blob cache can be borrowed mutably beside them.
         let folds = Folds {
             collapsed: &ws.collapsed,
@@ -172,7 +171,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         let state = ws.state.read(cx);
         state.response().map(|r| {
             let shown = Shown::live(r).waiting(state.response_waiting());
-            response::render(shown, &prefix, revealed, &mut draw, cx)
+            response::render(shown, &prefix, &mut draw, cx)
         })
     };
     let key = ws.state.read(cx).response_key();

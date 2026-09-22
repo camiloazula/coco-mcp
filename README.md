@@ -345,9 +345,9 @@ are worth knowing:
   opened, the dialog shows the URL first, and nothing is opened without your
   answer. Links inside a Markdown response open in the browser when clicked.
 - A server can only claim what it returns; nothing it sends is executed
-  here. Responses larger than the drawing budget are held back until asked
-  for, lists are read for at most a thousand pages, and a child's stderr is
-  kept a line at a time.
+  here. A response of any size is drawn a screen at a time, lists are read
+  for at most a thousand pages, and a child's stderr is kept a line at a
+  time.
 
 ## The command-line mode
 

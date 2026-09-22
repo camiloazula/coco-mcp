@@ -143,18 +143,6 @@ pub fn compare_and_store(
     (Some(diff), error.map(|e| e.to_string()))
 }
 
-/// Each call with what its result lays out, measured where the calls were
-/// read, on the blocking pool, since a result may run to megabytes.
-pub fn measured(calls: Vec<CallRecord>) -> Vec<(CallRecord, usize)> {
-    calls
-        .into_iter()
-        .map(|call| {
-            let size = crate::views::stored_size(&call);
-            (call, size)
-        })
-        .collect()
-}
-
 /// A server's recorded calls once its stored history is read: the calls
 /// recorded this session while it was being read, and the stored ones, each
 /// once, newest first as the store lists them, at most [`MAX_HISTORY`].

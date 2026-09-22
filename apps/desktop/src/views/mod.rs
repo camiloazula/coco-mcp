@@ -35,10 +35,8 @@ mod workspace;
 pub use about::About;
 pub use add_server::AddServerForm;
 pub use call::Selection;
-pub use content::laid_out_size;
 pub use log_list::{LogList, fold_prefix};
 pub use request_answers::RequestUi;
-pub use response::{LARGE_RESULT_BYTES, stored_size};
 pub use workspace::Workspace;
 
 use std::rc::Rc;
