@@ -95,7 +95,10 @@ impl Render for Workspace {
             self.add_form = Some(form);
             self.add_form_target = wanted;
         }
-        let drawer_open = self.state.read(cx).drawer_open;
+        let (drawer_open, drawer_zoomed) = {
+            let s = self.state.read(cx);
+            (s.drawer_open, s.drawer_zoomed)
+        };
         let dialogs = Root::render_dialog_layer(window, cx);
         let sheets = Root::render_sheet_layer(window, cx);
         let notifications = Root::render_notification_layer(window, cx);
@@ -121,7 +124,18 @@ impl Render for Workspace {
         let palette = palette::render(self, window, cx);
         let copy_menu = copy_menu::render(cx);
         let header = log_drawer::header(self, cx);
-        let middle: AnyElement = if drawer_open {
+        let middle: AnyElement = if drawer_open && drawer_zoomed {
+            // The drawer alone between the title bar and the status bar; the
+            // columns keep their state and come back at the same sizes.
+            let body = log_drawer::body(self, window, cx);
+            v_flex()
+                .id("log-zoomed")
+                .size_full()
+                .child(header)
+                .child(body)
+                .test_support()
+                .into_any_element()
+        } else if drawer_open {
             let body = log_drawer::body(self, window, cx);
             v_resizable("rows")
                 .with_state(&self.rows)
@@ -156,6 +170,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_cancel))
             .on_action(cx.listener(|this, _: &ToggleLog, _, cx| {
                 this.state.update(cx, |s, cx| s.toggle_drawer(cx));
+            }))
+            .on_action(cx.listener(|this, _: &ZoomLog, _, cx| {
+                this.state.update(cx, |s, cx| s.toggle_drawer_zoom(cx));
             }))
             .on_action(cx.listener(|this, _: &ClearLog, _, cx| {
                 this.state.update(cx, |s, cx| s.clear_log(cx));

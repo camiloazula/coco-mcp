@@ -14,7 +14,7 @@ use crate::actions::{
     CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer, Disconnect,
     EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot, ForgetCredentials,
     ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts, ShowResources, ShowServer,
-    ShowTools, ToggleLog, ToggleTheme,
+    ShowTools, ToggleLog, ToggleTheme, ZoomLog,
 };
 use crate::state::{Mode, Status};
 use crate::views::Workspace;
@@ -68,7 +68,7 @@ pub fn render(
     }
     let state = ws.palette.clone()?;
     let t = *crate::theme::tokens(cx);
-    let (servers, selected, connected, mode, drawer_open, dark, spec) = {
+    let (servers, selected, connected, mode, drawer_open, drawer_zoomed, dark, spec) = {
         let s = ws.state.read(cx);
         (
             s.servers
@@ -79,6 +79,7 @@ pub fn render(
             s.server().is_some_and(|e| e.status == Status::Connected),
             s.mode,
             s.drawer_open,
+            s.drawer_zoomed,
             s.dark,
             s.server().map(|e| e.record.spec.clone()),
         )
@@ -174,11 +175,24 @@ pub fn render(
     let mut action_items = vec![
         item("Call", Call, &["run", "send", "read", "get", "replay"]),
         item(
-            if drawer_open { "Hide log" } else { "Show log" },
+            if drawer_open {
+                "Hide logs"
+            } else {
+                "Show logs"
+            },
             ToggleLog,
             &["log", "drawer", "events"],
         ),
-        item("Clear log", ClearLog, &["log"]),
+        item(
+            if drawer_zoomed {
+                "Zoom logs out"
+            } else {
+                "Zoom logs in"
+            },
+            ZoomLog,
+            &["log", "drawer", "zoom", "focus", "full"],
+        ),
+        item("Clear logs", ClearLog, &["log"]),
         item(
             if dark { "Light theme" } else { "Dark theme" },
             ToggleTheme,

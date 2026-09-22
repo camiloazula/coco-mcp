@@ -1,7 +1,7 @@
 //! Headless flows for how the window answers the keyboard and says what it
 //! cannot show: dialogs that take Enter and Esc, shortcuts a dialog holds
 //! back, empty lists and logs, display titles, the declared-schema tab and a
-//! replay that needs a session.
+//! replay that needs a session, and the log drawer zoomed and restored.
 
 use coco_mcp::calls::ResponseStatus;
 use coco_mcp::state::{AppState, Confirm, LogFilter, Mode, Screen, Status};
@@ -234,6 +234,59 @@ pub fn log_level_filter_flow() {
     live.ui(|_, _| {});
     snap(&mut live.cx, live.handle, "55-log-level-menu");
     live.ui(|window, cx| window.click("log-level", cx));
+}
+
+/// The zoomed drawer takes the columns' place until it is restored; hiding
+/// it drops the zoom; and Esc leaves the drawer as it is.
+pub fn log_zoom_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.call("echo", json!({"text": "read me in full"}));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
+
+    // ⌘⇧J on a hidden drawer shows it zoomed in one step.
+    live.ui(|window, cx| window.press("cmd-shift-j", cx));
+    live.wait("zoomed", |s| s.drawer_open && s.drawer_zoomed);
+    live.ui(|window, _| {
+        assert!(window.try_find("log-zoomed").is_some());
+        assert!(
+            window.try_find("add-server").is_none(),
+            "the columns are gone"
+        );
+    });
+    snap(&mut live.cx, live.handle, "61-log-zoomed");
+
+    // Esc closes nothing here.
+    live.ui(|window, cx| window.press("escape", cx));
+    live.ui(|window, _| assert!(window.try_find("log-zoomed").is_some()));
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert!(s.drawer_open && s.drawer_zoomed, "Esc leaves the drawer");
+    });
+
+    // The header's button restores the columns and keeps the drawer open.
+    live.ui(|window, cx| window.click("zoom-log", cx));
+    live.wait("restored", |s| s.drawer_open && !s.drawer_zoomed);
+    live.ui(|window, _| {
+        assert!(window.try_find("add-server").is_some());
+        assert!(window.try_find("clear-log").is_some(), "still open");
+    });
+
+    // Zoomed again, hiding the drawer drops the zoom, so ⌘J brings back the
+    // drawer at its height, not the whole window.
+    live.ui(|window, cx| window.click("zoom-log", cx));
+    live.wait("zoomed again", |s| s.drawer_zoomed);
+    live.ui(|window, cx| window.click("toggle-log", cx));
+    live.wait("hidden", |s| !s.drawer_open && !s.drawer_zoomed);
+    // Collapsed, the header keeps its two buttons: the toggle shows the
+    // drawer again at its height.
+    live.ui(|window, _| {
+        assert!(window.try_find("zoom-log").is_some());
+        assert!(window.try_find("toggle-log").is_some());
+        assert!(window.try_find("clear-log").is_none(), "Clear needs rows");
+    });
+    live.ui(|window, cx| window.click("toggle-log", cx));
+    live.wait("shown at its height", |s| s.drawer_open && !s.drawer_zoomed);
+    live.ui(|window, _| assert!(window.try_find("add-server").is_some()));
 }
 
 /// Double-clicking a server disconnects it when connected and connects it

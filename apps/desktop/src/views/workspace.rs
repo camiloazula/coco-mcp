@@ -20,7 +20,7 @@ use crate::actions::{
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, SelectServer, ShowHistory,
-    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleTheme, WORKSPACE,
+    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleTheme, WORKSPACE, ZoomLog,
 };
 use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
 use crate::theme::{self, tokens};
@@ -330,12 +330,11 @@ impl Workspace {
             self.cancel_request(cx);
             return;
         }
-        let showing_form = self.state.read(cx).screen == Screen::AddServer;
-        if showing_form {
+        // The drawer is not on this list: it opens and closes only by its
+        // own buttons, ⌘J and ⌘⇧J, so reading a log never ends by accident.
+        if self.state.read(cx).screen == Screen::AddServer {
             self.state.update(cx, |s, cx| s.cancel_add_server(cx));
             window.focus(&self.list_focus, cx);
-        } else if self.state.read(cx).drawer_open {
-            self.state.update(cx, |s, cx| s.toggle_drawer(cx));
         }
     }
 }

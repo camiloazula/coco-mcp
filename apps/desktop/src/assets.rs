@@ -9,7 +9,21 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Result, SharedString};
 
-gpui_kit::assets::icon_assets!(pub ExtraIcons, [Trash, Pencil, Copy, Download, Plug, Unplug]);
+gpui_kit::assets::icon_assets!(
+    pub ExtraIcons,
+    [
+        Trash,
+        Pencil,
+        Copy,
+        Download,
+        Plug,
+        Unplug,
+        Maximize2,
+        Minimize2,
+        PanelBottomClose,
+        PanelBottomOpen,
+    ]
+);
 
 /// The app's own SVGs, embedded by path.
 const BRAND: &[(&str, &[u8])] = &[
