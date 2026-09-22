@@ -84,8 +84,8 @@ fn snapshot_prints_tools_resources_prompts() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert!(tools.contains(&"echo"));
-    assert_eq!(snap["resources"].as_array().unwrap().len(), 5);
-    assert_eq!(snap["prompts"].as_array().unwrap().len(), 2);
+    assert_eq!(snap["resources"].as_array().unwrap().len(), 8);
+    assert_eq!(snap["prompts"].as_array().unwrap().len(), 3);
     assert_eq!(snap["digest"].as_str().unwrap().len(), 64);
 }
 
@@ -307,7 +307,7 @@ fn a_snapshot_missing_a_list_is_not_stored() {
     let stored = store.list_snapshots(&servers[0].id, 10).unwrap();
     assert_eq!(stored.len(), 1);
     let latest = store.get_snapshot(&stored[0].id).unwrap().unwrap().snapshot;
-    assert_eq!(latest.resources.len(), 5);
+    assert_eq!(latest.resources.len(), 8);
     assert!(latest.list_failures.is_empty());
     let _ = std::fs::remove_file(&db);
 }

@@ -489,8 +489,11 @@ artifacts, publishing nothing.
   `--stalled-resources`, `--ignore-pings`, `--paged-resources`) and tools
   (`progress`, `stderr`, `exit`, `elicit` with a `url`) give each unhappy
   path a test. `exit` only ends a server serving its own process over stdio.
-  `rows`, `text` and `markdown` return results as large as asked, for
-  trying the window against a long answer of each kind.
+  `rows`, `text` and `markdown` return results as large as asked, the
+  `long` prompt one message of `json`, `text` or `markdown`, and the
+  resources under `mock://big/` (three listed at 256 KB, and the template
+  `mock://big/{kind}/{kilobytes}` for any size) the same three kinds, for
+  trying the window against a long answer of every kind from every mode.
 - The mock server speaks both eras from one binary, over stdio and HTTP. On
   a 2026-07-28 request `elicit`, `sample` and `roots` answer `input_required`
   (`elicit` with `repeat` keeps asking, to reach the round limit), `bump` and
