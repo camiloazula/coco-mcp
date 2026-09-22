@@ -186,6 +186,29 @@ fn theme_config(name: &str, t: &Tokens, font: &str, mono: &str) -> serde_json::V
             "table.hover.background": hex(t.hover),
             "table.row.border": hex(t.hair),
             "window.border": hex(t.hair),
+        },
+        // The raw JSON editor's colours, the same the JSON trees use: keys
+        // in the foreground, strings and numbers in their tokens, and the
+        // punctuation, `null` and comments muted. Without this section the
+        // editor falls back to gpui-component's own palette, which is
+        // built for a white page.
+        "highlight": {
+            "editor.foreground": hex(t.fg),
+            "editor.background": hex(t.field),
+            "editor.active_line.background": hex(t.hover),
+            "editor.line_number": hex(t.muted),
+            "editor.active_line_number": hex(t.fg),
+            "editor.invisible": hex(t.hair),
+            "syntax": {
+                "property": { "color": hex(t.fg) },
+                "string": { "color": hex(t.str) },
+                "string.escape": { "color": hex(t.str) },
+                "number": { "color": hex(t.num) },
+                "boolean": { "color": hex(t.num) },
+                "constant": { "color": hex(t.muted) },
+                "punctuation": { "color": hex(t.muted) },
+                "comment": { "color": hex(t.muted) },
+            }
         }
     })
 }
@@ -292,6 +315,19 @@ mod tests {
         assert_eq!(hex(Tokens::dark().bg), "#161719");
         assert_eq!(hex(Tokens::light().accent), "#1f8f8f");
         assert_eq!(hex(Tokens::dark().sel), "#ffffff0d");
+    }
+
+    #[test]
+    fn both_themes_colour_the_editor_like_the_json_trees() {
+        for t in [Tokens::dark(), Tokens::light()] {
+            let config = theme_config("t", &t, "Inter", "Geist Mono");
+            let syntax = &config["highlight"]["syntax"];
+            assert_eq!(config["highlight"]["editor.foreground"], hex(t.fg));
+            assert_eq!(syntax["property"]["color"], hex(t.fg));
+            assert_eq!(syntax["string"]["color"], hex(t.str));
+            assert_eq!(syntax["number"]["color"], hex(t.num));
+            assert_eq!(syntax["punctuation"]["color"], hex(t.muted));
+        }
     }
 
     #[test]
