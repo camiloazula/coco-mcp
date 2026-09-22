@@ -17,7 +17,7 @@ use crate::actions::{
     CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
     Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
     ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts, ShowResources,
-    ShowServer, ShowTools, ToggleLog, ToggleTheme,
+    ShowServer, ShowTools, ToggleLog, ToggleTheme, ZoomLog,
 };
 use crate::state::{AppState, Status};
 use crate::views::about;
@@ -180,6 +180,7 @@ fn menu_bar(a: Available) -> Vec<Menu> {
                 MenuItem::action("Server", ShowServer),
                 MenuItem::separator(),
                 MenuItem::action("Toggle Log", ToggleLog),
+                MenuItem::action("Zoom Log", ZoomLog),
                 MenuItem::action("Toggle Theme", ToggleTheme),
                 MenuItem::action("Command Palette", CommandPalette),
             ],

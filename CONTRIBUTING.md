@@ -433,6 +433,14 @@ artifacts, publishing nothing.
   open, under the `Dialog` key context: Enter and `⌘⏎` accept, Esc cancels,
   and the window's shortcuts are bound to `NoAction` there, so they wait
   until it closes. Closing it gives focus back to the list.
+- The log drawer opens and closes only by its header buttons, `⌘J` and
+  `⌘⇧J`, the View menu and the palette, never by Esc: reading a log must not
+  end by accident. Zoomed (`drawer_zoomed`), it takes the columns' place
+  between the title bar and the status bar; the columns keep their sizes.
+  Hiding the drawer drops the zoom, so `⌘J` always brings back the drawer at
+  its height. The zoom and show/hide buttons stay in the collapsed header;
+  Clear, the filters and the level only show with rows. Neither flag is
+  persisted.
 - The log drawer follows its newest row (`FollowMode::Tail`) until it is
   scrolled up. The row a click toggles is scrolled to the top of the drawer,
   opened or closed (`LogList::sync`), within the same server's log only. A headless flow addresses rows near the end, or filters the

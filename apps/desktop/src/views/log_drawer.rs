@@ -1,4 +1,5 @@
-//! Bottom log drawer: 28px header always visible, 260px body when open.
+//! Bottom log drawer: 28px header always visible, 260px body when open, or
+//! the whole space between the title bar and the status bar when zoomed.
 //! Rows: `90 | 20 | 200 | 1fr | 60`, gap 12, height 24, mono 12px.
 //!
 //! The rows that pass the filter are indexed once per frame; each row drawn
@@ -21,7 +22,7 @@ use crate::theme::tokens;
 use crate::views::json::json_tree;
 use crate::views::log_list::{LogView, fold_prefix};
 use crate::views::log_menu::row_entries;
-use crate::views::{Workspace, kbd, mono};
+use crate::views::{Workspace, mono};
 
 mod row;
 
@@ -31,11 +32,13 @@ use row::*;
 /// ones a person switches between while watching a server.
 pub(crate) const LEVEL_CHOICES: [&str; 4] = ["debug", "info", "warning", "error"];
 
-/// The 28px header row (chevron, "Log", count, Clear, ⌘J).
+/// The 28px header row: chevron, "Log", count, and at the right the zoom and
+/// show/hide buttons, with the filters, the level and Clear while open.
 pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     let t = *tokens(cx);
     let state = ws.state.read(cx);
     let open = state.drawer_open;
+    let zoomed = state.drawer_zoomed;
     let active = state.log_filter;
     let level = state.features().get(Feature::LogLevel);
     // Messages, not rows: a reconnect's separator was never on the wire.
@@ -58,6 +61,35 @@ pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     };
     let entity = ws.state.clone();
     let clear = ws.state.clone();
+    let zoom = ws.state.clone();
+    let toggle = ws.state.clone();
+    // The icon buttons at the right, muted until hovered like the sidebar's:
+    // Clear is the bin, the zoom is the arrows going out, or coming back
+    // once zoomed, and the toggle is the panel with its bottom opening or
+    // closing. The zoom and the toggle stay while the drawer is collapsed.
+    let button = |id: &'static str, icon: gpui_kit::assets::IconName, caption: &'static str| {
+        div()
+            .id(id)
+            .p(px(2.))
+            .text_color(t.muted)
+            .hover(move |s| s.text_color(t.fg))
+            .cursor_pointer()
+            .tooltip(move |window, cx| Tooltip::new(caption).build(window, cx))
+            .child(Icon::new(icon).with_size(px(12.)).text_color(t.muted))
+    };
+    let (toggle_icon, toggle_caption) = if open {
+        (gpui_kit::assets::IconName::PanelBottomClose, "Hide logs")
+    } else {
+        (gpui_kit::assets::IconName::PanelBottomOpen, "Show logs")
+    };
+    let (zoom_icon, zoom_caption) = if zoomed {
+        (gpui_kit::assets::IconName::Minimize2, "Zoom out")
+    } else {
+        (
+            gpui_kit::assets::IconName::Maximize2,
+            "Zoom the log over the columns",
+        )
+    };
     // Hides log messages below the chosen level, those already shown too, and
     // asks a server that accepts it to send from that level. Rows without a
     // level (requests, stderr) always pass. The caption says which of the
@@ -131,36 +163,47 @@ pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
         .child("Log")
         .child(mono(cx, 11., count).text_color(t.muted))
         .child(div().flex_1())
-        .when(open, |el| {
-            // One group for the filters, Clear and the hint: a click anywhere
-            // inside it, including the gaps, must not reach the header toggle.
-            el.child(
-                h_flex()
-                    .id("log-controls")
-                    .h_full()
-                    .items_center()
-                    .gap(px(12.))
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(h_flex().gap(px(10.)).children(filters))
-                    .children(deprecated)
-                    .child(div().mr(px(12.)).child(levels))
-                    .child(
-                        div()
-                            .id("clear-log")
-                            .text_size(px(11.))
-                            .text_color(t.muted)
-                            .cursor_pointer()
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                clear.update(cx, |s, cx| s.clear_log(cx));
-                            })
-                            .child("Clear")
-                            .test_support(),
-                    )
-                    .child(kbd(cx, "⌘J"))
-                    .test_support(),
-            )
-        })
+        .child(
+            // One group for the filters, the level, Clear and the two
+            // buttons: a click anywhere inside it, including the gaps, must
+            // not reach the header toggle.
+            h_flex()
+                .id("log-controls")
+                .h_full()
+                .items_center()
+                .gap(px(12.))
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .when(open, |el| {
+                    el.child(h_flex().gap(px(10.)).children(filters))
+                        .children(deprecated)
+                        .child(div().mr(px(12.)).child(levels))
+                        .child(
+                            button("clear-log", gpui_kit::assets::IconName::Trash, "Clear logs")
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    clear.update(cx, |s, cx| s.clear_log(cx));
+                                })
+                                .test_support(),
+                        )
+                })
+                .child(
+                    button("zoom-log", zoom_icon, zoom_caption)
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            zoom.update(cx, |s, cx| s.toggle_drawer_zoom(cx));
+                        })
+                        .test_support(),
+                )
+                .child(
+                    button("toggle-log", toggle_icon, toggle_caption)
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            toggle.update(cx, |s, cx| s.toggle_drawer(cx));
+                        })
+                        .test_support(),
+                )
+                .test_support(),
+        )
         .test_support()
         .into_any_element()
 }

@@ -22,6 +22,8 @@ gpui_kit::actions!(
         DialogAccept,
         /// Show or hide the log drawer (⌘J).
         ToggleLog,
+        /// Zoom the log drawer over the columns, or restore them (⌘⇧J).
+        ZoomLog,
         /// Clear the log drawer.
         ClearLog,
         /// Open the command palette (⌘K).
@@ -103,10 +105,11 @@ pub const ITEM_LIST: &str = "ItemList";
 pub const DIALOG: &str = "Dialog";
 
 /// The window's shortcuts, inert while a dialog is open.
-const WINDOW_SHORTCUTS: [&str; 15] = [
+const WINDOW_SHORTCUTS: [&str; 16] = [
     "cmd-n",
     "cmd-.",
     "cmd-j",
+    "cmd-shift-j",
     "cmd-k",
     "cmd-1",
     "cmd-2",
@@ -137,6 +140,7 @@ pub fn bind(cx: &mut App) {
             KeyBinding::new("cmd-.", CancelCall, Some(WORKSPACE)),
             KeyBinding::new("escape", Cancel, Some(WORKSPACE)),
             KeyBinding::new("cmd-j", ToggleLog, Some(WORKSPACE)),
+            KeyBinding::new("cmd-shift-j", ZoomLog, Some(WORKSPACE)),
             KeyBinding::new("cmd-k", CommandPalette, Some(WORKSPACE)),
             KeyBinding::new("cmd-1", ShowTools, Some(WORKSPACE)),
             KeyBinding::new("cmd-2", ShowResources, Some(WORKSPACE)),

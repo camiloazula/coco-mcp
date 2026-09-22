@@ -87,7 +87,8 @@ use:
   (nested objects, arrays, enums, `oneOf`), or edit the raw JSON. Arguments
   are validated against the schema before they are sent.
 - **See** responses as collapsible JSON, text, Markdown or images, with
-  round-trip times, and every wire message in a filterable log drawer (`⌘J`),
+  round-trip times, and every wire message in a filterable log drawer (`⌘J`,
+  zoomed over the columns with `⌘⇧J`),
   where a row unfolds into the same tree as a response and, opened or
   closed, moves to the top of the drawer. A reconnect keeps
   the previous connection's messages above a separator, so the reason a
@@ -241,7 +242,8 @@ Keyboard:
 | `⌘⏎` | Call the tool, read the resource, get the prompt, or replay; in the server form, connect |
 | `⌘.` | Cancel the running request; the server is told |
 | `⌘1` … `⌘5` | Tools, Resources, Prompts, History, Server |
-| `⌘J` | Toggle the log drawer |
+| `⌘J` | Show or hide the log drawer (the panel button at the right of its header does the same, collapsed or not) |
+| `⌘⇧J` | Zoom the log drawer in over the columns, or out again (the arrows button does the same) |
 | `⌘R` / `⌘⇧R` | Connect or reconnect / disconnect (the plug on the server's row does the same) |
 | `⌘⌫` | Delete the selected server (asks first; the bin next to `+` does the same) |
 | `⌘⇧C` | Copy the whole response |
@@ -249,7 +251,7 @@ Keyboard:
 | `⌘Q` | Quit |
 | `↑` `↓` | Move in the focused list; `⏎` moves into the detail, or connects the selected server in the sidebar |
 | `⏎` / `Esc` | In a dialog: answer or confirm / cancel |
-| `Esc` | Close the copy menu, a confirmation, a pending server request, the palette, the server form or the drawer, whichever is open |
+| `Esc` | Close the copy menu, a confirmation, a pending server request, the palette or the server form, whichever is open; the log drawer stays |
 
 The application menu has "About Coco MCP", which opens a small
 window with the version, the commit and date it was built from, the licence,

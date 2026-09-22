@@ -797,6 +797,8 @@ pub struct AppState {
     pub filter: String,
     /// Whether the log drawer is expanded.
     pub drawer_open: bool,
+    /// Whether the open drawer covers the columns, for reading the log alone.
+    pub drawer_zoomed: bool,
     /// Id of the expanded row of the selected server's log.
     pub expanded_log: Option<u64>,
     /// Detail pane content.
@@ -974,6 +976,7 @@ impl AppState {
             selected_item: None,
             filter: String::new(),
             drawer_open: false,
+            drawer_zoomed: false,
             expanded_log: None,
             screen: Screen::Detail,
             dark: true,
@@ -1431,9 +1434,25 @@ impl AppState {
         }
     }
 
-    /// Expand or collapse the log drawer.
+    /// Expand or collapse the log drawer. Collapsing drops the zoom, so the
+    /// next expansion is the drawer at its height, not the whole window.
     pub fn toggle_drawer(&mut self, cx: &mut Context<Self>) {
         self.drawer_open = !self.drawer_open;
+        if !self.drawer_open {
+            self.drawer_zoomed = false;
+        }
+        self.changed(cx);
+    }
+
+    /// Zoom the log drawer over the columns, or restore them. A collapsed
+    /// drawer is expanded and zoomed in one step.
+    pub fn toggle_drawer_zoom(&mut self, cx: &mut Context<Self>) {
+        if self.drawer_open {
+            self.drawer_zoomed = !self.drawer_zoomed;
+        } else {
+            self.drawer_open = true;
+            self.drawer_zoomed = true;
+        }
         self.changed(cx);
     }
 
