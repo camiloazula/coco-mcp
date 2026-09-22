@@ -2556,6 +2556,17 @@ mod macos {
                 "its own scroll view"
             );
             assert!(window.try_find("call").is_some(), "the toolbar stays put");
+            // The separator settles where the short form ends, once the
+            // form has been measured, and the response has the rest.
+            for _ in 0..3 {
+                window.render_frame(cx);
+            }
+            let input = window.find("detail-input").bounds().size.height;
+            let response = window.find("response").bounds().size.height;
+            assert!(
+                input < response,
+                "a short form leaves the response the rest: {input:?} vs {response:?}"
+            );
         })
         .unwrap();
         let structured = cx.update(|cx| {

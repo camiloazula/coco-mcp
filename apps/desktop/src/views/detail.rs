@@ -59,7 +59,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         if ws.state.read(cx).history_reading() {
             return centered_note(cx, "Reading history…");
         }
-        return history::render(ws, cx)
+        return history::render(ws, window, cx)
             .unwrap_or_else(|| centered_note(cx, "Select a call to see it"));
     }
     match status {
@@ -182,7 +182,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         .size_full()
         .min_h_0()
         .children(pinned)
-        .child(split::render(ws, key, body, fills, response, cx))
+        .child(split::render(ws, key, body, fills, response, window, cx))
         .into_any_element()
 }
 

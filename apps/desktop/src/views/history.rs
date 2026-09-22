@@ -9,7 +9,7 @@ use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt as _, div, px,
+    StatefulInteractiveElement, Styled, TestSupportExt as _, Window, div, px,
 };
 use mcp_store::{CallKind, CallStatus};
 
@@ -43,7 +43,11 @@ pub(crate) fn when_label(at: time::OffsetDateTime) -> String {
 ///
 /// The record and its result are borrowed from the model, not copied, for
 /// as long as the row stays selected.
-pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElement> {
+pub fn render(
+    ws: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Option<AnyElement> {
     let t = *tokens(cx);
     // Both trees are keyed by the call id, so a replay keeps the folds.
     let toggle = ws.collapse_toggle(cx);
@@ -148,24 +152,22 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
         toggle: &toggle,
     };
     let sent = Rc::new(record.args.clone());
+    // The arguments take their rows, so a short call leaves the result the
+    // rest of the pane.
     let args_tree = json_tree_rc(
         sent.clone(),
         &folds,
         &format!("args:{}", record.id),
-        Fit::Fill,
+        Fit::Rows,
         cx,
     );
-    let args = v_flex().px(px(24.)).py(px(16.)).flex_1().min_h_0().child(
-        tree_section(
-            cx,
-            "ARGUMENTS",
-            SharedString::from(format!("args-copy:{}", record.id)),
-            sent,
-            args_tree,
-        )
-        .flex_1()
-        .min_h_0(),
-    );
+    let args = v_flex().px(px(24.)).py(px(16.)).child(tree_section(
+        cx,
+        "ARGUMENTS",
+        SharedString::from(format!("args-copy:{}", record.id)),
+        sent,
+        args_tree,
+    ));
     let mut draw = Draw {
         folds: &folds,
         decoded: &mut ws.decoded,
@@ -183,8 +185,9 @@ pub fn render(ws: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
                 ws,
                 key,
                 vec![args.into_any_element()],
-                true,
+                false,
                 Some(response),
+                window,
                 cx,
             ))
             .into_any_element(),

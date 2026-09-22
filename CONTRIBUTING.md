@@ -442,10 +442,15 @@ artifacts, publishing nothing.
 - The detail pane is split once a selection has a response: the header,
   description and toolbar stay put, and the input (form, arguments or
   declaration) and the response scroll each on their own, with a draggable
-  separator between them (`views/split.rs`). It starts halfway and is
-  remembered per selection, like folds, so the split that suits one tool's
-  form is not forced on another's; a deleted server or a cleared call takes
-  its splits with it. Before the first call the input has the whole pane.
+  separator between them (`views/split.rs`). The separator starts where a
+  scrolling input body ends (its height is read back from a canvas in the
+  scroll view and the panel resized to it, half the pane at most), so a
+  short form leaves the response the rest; a body that fills (the schema
+  tab, the raw editor) starts halfway. A resize the fit did not ask for is
+  the user's, and from then on the split is theirs. It is remembered per
+  selection, like folds, so the split that suits one tool's form is not
+  forced on another's; a deleted server or a cleared call takes its splits
+  with it. Before the first call the input has the whole pane.
 - A plain-text block of a response is a read-only text area
   (`views/plain.rs`, on gpui-kit's input engine): the text sits in a rope
   and only the lines in view are laid out, so a block of any length costs a
