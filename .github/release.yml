@@ -1,0 +1,20 @@
+# How GitHub groups the generated release notes: one section per label,
+# in this order. A PR without one of these labels lands under "Other", so
+# label every PR before merging; `skip-changelog` keeps one out entirely.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: New
+      labels:
+        - enhancement
+    - title: Fixed
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other
+      labels:
+        - "*"
