@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt as _, div, px,
@@ -16,7 +17,7 @@ use serde_json::{Map, Value};
 
 use crate::calls::{Response, ResponseStatus, Waiting};
 use crate::theme::tokens;
-use crate::views::content::{self, Draw, laid_out_size};
+use crate::views::content::{self, Body, Draw, laid_out_size};
 use crate::views::history::method;
 use crate::views::json::json_tree;
 use crate::views::{Workspace, accent_button, kbd, mono, muted};
@@ -181,6 +182,7 @@ pub fn render(
                 }))
                 .child(mono(cx, 11., elapsed).text_color(t.muted)),
         );
+    let mut fills = false;
     let body: AnyElement = match &shown.status {
         ResponseStatus::Pending => v_flex()
             .gap(px(4.))
@@ -217,7 +219,12 @@ pub fn render(
         }
         ResponseStatus::Ok | ResponseStatus::ToolError if held => show_result(prefix, cx),
         ResponseStatus::Ok | ResponseStatus::ToolError => {
-            content::body(shown.method, &shown.raw, prefix, draw, cx)
+            let Body {
+                element,
+                fills: full,
+            } = content::body(shown.method, &shown.raw, prefix, draw, cx);
+            fills = full;
+            element
         }
     };
     // Shown above the result, like the form's argument errors: a result the
@@ -233,7 +240,18 @@ pub fn render(
             .test_support()
     });
     // The header stays put; the body scrolls under it, apart from the input
-    // above the split.
+    // above the split. A body that fills (one text area) scrolls inside
+    // itself instead, and gets the whole height.
+    let column = v_flex()
+        .px(px(24.))
+        .pb(px(20.))
+        .gap(px(12.))
+        .font_family(cx.theme().mono_font_family.clone())
+        .text_size(px(12.))
+        .line_height(px(19.2))
+        .when(fills, |column| column.size_full().min_h_0())
+        .children(issues)
+        .child(body);
     v_flex()
         .id("response")
         .size_full()
@@ -246,18 +264,9 @@ pub fn render(
                 .id("response-body")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .child(
-                    v_flex()
-                        .px(px(24.))
-                        .pb(px(20.))
-                        .gap(px(12.))
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_size(px(12.))
-                        .line_height(px(19.2))
-                        .children(issues)
-                        .child(body),
-                )
+                .when(!fills, |body| body.overflow_y_scroll())
+                .when(fills, |body| body.flex().flex_col())
+                .child(column)
                 .test_support(),
         )
         .test_support()

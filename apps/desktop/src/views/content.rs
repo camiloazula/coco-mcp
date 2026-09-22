@@ -1,7 +1,9 @@
 //! The body of an answered request, drawn by what it holds: structured
 //! content and JSON text as trees, Markdown rendered, other text verbatim,
 //! and base64 blobs through `blob.rs`. A text block is parsed and copied
-//! once while it is drawn, in [`Decoded`], not on every frame.
+//! once while it is drawn, in [`Decoded`], not on every frame; plain text
+//! is a read-only text area (`plain.rs`), which lays out only the lines in
+//! view.
 
 use std::rc::Rc;
 
@@ -16,6 +18,7 @@ use crate::theme::tokens;
 use crate::views::blob::{blob_stem, render_blob};
 use crate::views::json::{Folds, json_tree, json_tree_rc};
 use crate::views::kept::Decoded;
+use crate::views::plain::PlainText;
 use crate::views::{labelled, muted, tree_section};
 
 mod blocks;
@@ -82,8 +85,16 @@ fn text_field<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
     value.get(name).and_then(Value::as_str)
 }
 
+/// A drawn body, and whether it takes the whole height it is given: a
+/// response that is one plain text block fills the response panel with its
+/// text area instead of scrolling the panel around it.
+pub struct Body {
+    pub element: AnyElement,
+    pub fills: bool,
+}
+
 /// The body of a `method` result, every element id under `prefix`.
-pub fn body(method: &str, raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyElement {
+pub fn body(method: &str, raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
     match method {
         "resources/read" => resource_body(raw, prefix, draw, cx),
         "prompts/get" => prompt_body(raw, prefix, draw, cx),
@@ -91,9 +102,15 @@ pub fn body(method: &str, raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &A
     }
 }
 
-fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyElement {
+fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
     let mut parts: Vec<AnyElement> = Vec::new();
+    let mut fills = false;
     let structured = raw.get("structuredContent");
+    let blocks = raw.get("content").and_then(Value::as_array);
+    // The one content block of a result with nothing else in it.
+    let lone = structured.is_none()
+        && blocks.is_some_and(|blocks| blocks.len() == 1)
+        && rest_fields(raw, &["content", "structuredContent"]).is_none();
     if let Some(value) = structured {
         let value = Rc::new(value.clone());
         let tree = json_tree_rc(value.clone(), draw.folds, &format!("{prefix}s"), cx);
@@ -108,7 +125,7 @@ fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyEle
             .into_any_element(),
         );
     }
-    if let Some(blocks) = raw.get("content").and_then(Value::as_array) {
+    if let Some(blocks) = blocks {
         for (i, block) in blocks.iter().enumerate() {
             let id = format!("{prefix}c{i}");
             // Servers commonly mirror structuredContent as a JSON text block; show it once.
@@ -121,7 +138,9 @@ fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyEle
             if duplicate {
                 continue;
             }
-            parts.push(content_block(block, &id, draw, cx));
+            let (block, plain) = content_block(block, &id, draw, lone, cx);
+            fills |= lone && plain;
+            parts.push(block);
         }
     }
     if parts.is_empty() {
@@ -135,19 +154,23 @@ fn tool_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyEle
             cx,
         ));
     }
-    v_flex().gap(px(12.)).children(parts).into_any_element()
+    blocks_column(parts, fills)
+}
+
+/// `parts` in a column; one that fills gives its height to its one block.
+fn blocks_column(parts: Vec<AnyElement>, fills: bool) -> Body {
+    let element = v_flex()
+        .gap(px(12.))
+        .when(fills, |column| column.size_full().min_h_0())
+        .children(parts)
+        .into_any_element();
+    Body { element, fills }
 }
 
 /// Whatever else a result carries (`isError`, `_meta`, vendor fields),
 /// which the reading of it above leaves out. The two defaults every result
 /// repeats, `isError: false` and `resultType: complete`, say nothing.
-fn other_fields(
-    raw: &Value,
-    shown: &[&str],
-    prefix: &str,
-    draw: &Draw<'_>,
-    cx: &App,
-) -> Option<AnyElement> {
+fn rest_fields(raw: &Value, shown: &[&str]) -> Option<serde_json::Map<String, Value>> {
     let rest: serde_json::Map<String, Value> = raw
         .as_object()?
         .iter()
@@ -158,9 +181,18 @@ fn other_fields(
         })
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    if rest.is_empty() {
-        return None;
-    }
+    (!rest.is_empty()).then_some(rest)
+}
+
+/// The tree of [`rest_fields`], when there are any.
+fn other_fields(
+    raw: &Value,
+    shown: &[&str],
+    prefix: &str,
+    draw: &Draw<'_>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let rest = rest_fields(raw, shown)?;
     let value = Rc::new(Value::Object(rest));
     let id = format!("{prefix}o");
     let tree = json_tree_rc(value.clone(), draw.folds, &id, cx);
@@ -176,20 +208,24 @@ fn other_fields(
     )
 }
 
-fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyElement {
+fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
     let contents = raw
         .get("contents")
         .and_then(Value::as_array)
         .filter(|contents| !contents.is_empty());
     let Some(contents) = contents else {
-        return json_tree(raw, draw.folds, prefix, cx);
+        return blocks_column(vec![json_tree(raw, draw.folds, prefix, cx)], false);
     };
     let mut parts: Vec<AnyElement> = Vec::new();
+    let mut fills = false;
+    let lone = contents.len() == 1 && rest_fields(raw, &["contents"]).is_none();
     for (i, c) in contents.iter().enumerate() {
         let mime = c.get("mimeType").and_then(Value::as_str).unwrap_or("");
         let p = format!("{prefix}x{i}");
         parts.push(if let Some(text) = c.get("text").and_then(Value::as_str) {
-            render_text(text, mime, &p, draw, cx)
+            let (text, plain) = render_text(text, mime, &p, draw, lone, cx);
+            fills |= lone && plain;
+            text
         } else if let Some(blob) = c.get("blob").and_then(Value::as_str) {
             render_blob(blob, mime, &blob_stem(c), &p, draw.decoded, cx)
         } else {
@@ -197,10 +233,10 @@ fn resource_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> An
         });
     }
     parts.extend(other_fields(raw, &["contents"], prefix, draw, cx));
-    v_flex().gap(px(12.)).children(parts).into_any_element()
+    blocks_column(parts, fills)
 }
 
-fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyElement {
+fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> Body {
     let t = *tokens(cx);
     let mut parts: Vec<AnyElement> = Vec::new();
     if let Some(desc) = raw.get("description").and_then(Value::as_str) {
@@ -225,7 +261,7 @@ fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyE
                         .text_color(t.muted)
                         .child(role.to_owned()),
                 )
-                .child(content_block(content, &format!("{prefix}m{i}"), draw, cx))
+                .child(content_block(content, &format!("{prefix}m{i}"), draw, false, cx).0)
                 .into_any_element(),
         );
     }
@@ -240,7 +276,7 @@ fn prompt_body(raw: &Value, prefix: &str, draw: &mut Draw<'_>, cx: &App) -> AnyE
             cx,
         ));
     }
-    v_flex().gap(px(12.)).children(parts).into_any_element()
+    blocks_column(parts, false)
 }
 
 #[cfg(test)]

@@ -3457,6 +3457,7 @@ mod macos {
         crate::interaction::log_level_filter_flow();
         crate::interaction::double_click_server_flow();
         crate::interaction::log_zoom_flow();
+        crate::interaction::plain_text_flow();
         crate::unhappy::failed_call_flow();
         crate::unhappy::crash_mid_session_flow();
         crate::unhappy::request_outcomes_flow();

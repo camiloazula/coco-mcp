@@ -65,8 +65,6 @@ struct Text {
     json: Option<Option<Rc<Value>>>,
     /// Whether the text is the JSON of the result's structuredContent.
     mirrors: Option<bool>,
-    /// The text as HTML that shows it verbatim.
-    html: Option<SharedString>,
 }
 
 /// The decoded blobs and parsed text blocks of the responses on screen, by
@@ -152,7 +150,6 @@ impl Decoded {
             shared: None,
             json: None,
             mirrors: None,
-            html: None,
         };
         match self.texts.entry(id.to_owned()) {
             Entry::Occupied(mut entry) => {
@@ -173,12 +170,20 @@ impl Decoded {
             .clone()
     }
 
-    /// `text`, drawn as `id`, as HTML that shows it verbatim, built once.
-    pub fn verbatim_html(&mut self, id: &str, text: &str) -> SharedString {
-        self.text(id, text)
-            .html
-            .get_or_insert_with(|| SharedString::from(verbatim_html(text)))
-            .clone()
+    /// A number that changes when `id` shows another text than it did, so
+    /// an element keeping its own copy of the text (a text area) can tell
+    /// without comparing them.
+    pub fn stamp(&mut self, id: &str, text: &str) -> u64 {
+        let fingerprint = self.text(id, text).fingerprint;
+        let mut hasher = DefaultHasher::new();
+        (
+            fingerprint.answer,
+            fingerprint.at,
+            fingerprint.len,
+            fingerprint.edges,
+        )
+            .hash(&mut hasher);
+        hasher.finish()
     }
 
     /// `text`, drawn as `id`, parsed once as JSON; `None` when it is not.
@@ -203,29 +208,6 @@ impl Decoded {
         self.text(id, text).mirrors = Some(mirrors);
         mirrors
     }
-}
-
-/// `text` as HTML that reads as the text itself: markup escaped, line breaks
-/// and runs of spaces kept. A text view renders HTML selectable, which plain
-/// text drawn as a string is not.
-fn verbatim_html(text: &str) -> String {
-    let mut html = String::with_capacity(text.len() + 16);
-    html.push_str("<p>");
-    let mut space = false;
-    for c in text.chars() {
-        match c {
-            '&' => html.push_str("&amp;"),
-            '<' => html.push_str("&lt;"),
-            '>' => html.push_str("&gt;"),
-            '"' => html.push_str("&quot;"),
-            '\n' => html.push_str("<br>"),
-            ' ' if space => html.push_str("&nbsp;"),
-            other => html.push(other),
-        }
-        space = c == ' ';
-    }
-    html.push_str("</p>");
-    html
 }
 
 #[cfg(test)]
@@ -287,10 +269,20 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_is_kept_verbatim_as_html() {
-        assert_eq!(
-            verbatim_html("a <b> & \"c\"\n  two  spaces"),
-            "<p>a &lt;b&gt; &amp; &quot;c&quot;<br> &nbsp;two &nbsp;spaces</p>"
+    fn a_stamp_follows_the_text_and_the_answer() {
+        let mut decoded = Decoded::default();
+        decoded.begin_frame();
+        decoded.answer(1);
+        let text = "plain words".to_owned();
+        let first = decoded.stamp("respc0", &text);
+        assert_eq!(first, decoded.stamp("respc0", &text), "the same text");
+        let other = "other words".to_owned();
+        assert_ne!(first, decoded.stamp("respc0", &other));
+        decoded.answer(2);
+        assert_ne!(
+            first,
+            decoded.stamp("respc0", &text),
+            "the same text in a newer answer"
         );
     }
 

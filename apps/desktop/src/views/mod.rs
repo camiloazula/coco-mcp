@@ -21,6 +21,7 @@ mod log_drawer;
 mod log_list;
 mod log_menu;
 mod palette;
+mod plain;
 mod prune;
 mod request_answers;
 pub mod request_dialog;

@@ -447,6 +447,15 @@ artifacts, publishing nothing.
   remembered per selection, like folds, so the split that suits one tool's
   form is not forced on another's; a deleted server or a cleared call takes
   its splits with it. Before the first call the input has the whole pane.
+- A plain-text block of a response is a read-only text area
+  (`views/plain.rs`, on gpui-kit's input engine): the text sits in a rope
+  and only the lines in view are laid out, so a block of any length costs a
+  frame the same, and it can be selected and copied. The text area is kept
+  by the block's element id while the block is drawn and its text set again
+  only when `kept::Decoded` stamps it as another text. A text that is the
+  whole response fills the response panel; beside other blocks it takes its
+  own rows, up to `plain::MAX_ROWS`, and scrolls inside. JSON text is still
+  a tree and Markdown still the text view.
 - The log drawer opens and closes only by its header buttons, `⌘J` and
   `⌘⇧J`, the View menu and the palette, never by Esc: reading a log must not
   end by accident. Zoomed (`drawer_zoomed`), it takes the columns' place

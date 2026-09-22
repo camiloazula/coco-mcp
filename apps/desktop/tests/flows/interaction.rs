@@ -236,6 +236,31 @@ pub fn log_level_filter_flow() {
     live.ui(|window, cx| window.click("log-level", cx));
 }
 
+/// A plain-text result is a read-only text area, whatever its length, and
+/// on its own it fills the response panel.
+pub fn plain_text_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.call("text", json!({"kilobytes": 8}));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
+    let lines = live.text().lines().count();
+    assert!(
+        lines > 40,
+        "{lines} lines, enough to need a scroll of its own"
+    );
+    let area = live.cx.update(|cx| {
+        let (server, mode, name) = live.state.read(cx).response_key().unwrap();
+        format!("resp:{server}:{mode:?}:{name}c0txt")
+    });
+    live.ui(|window, _| {
+        assert!(window.try_find(area.clone()).is_some(), "the text area");
+        assert!(
+            window.try_find("response-body").is_some(),
+            "under the response header"
+        );
+    });
+    snap(&mut live.cx, live.handle, "63-text-result");
+}
+
 /// The zoomed drawer takes the columns' place until it is restored; hiding
 /// it drops the zoom; and Esc leaves the drawer as it is.
 pub fn log_zoom_flow() {
