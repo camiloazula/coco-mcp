@@ -89,8 +89,8 @@ use:
 - **See** responses as collapsible JSON, text, Markdown or images, with
   round-trip times, and every wire message in a filterable log drawer (`⌘J`,
   zoomed over the columns with `⌘⇧J`),
-  where a row unfolds into the same tree as a response and, opened or
-  closed, moves to the top of the drawer. A reconnect keeps
+  where rows unfold, each on its own, into the same tree as a response,
+  and a toggled row moves to the top of the drawer. A reconnect keeps
   the previous connection's messages above a separator, so the reason a
   server stopped is still there.
 - **Answer** server-initiated requests: elicitation forms, sampling and

@@ -449,9 +449,13 @@ artifacts, publishing nothing.
   Clear, the filters and the level only show with rows. Neither flag is
   persisted.
 - The log drawer follows its newest row (`FollowMode::Tail`) until it is
-  scrolled up. The row a click toggles is scrolled to the top of the drawer,
-  opened or closed (`LogList::sync`), within the same server's log only. A headless flow addresses rows near the end, or filters the
-  log first, rather than a fixed index.
+  scrolled up. Rows open independently of each other (`expanded_log` is a
+  set of row ids), so a request reads beside its response. The row a click
+  toggles is scrolled to the top of the drawer, opened or closed
+  (`LogList::sync`), within the same server's log only; several rows
+  closing at once (Clear, the cap) scroll nothing. A headless flow
+  addresses rows near the end, or filters the log first, rather than a
+  fixed index.
 - The menu bar is rebuilt only when what the selected server allows changes
   (`menus::Available`); an item that cannot run is disabled, not hidden.
 - Calls are listed by `julianday(at)`, not by the text of `at`: RFC 3339

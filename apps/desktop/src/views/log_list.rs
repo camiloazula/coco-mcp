@@ -9,6 +9,8 @@
 //! frame and kept here as log indices, so drawing a row borrows it from the
 //! model rather than copying the log to find it.
 
+use std::collections::BTreeSet;
+
 use gpui_kit::{FollowMode, ListAlignment, ListOffset, ListState, px};
 
 use crate::state::{AppState, LogFilter};
@@ -40,8 +42,8 @@ pub struct LogList {
     end: u64,
     filter: LogFilter,
     min_level: Option<&'static str>,
-    /// Id of the expanded row.
-    expanded: Option<u64>,
+    /// Ids of the open rows.
+    expanded: BTreeSet<u64>,
     collapse_rev: u64,
 }
 
@@ -58,7 +60,7 @@ impl Default for LogList {
             end: 0,
             filter: LogFilter::All,
             min_level: None,
-            expanded: None,
+            expanded: BTreeSet::new(),
             collapse_rev: 0,
         }
     }
@@ -77,8 +79,8 @@ pub(crate) struct LogView {
     filter: LogFilter,
     /// Lowest server log level shown, when the level filter is on.
     min_level: Option<&'static str>,
-    /// Id of the expanded row.
-    expanded: Option<u64>,
+    /// Ids of the open rows.
+    expanded: BTreeSet<u64>,
 }
 
 impl LogView {
@@ -92,7 +94,7 @@ impl LogView {
             visible: state.visible_log(),
             filter: state.log_filter,
             min_level: state.log_min_level,
-            expanded: state.expanded_log,
+            expanded: state.expanded_log.clone(),
         }
     }
 }
@@ -136,31 +138,36 @@ impl LogList {
                 self.state.splice(kept..kept, count - kept);
             }
         }
-        // A toggled row changes height, and so does folding a node inside the
-        // open one: re-measure both the old and the new row.
+        // A toggled row changes height, and so does folding a node inside an
+        // open one: re-measure the toggled rows, and on a fold every open row.
         let position = |target: u64| {
             target
                 .checked_sub(log.first)
                 .and_then(|ix| usize::try_from(ix).ok())
                 .and_then(|ix| log.visible.binary_search(&ix).ok())
         };
-        if log.expanded != self.expanded || collapse_rev != self.collapse_rev {
-            for pos in [self.expanded, log.expanded]
-                .into_iter()
-                .flatten()
-                .filter_map(position)
-            {
-                self.state.splice(pos..pos + 1, 1);
-            }
+        let toggled: Vec<u64> = self
+            .expanded
+            .symmetric_difference(&log.expanded)
+            .copied()
+            .collect();
+        let remeasured: Vec<u64> = if collapse_rev != self.collapse_rev {
+            self.expanded.union(&log.expanded).copied().collect()
+        } else {
+            toggled.clone()
+        };
+        for pos in remeasured.into_iter().filter_map(position) {
+            self.state.splice(pos..pos + 1, 1);
         }
         // The row a click toggled starts at the top of the drawer, opened or
         // closed: a payload of many lines reads from its first, and closing
         // one leaves the eye on the row it was reading, not on whatever the
-        // rows below happen to have moved up to. Only within the same log:
-        // another server's list has nothing to do with the id.
+        // rows below happen to have moved up to. One row at a time: several
+        // closing at once is Clear or the cap, not a click. Only within the
+        // same log: another server's list has nothing to do with the id.
         if log.server == self.server
-            && log.expanded != self.expanded
-            && let Some(pos) = log.expanded.or(self.expanded).and_then(position)
+            && let [id] = toggled[..]
+            && let Some(pos) = position(id)
         {
             self.state.scroll_to(ListOffset {
                 item_ix: pos,
@@ -191,7 +198,7 @@ mod tests {
             visible: visible.to_vec(),
             filter: LogFilter::All,
             min_level: None,
-            expanded: None,
+            expanded: BTreeSet::new(),
         }
     }
 
@@ -213,7 +220,7 @@ mod tests {
         scroll(&list, 30);
         // Opening row 12 brings it to the top.
         let mut open = log("a", 0, 40, &(0..40).collect::<Vec<_>>());
-        open.expanded = Some(12);
+        open.expanded = [12].into();
         list.sync(open, 0);
         assert_eq!(top(&list), 12, "the opened row is the first drawn");
         // Scrolled away and closed again, it is the first drawn again.
@@ -222,11 +229,11 @@ mod tests {
         assert_eq!(top(&list), 12, "the closed row is the first drawn");
         // Folding a node inside an open row is not a toggle.
         let mut open = log("a", 0, 40, &(0..40).collect::<Vec<_>>());
-        open.expanded = Some(12);
+        open.expanded = [12].into();
         list.sync(open, 0);
         scroll(&list, 20);
         let mut same = log("a", 0, 40, &(0..40).collect::<Vec<_>>());
-        same.expanded = Some(12);
+        same.expanded = [12].into();
         list.sync(same, 1);
         assert_eq!(
             top(&list),
@@ -236,9 +243,27 @@ mod tests {
         // Another server's list is not scrolled by the id it carries over.
         scroll(&list, 5);
         let mut other = log("b", 0, 40, &(0..40).collect::<Vec<_>>());
-        other.expanded = Some(30);
+        other.expanded = [30].into();
         list.sync(other, 1);
         assert_ne!(top(&list), 30);
+    }
+
+    #[test]
+    fn rows_open_independently_and_only_a_click_scrolls() {
+        let mut list = LogList::default();
+        let all = || log("a", 0, 40, &(0..40).collect::<Vec<_>>());
+        let mut one = all();
+        one.expanded = [12].into();
+        list.sync(one, 0);
+        // A second row opens under the first, and is the one brought up.
+        let mut two = all();
+        two.expanded = [12, 30].into();
+        list.sync(two, 0);
+        assert_eq!(top(&list), 30, "the row just opened is the first drawn");
+        // Clear closes both at once: nothing to bring to the top.
+        scroll(&list, 5);
+        list.sync(all(), 0);
+        assert_eq!(top(&list), 5, "several rows closing is not a click");
     }
 
     #[test]

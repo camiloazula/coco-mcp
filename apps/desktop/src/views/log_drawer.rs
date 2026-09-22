@@ -257,7 +257,7 @@ pub fn body(ws: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace
                     });
             match drawn {
                 Some((server, log_ix, r)) => {
-                    let expanded = state.expanded_log == Some(r.row_id);
+                    let expanded = state.expanded_log.contains(&r.row_id);
                     row(log_ix, r, expanded, server, this, cx)
                 }
                 None => div().into_any_element(),
