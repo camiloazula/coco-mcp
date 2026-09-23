@@ -2609,6 +2609,17 @@ mod macos {
             "the copy confirmation expires"
         );
         snap(cx, handle, "07-tool-call");
+        // The raw editor takes the input panel above the response, as the
+        // form does; it is not sized by its content.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("tab-raw", cx);
+        })
+        .unwrap();
+        snap(cx, handle, "07-raw-above-response");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("tab-form", cx);
+        })
+        .unwrap();
 
         // Nested form for `complex`, then the Raw tab.
         let complex = item_index(cx, state, "complex");
