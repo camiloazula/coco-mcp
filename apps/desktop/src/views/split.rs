@@ -143,7 +143,13 @@ fn input_view(
             )
             .children(body)
             .into_any_element(),
-        None => div().w_full().children(body).into_any_element(),
+        // A body that fills is a column that hands the height down; a plain
+        // block would stop it here and the body would shrink to its content.
+        None => div()
+            .w_full()
+            .when(fills, |wrap| wrap.flex_1().min_h_0().flex().flex_col())
+            .children(body)
+            .into_any_element(),
     };
     div()
         .id("detail-input")
