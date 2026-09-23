@@ -58,6 +58,13 @@ impl FormModel {
         {
             return state;
         }
+        self.blank_state()
+    }
+
+    /// The type's zero value, whatever the schema default: what a nullable
+    /// node holds once the user turns its `null` into a value, and what an
+    /// optional field whose default is `null` gets when it is set.
+    pub fn blank_state(&self) -> FormState {
         match self {
             Self::Text { .. } => FormState::Text(String::new()),
             Self::Number { bounds, .. } => FormState::Number(zero_within(bounds, false)),
@@ -372,6 +379,13 @@ mod tests {
             values[8] = Some(FormState::Raw("{".into()));
         }
         assert_eq!(m.to_json(&state).unwrap_err().path, "$.raw");
+    }
+
+    #[test]
+    fn a_null_default_starts_null_and_blank_is_the_zero_value() {
+        let m = FormModel::from_schema(&json!({"type": ["string", "null"], "default": null}));
+        assert!(matches!(m.initial_state(), FormState::Null));
+        assert!(matches!(m.blank_state(), FormState::Text(s) if s.is_empty()));
     }
 
     #[test]

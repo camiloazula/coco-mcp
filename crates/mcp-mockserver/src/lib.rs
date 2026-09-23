@@ -34,7 +34,7 @@ pub mod http;
 pub mod legacy;
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -214,6 +214,100 @@ pub struct ComplexArgs {
     pub address: Option<Address>,
     /// Arbitrary JSON.
     pub metadata: Option<serde_json::Value>,
+}
+
+/// A string or a number, whichever the caller sends.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum StringOrNumber {
+    /// A string.
+    Text(String),
+    /// A number.
+    Number(i64),
+}
+
+/// A shape, told apart by its `kind`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Shape {
+    /// A circle.
+    Circle {
+        /// Its radius.
+        radius: f64,
+    },
+    /// A rectangle.
+    Rect {
+        /// Its width.
+        width: f64,
+        /// Its height.
+        height: f64,
+    },
+}
+
+/// Arguments for `kinds`: one field of every type the form draws, and the
+/// mixed cases a schema can state.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct KindsArgs {
+    /// A string.
+    pub text: String,
+    /// An integer or null, and required: the caller says which.
+    #[schemars(required, schema_with = "nullable_integer")]
+    pub score: Option<i32>,
+    /// A string or null, and null unless set.
+    #[serde(default)]
+    pub nickname: Option<String>,
+    /// A string or an integer.
+    pub id: StringOrNumber,
+    /// One of several object shapes, told apart by a tag.
+    pub shape: Shape,
+    /// A short lowercase word: a length, a pattern and a default.
+    #[serde(default = "default_word")]
+    #[schemars(length(min = 2, max = 8), regex(pattern = r"^[a-z]+$"))]
+    pub word: String,
+    /// An email address: a format.
+    #[schemars(email)]
+    pub email: String,
+    /// A URL: another format.
+    #[schemars(url)]
+    pub link: String,
+    /// An integer within bounds.
+    #[schemars(range(min = 1, max = 10))]
+    pub count: u8,
+    /// A number.
+    pub ratio: f64,
+    /// A boolean.
+    pub flag: bool,
+    /// A choice among constants.
+    pub role: UserRole,
+    /// A list of strings.
+    pub tags: Vec<String>,
+    /// A list of objects.
+    pub people: Vec<User>,
+    /// A map from names to numbers.
+    pub scores: HashMap<String, i32>,
+    /// A pair: a fixed-length array of mixed types, with a default.
+    #[serde(default = "default_pair")]
+    pub pair: (String, i32),
+    /// A nested object.
+    pub address: Address,
+    /// Anything: free JSON.
+    pub extra: serde_json::Value,
+}
+
+/// The schema of [`KindsArgs::score`]: `Option<i32>` would be optional and
+/// nullable, and `required` alone would drop the null; this keeps both.
+fn nullable_integer(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": ["integer", "null"], "format": "int32"})
+}
+
+/// The `word` of [`KindsArgs`] when not given.
+fn default_word() -> String {
+    "hello".into()
+}
+
+/// The `pair` of [`KindsArgs`] when not given.
+fn default_pair() -> (String, i32) {
+    ("a".into(), 1)
 }
 
 /// Arguments for `log`.
@@ -682,6 +776,37 @@ impl MockServer {
             args.tags.len(),
             args.address.is_some(),
             args.metadata.is_some()
+        )
+    }
+
+    /// Take one argument of every type a form can draw, and the mixed cases:
+    /// nullable, string or number, tagged shapes, lists, maps, pairs and
+    /// free JSON. Answers with what it understood.
+    #[tool]
+    fn kinds(&self, Parameters(args): Parameters<KindsArgs>) -> String {
+        format!(
+            "text={} word={} email={} link={} count={} ratio={} flag={} role={:?} nickname={:?} \
+             score={:?} id={:?} shape={:?} tags={} people={} scores={} pair=({}, {}) \
+             address={} extra={}",
+            args.text,
+            args.word,
+            args.email,
+            args.link,
+            args.count,
+            args.ratio,
+            args.flag,
+            args.role,
+            args.nickname,
+            args.score,
+            args.id,
+            args.shape,
+            args.tags.len(),
+            args.people.len(),
+            args.scores.len(),
+            args.pair.0,
+            args.pair.1,
+            args.address.city,
+            args.extra
         )
     }
 
