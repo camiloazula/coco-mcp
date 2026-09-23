@@ -1168,7 +1168,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "coco-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1186,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "coco-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -4546,7 +4546,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-auth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4566,7 +4566,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -4590,7 +4590,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-diff"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mcp-core",
  "mcp-mockserver",
@@ -4602,7 +4602,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-exchange"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mcp-core",
  "mcp-diff",
@@ -4614,7 +4614,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-mockserver"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -4634,7 +4634,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-schema-form"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jsonschema",
  "serde",
@@ -4644,7 +4644,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "directories",
  "mcp-core",
