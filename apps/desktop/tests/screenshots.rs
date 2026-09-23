@@ -38,7 +38,7 @@ mod macos {
     use coco_mcp::views::Workspace;
     use gpui_kit::component::Root;
     use gpui_kit::test::TestWindowExt as _;
-    use gpui_kit::{AppContext as _, HeadlessAppContext, px, size};
+    use gpui_kit::{AppContext as _, HeadlessAppContext, point, px, size};
     use mcp_core::{Direction, EventKind, EventSink, ServerSpec};
     use serde_json::json;
 
@@ -2609,6 +2609,43 @@ mod macos {
             "the copy confirmation expires"
         );
         snap(cx, handle, "07-tool-call");
+        // The separator between the input and the response follows a drag,
+        // and the fit that placed it does not snap it back.
+        let (x, boundary, before) = cx
+            .update_window(handle.into(), |_, window, _| {
+                let bounds = window.find("detail-input").bounds();
+                (bounds.center().x, bounds.bottom(), bounds.size.height)
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.drag(
+                point(x, boundary - px(2.)),
+                point(x, boundary + px(120.)),
+                cx,
+            );
+            window.render_frame(cx);
+        })
+        .unwrap();
+        let after = cx
+            .update_window(handle.into(), |_, window, _| {
+                window.find("detail-input").bounds().size.height
+            })
+            .unwrap();
+        assert!(
+            (after - before - px(120.)).abs() <= px(2.),
+            "dragging the separator moves it and it stays: {before:?} -> {after:?}"
+        );
+        // The raw editor takes the input panel above the response, as the
+        // form does; it is not sized by its content.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("tab-raw", cx);
+        })
+        .unwrap();
+        snap(cx, handle, "07-raw-above-response");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("tab-form", cx);
+        })
+        .unwrap();
 
         // Nested form for `complex`, then the Raw tab.
         let complex = item_index(cx, state, "complex");
