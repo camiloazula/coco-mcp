@@ -188,6 +188,18 @@ impl FormModel {
         }
     }
 
+    /// The kind as a user reads it: `string` for text, `boolean`, `json`
+    /// for a schema without a form, `one of` for alternatives.
+    pub fn kind_label(&self) -> &'static str {
+        match self.kind() {
+            "text" => "string",
+            "bool" => "boolean",
+            "one_of" => "one of",
+            "unknown" => "json",
+            other => other,
+        }
+    }
+
     /// Whether any node in the tree fell back to [`FormModel::Unknown`].
     pub fn has_unknown(&self) -> bool {
         match self {
