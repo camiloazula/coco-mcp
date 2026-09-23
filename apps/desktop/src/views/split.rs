@@ -207,6 +207,13 @@ fn fit(split: &Handles, window: &mut Window, cx: &mut Context<Workspace>) {
         .update(cx, |state, cx| state.resize_panel(0, wanted, window, cx));
 }
 
+/// The response panel under the split, and whether its body is shown or
+/// it is collapsed to its header.
+pub(crate) struct Panel {
+    pub element: AnyElement,
+    pub open: bool,
+}
+
 /// `body` above `response`, split by the separator of `key`; `body` alone,
 /// filling the pane, while there is no response. `fills` says the body
 /// takes the height it is given rather than scrolling in it.
@@ -215,23 +222,52 @@ pub(crate) fn render(
     key: Option<ResponseKey>,
     body: Vec<AnyElement>,
     fills: bool,
-    response: Option<AnyElement>,
+    response: Option<Panel>,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
-    let (Some(response), Some(key)) = (response, key) else {
+    let (
+        Some(Panel {
+            element: response,
+            open,
+        }),
+        Some(key),
+    ) = (response, key)
+    else {
         let input = input_view(body, fills, None);
         return div().flex_1().min_h_0().child(input).into_any_element();
     };
+    if !open {
+        // Collapsed to its header: the input has the rest of the pane, and
+        // the split keeps its sizes for when the response is shown again.
+        let input = input_view(body, fills, None);
+        return div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(input)
+            .child(response)
+            .into_any_element();
+    }
     let split = ws.splits.of(key, cx);
     fit(&split, window, cx);
     let input = input_view(body, fills, Some(split.input.clone()));
+    // The input can be dragged down to where the response keeps its header
+    // and a row, no further: past that the response would overflow the pane
+    // and take its header, the way back, with it.
+    let container = split.state.read(cx).container_size();
+    let input_max = if container > PANEL_MIN * 2. {
+        container - PANEL_MIN
+    } else {
+        Pixels::MAX
+    };
     let state = split.state;
     v_resizable("detail-split")
         .with_state(&state)
         .child(
             resizable_panel()
-                .size_range(PANEL_MIN..Pixels::MAX)
+                .size_range(PANEL_MIN..input_max)
                 // Halfway on the first frame; measured pixels, and then the
                 // drag, from the next.
                 .flex_basis(relative(0.5))

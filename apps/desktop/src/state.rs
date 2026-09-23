@@ -780,6 +780,9 @@ pub struct AppState {
     pub drawer_open: bool,
     /// Whether the open drawer covers the columns, for reading the log alone.
     pub drawer_zoomed: bool,
+    /// Whether the response panel shows its body under its header. Collapsed,
+    /// the header stays and the input has the rest of the pane.
+    pub response_open: bool,
     /// Ids of the open rows of the selected server's log. Rows open and
     /// close independently of each other.
     pub expanded_log: BTreeSet<u64>,
@@ -959,6 +962,7 @@ impl AppState {
             filter: String::new(),
             drawer_open: false,
             drawer_zoomed: false,
+            response_open: true,
             expanded_log: BTreeSet::new(),
             screen: Screen::Detail,
             dark: true,
@@ -1423,6 +1427,12 @@ impl AppState {
         if !self.drawer_open {
             self.drawer_zoomed = false;
         }
+        self.changed(cx);
+    }
+
+    /// Show the response panel's body, or collapse it to its header.
+    pub fn toggle_response(&mut self, cx: &mut Context<Self>) {
+        self.response_open = !self.response_open;
         self.changed(cx);
     }
 

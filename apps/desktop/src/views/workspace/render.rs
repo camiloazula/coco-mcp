@@ -174,6 +174,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomLog, _, cx| {
                 this.state.update(cx, |s, cx| s.toggle_drawer_zoom(cx));
             }))
+            .on_action(cx.listener(|this, _: &ToggleResponse, _, cx| {
+                this.state.update(cx, |s, cx| s.toggle_response(cx));
+            }))
             .on_action(cx.listener(|this, _: &ClearLog, _, cx| {
                 this.state.update(cx, |s, cx| s.clear_log(cx));
             }))

@@ -172,7 +172,8 @@ pub fn render(
         folds: &folds,
         decoded: &mut ws.decoded,
     };
-    let response = response::render(shown, &prefix, &mut draw, cx);
+    let open = ws.state.read(cx).response_open;
+    let response = response::render(shown, &prefix, &mut draw, open, cx);
     let key = ws.state.read(cx).response_key();
     Some(
         v_flex()
@@ -186,7 +187,10 @@ pub fn render(
                 key,
                 vec![args.into_any_element()],
                 false,
-                Some(response),
+                Some(split::Panel {
+                    element: response,
+                    open,
+                }),
                 window,
                 cx,
             ))

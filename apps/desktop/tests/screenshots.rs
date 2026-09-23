@@ -2635,6 +2635,32 @@ mod macos {
             (after - before - px(120.)).abs() <= px(2.),
             "dragging the separator moves it and it stays: {before:?} -> {after:?}"
         );
+        // The response collapses to its header, the input taking the height,
+        // and the header brings it back.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("toggle-response", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("response-body").is_none(),
+                "response collapsed"
+            );
+            assert!(
+                window.try_find("response-header").is_some(),
+                "its header stays"
+            );
+        })
+        .unwrap();
+        snap(cx, handle, "07-response-collapsed");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("response-header", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("response-body").is_some(),
+                "response shown again"
+            );
+        })
+        .unwrap();
+
         // The raw editor takes the input panel above the response, as the
         // form does; it is not sized by its content.
         cx.update_window(handle.into(), |_, window, cx| {

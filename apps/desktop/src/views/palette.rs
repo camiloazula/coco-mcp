@@ -14,7 +14,7 @@ use crate::actions::{
     CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer, Disconnect,
     EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot, ForgetCredentials,
     ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts, ShowResources, ShowServer,
-    ShowTools, ToggleLog, ToggleTheme, ZoomLog,
+    ShowTools, ToggleLog, ToggleResponse, ToggleTheme, ZoomLog,
 };
 use crate::state::{Mode, Status};
 use crate::views::Workspace;
@@ -68,7 +68,7 @@ pub fn render(
     }
     let state = ws.palette.clone()?;
     let t = *crate::theme::tokens(cx);
-    let (servers, selected, connected, mode, drawer_open, drawer_zoomed, dark, spec) = {
+    let (servers, selected, connected, mode, drawer_open, drawer_zoomed, response_open, dark, spec) = {
         let s = ws.state.read(cx);
         (
             s.servers
@@ -80,6 +80,7 @@ pub fn render(
             s.mode,
             s.drawer_open,
             s.drawer_zoomed,
+            s.response_open,
             s.dark,
             s.server().map(|e| e.record.spec.clone()),
         )
@@ -191,6 +192,15 @@ pub fn render(
             },
             ZoomLog,
             &["log", "drawer", "zoom", "focus", "full"],
+        ),
+        item(
+            if response_open {
+                "Hide response"
+            } else {
+                "Show response"
+            },
+            ToggleResponse,
+            &["response", "result", "answer", "panel"],
         ),
         item("Clear logs", ClearLog, &["log"]),
         item(
