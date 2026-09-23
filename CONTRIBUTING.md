@@ -205,6 +205,9 @@ it. Tags never move: a wrong release gets the next patch version.
 5. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
    tag's archive and checksum, for example with
    `brew bump-formula-pr --tag vX.Y.Z camiloazula/coco/coco-mcp`.
+6. The npm packages follow on their own: the workflow in
+   `camiloazula/coco-mcp-npm` publishes the latest release within the
+   hour, or at once when run by hand with the version.
 
 To rehearse the matrix without a tag, run the workflow by hand from the
 Actions tab: it builds every target and keeps the archives as workflow
