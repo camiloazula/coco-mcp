@@ -261,17 +261,25 @@ impl Builder<'_> {
                 options,
             };
         }
+        let labels: Vec<String> = models.iter().map(variant_label).collect();
+        // Two alternatives that read the same are told apart by their place.
+        let repeated: Vec<bool> = labels
+            .iter()
+            .map(|l| labels.iter().filter(|other| *other == l).count() > 1)
+            .collect();
         FormModel::OneOf {
             meta: meta_of(obj, nullable),
             variants: models
                 .into_iter()
+                .zip(labels)
+                .zip(repeated)
                 .enumerate()
-                .map(|(i, model)| Variant {
-                    label: model
-                        .meta()
-                        .title
-                        .clone()
-                        .unwrap_or_else(|| format!("{} {}", model.kind(), i + 1)),
+                .map(|(i, ((model, label), repeated))| Variant {
+                    label: if repeated {
+                        format!("{label} {}", i + 1)
+                    } else {
+                        label
+                    },
                     model,
                 })
                 .collect(),
@@ -428,6 +436,25 @@ fn bounds_of(obj: &Map<String, Value>) -> NumberBounds {
     }
 }
 
+/// What an alternative is called in the selector: its `title`; for an
+/// object, the one value of its tag field (`kind: {const: "circle"}`, the
+/// way tagged unions are written); otherwise its kind, as `string` or
+/// `integer`.
+fn variant_label(model: &FormModel) -> String {
+    if let Some(title) = &model.meta().title {
+        return title.clone();
+    }
+    if let FormModel::Object { fields, .. } = model
+        && let Some(tag) = fields.iter().find_map(|f| match &f.model {
+            FormModel::Enum { options, .. } if options.len() == 1 => Some(options[0].label.clone()),
+            _ => None,
+        })
+    {
+        return tag;
+    }
+    model.kind_label().to_owned()
+}
+
 fn label_of(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -538,7 +565,7 @@ mod tests {
         match FormModel::from_schema(&schema) {
             FormModel::OneOf { variants, .. } => {
                 assert_eq!(variants[0].label, "By id");
-                assert_eq!(variants[1].label, "object 2");
+                assert_eq!(variants[1].label, "object");
             }
             other => panic!("{other:?}"),
         }
@@ -548,9 +575,34 @@ mod tests {
     fn multiple_types_become_variants() {
         let schema = json!({"type": ["string", "integer"]});
         match FormModel::from_schema(&schema) {
-            FormModel::OneOf { variants, .. } => assert_eq!(variants.len(), 2),
+            FormModel::OneOf { variants, .. } => {
+                let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
+                assert_eq!(labels, ["string", "integer"]);
+            }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn variants_are_named_by_tag_kind_or_place() {
+        // Tagged objects take the tag's one value.
+        let shapes = json!({"oneOf": [
+            {"type": "object", "properties": {"kind": {"type": "string", "const": "circle"}, "radius": {"type": "number"}}, "required": ["kind"]},
+            {"type": "object", "properties": {"kind": {"type": "string", "enum": ["rect"]}, "width": {"type": "number"}}, "required": ["kind"]}
+        ]});
+        let labels = |schema: &Value| match FormModel::from_schema(schema) {
+            FormModel::OneOf { variants, .. } => {
+                variants.into_iter().map(|v| v.label).collect::<Vec<_>>()
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(labels(&shapes), ["circle", "rect"]);
+        // Untagged objects that read the same are numbered.
+        let plain = json!({"oneOf": [
+            {"type": "object", "properties": {"a": {"type": "string"}}},
+            {"type": "object", "properties": {"b": {"type": "string"}}}
+        ]});
+        assert_eq!(labels(&plain), ["object 1", "object 2"]);
     }
 
     #[test]

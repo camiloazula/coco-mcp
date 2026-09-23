@@ -3,13 +3,7 @@
 use super::*;
 
 pub(super) fn kind_label(model: &FormModel) -> &'static str {
-    match model.kind() {
-        "text" => "string",
-        "bool" => "boolean",
-        "one_of" => "one of",
-        "unknown" => "json",
-        other => other,
-    }
+    model.kind_label()
 }
 
 /// One form row: 140px mono label with required marker, then the control.
