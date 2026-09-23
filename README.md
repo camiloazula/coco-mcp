@@ -139,6 +139,17 @@ brew install camiloazula/coco/coco-mcp
 The tap lives at
 [camiloazula/homebrew-coco](https://github.com/camiloazula/homebrew-coco).
 
+**npm**, on macOS, Linux and Windows, runs the binary of the latest release
+without installing anything else; `npm install -g coco-mcp` keeps it:
+
+```bash
+npx coco-mcp
+```
+
+The package is a small shim over one binary package per platform, and
+nothing is compiled on install; it lives at
+[camiloazula/coco-mcp-npm](https://github.com/camiloazula/coco-mcp-npm).
+
 **The release archive**, on any platform including Windows: download the
 one for your system from
 [the latest release](https://github.com/camiloazula/coco-mcp/releases/latest),
