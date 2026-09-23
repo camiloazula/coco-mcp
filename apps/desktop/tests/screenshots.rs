@@ -2691,6 +2691,43 @@ mod macos {
             window.render_frame(cx);
         })
         .unwrap();
+        // Every type the form draws, with the mixed cases, on `kinds`.
+        let kinds = item_index(cx, state, "kinds");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click(("item", kinds), cx);
+        })
+        .unwrap();
+        snap(cx, handle, "08-kinds-form");
+        cx.update_window(handle.into(), |_, window, cx| {
+            // A required nullable field starts as an input with a `null`
+            // link; the link makes it null, and the null offers the value.
+            assert!(window.try_find("$.score").is_some(), "score is an input");
+            window.click("null$.score", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("$.score").is_none(), "score is null");
+            window.click("unnull$.score", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("$.score").is_some(),
+                "score is an input again"
+            );
+            // An optional field whose default is null is set to a value,
+            // not to its default.
+            assert!(
+                window.try_find("$.nickname").is_none(),
+                "nickname starts unset"
+            );
+            window.click("set$.nickname", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("$.nickname").is_some(),
+                "nickname is an input"
+            );
+            // Back to `complex`, which the steps below look at.
+            window.click(("item", complex), cx);
+        })
+        .unwrap();
+
         // The Schema tab: what the server declared about the tool, foldable.
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("tab-schema", cx);

@@ -61,6 +61,7 @@ impl ToolForm {
                                 this.restructure(cx, |s, _| set_field(s, &trail, None));
                             }))
                             .child("×")
+                            .test_support()
                             .into_any_element()
                     });
                     rows.push(row(
@@ -82,11 +83,18 @@ impl ToolForm {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.restructure(cx, |s, m| {
                                 if let Some(f) = field_model(m, &trail) {
-                                    set_field(s, &trail, Some(f.initial_state()));
+                                    // A default of null is no value to set; the
+                                    // blank one is.
+                                    let state = match f.initial_state() {
+                                        FormState::Null => f.blank_state(),
+                                        state => state,
+                                    };
+                                    set_field(s, &trail, Some(state));
                                 }
                             });
                         }))
-                        .child(format!("+ Set ({})", kind_label(&field.model)));
+                        .child(format!("+ Set ({})", kind_label(&field.model)))
+                        .test_support();
                     rows.push(row(
                         cx,
                         &field.name,
@@ -101,7 +109,71 @@ impl ToolForm {
         rows
     }
 
+    /// The control of one node. A nullable node carries a `null` link
+    /// beside its control, and, while it is null, the word and a link that
+    /// puts the type's blank value in its place.
     pub(super) fn node(
+        &mut self,
+        model: &FormModel,
+        state: &FormState,
+        path: &str,
+        label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if !model.meta().nullable {
+            return self.typed_node(model, state, path, label, window, cx);
+        }
+        let t = *tokens(cx);
+        let p = path.to_owned();
+        if let FormState::Null = state {
+            return h_flex()
+                .gap(px(8.))
+                .items_center()
+                .child(mono(cx, 12., "null".to_owned()).text_color(t.muted))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("unnull{path}")))
+                        .text_size(px(12.))
+                        .text_color(t.muted)
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let p = p.clone();
+                            this.restructure(cx, |s, m| {
+                                if let Some(blank) = model_at(m, &p).map(FormModel::blank_state) {
+                                    set_at(s, m, &p, blank);
+                                }
+                            });
+                        }))
+                        .child(format!("+ Set ({})", kind_label(model)))
+                        .test_support(),
+                )
+                .into_any_element();
+        }
+        let control = self.typed_node(model, state, path, label, window, cx);
+        h_flex()
+            .gap(px(8.))
+            .items_start()
+            .child(div().flex_1().min_w_0().child(control))
+            .child(
+                div()
+                    .id(SharedString::from(format!("null{path}")))
+                    .pt(px(6.))
+                    .text_size(px(11.))
+                    .text_color(t.muted)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let p = p.clone();
+                        this.restructure(cx, |s, m| set_at(s, m, &p, FormState::Null));
+                    }))
+                    .child("null")
+                    .test_support(),
+            )
+            .into_any_element()
+    }
+
+    /// The control of a node with a value, by its type.
+    fn typed_node(
         &mut self,
         model: &FormModel,
         state: &FormState,

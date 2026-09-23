@@ -92,6 +92,9 @@ pub(super) fn hints(model: &FormModel) -> String {
         let examples: Vec<String> = meta.examples.iter().map(Value::to_string).collect();
         parts.push(format!("e.g. {}", examples.join(", ")));
     }
+    if meta.nullable {
+        parts.push("or null".to_owned());
+    }
     if meta.deprecated {
         parts.push("deprecated".to_owned());
     }

@@ -232,9 +232,10 @@ async fn call_every_tool_with_generated_defaults() {
     for tool in &snap.tools {
         let model = FormModel::from_schema(&tool.input_schema);
         let args = model.default_json();
+        let errors = mcp_schema_form::validate(&tool.input_schema, &args);
         assert!(
-            mcp_schema_form::validate(&tool.input_schema, &args).is_empty(),
-            "{}: generated args {args} do not validate",
+            errors.is_empty(),
+            "{}: generated args {args} do not validate: {errors:?}",
             tool.name
         );
         let outcome = session
