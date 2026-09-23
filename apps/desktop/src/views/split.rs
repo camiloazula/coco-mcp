@@ -41,6 +41,11 @@ struct Split {
     /// The input panel's height the fit last asked for, so the resize it
     /// emits is told from a drag.
     fitted: Rc<Cell<Option<Pixels>>>,
+    /// The input body height the fit last placed the separator for. The fit
+    /// runs on every frame; once it has placed the separator for a height it
+    /// leaves it alone until the height changes, so a drag in progress is
+    /// not snapped back frame by frame.
+    fitted_for: Rc<Cell<Option<Pixels>>>,
     /// Whether the user dragged the separator, after which it is theirs.
     dragged: Rc<Cell<bool>>,
     _resized: Subscription,
@@ -53,6 +58,7 @@ struct Handles {
     state: Entity<ResizableState>,
     input: Rc<Cell<Option<Pixels>>>,
     fitted: Rc<Cell<Option<Pixels>>>,
+    fitted_for: Rc<Cell<Option<Pixels>>>,
     dragged: Rc<Cell<bool>>,
 }
 
@@ -92,6 +98,7 @@ impl Splits {
                 state,
                 input: Rc::new(Cell::new(None)),
                 fitted,
+                fitted_for: Rc::new(Cell::new(None)),
                 dragged,
                 _resized: resized,
             }
@@ -100,6 +107,7 @@ impl Splits {
             state: split.state.clone(),
             input: split.input.clone(),
             fitted: split.fitted.clone(),
+            fitted_for: split.fitted_for.clone(),
             dragged: split.dragged.clone(),
         }
     }
@@ -129,6 +137,11 @@ fn input_view(
     fills: bool,
     measured: Option<Rc<Cell<Option<Pixels>>>>,
 ) -> AnyElement {
+    // A body that fills reports no height: the last one measured would
+    // otherwise keep placing the separator for a body no longer shown.
+    if fills && let Some(measured) = &measured {
+        measured.set(None);
+    }
     let body: AnyElement = match measured.filter(|_| !fills) {
         Some(measured) => div()
             .relative()
@@ -171,6 +184,11 @@ fn fit(split: &Handles, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(height) = split.input.get() else {
         return;
     };
+    // Placed for this height already; where the separator is since is the
+    // user's business, drag in progress included.
+    if split.fitted_for.get() == Some(height) {
+        return;
+    }
     let (container, current) = {
         let state = split.state.read(cx);
         (state.container_size(), state.sizes().first().copied())
@@ -178,6 +196,7 @@ fn fit(split: &Handles, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(current) = current.filter(|_| container > px(0.)) else {
         return;
     };
+    split.fitted_for.set(Some(height));
     let wanted = (height + px(1.)).min(container / 2.).max(PANEL_MIN);
     if (current - wanted).abs() <= px(1.) {
         return;
