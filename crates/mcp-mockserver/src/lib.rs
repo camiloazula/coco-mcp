@@ -242,6 +242,40 @@ pub struct RowsArgs {
 /// Most rows one `rows` call returns.
 pub const MAX_ROWS: u32 = 100_000;
 
+/// Arguments for `text` and `markdown`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ProseArgs {
+    /// About how many kilobytes to return (default 256, at most
+    /// [`MAX_PROSE_KB`]).
+    #[serde(default)]
+    pub kilobytes: Option<u32>,
+}
+
+/// Most kilobytes one `text` or `markdown` call returns.
+pub const MAX_PROSE_KB: u32 = 8 * 1024;
+
+/// Kilobytes `text` and `markdown` return when not told how many.
+pub const DEFAULT_PROSE_KB: u32 = 256;
+
+/// URI prefix of the large resources: `mock://big/rows.json`,
+/// `mock://big/prose.txt` and `mock://big/readme.md` at [`DEFAULT_PROSE_KB`],
+/// and the template `mock://big/{kind}/{kilobytes}` for any size of `json`,
+/// `text` or `markdown`.
+pub const BIG_PREFIX: &str = "mock://big/";
+
+/// The kinds a large answer comes in.
+pub const BIG_KINDS: [&str; 3] = ["json", "text", "markdown"];
+
+/// Arguments for the `long` prompt.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LongArgs {
+    /// What the one message holds: `json`, `text` or `markdown`.
+    pub kind: String,
+    /// About how many kilobytes (default 256, at most [`MAX_PROSE_KB`]).
+    #[serde(default)]
+    pub kilobytes: Option<String>,
+}
+
 /// Arguments for `progress`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ProgressArgs {
@@ -525,6 +559,15 @@ impl MockServer {
             Resource::new(COUNTER_URI, "counter")
                 .with_description("Increments on every `bump` call; subscribable")
                 .with_mime_type("text/plain"),
+            Resource::new(format!("{BIG_PREFIX}rows.json"), "rows.json")
+                .with_description("A large JSON document")
+                .with_mime_type("application/json"),
+            Resource::new(format!("{BIG_PREFIX}prose.txt"), "prose.txt")
+                .with_description("A large plain text")
+                .with_mime_type("text/plain"),
+            Resource::new(format!("{BIG_PREFIX}readme.md"), "readme.md")
+                .with_description("A large Markdown document")
+                .with_mime_type("text/markdown"),
         ];
         if let Ok(extra) = self.extra_resources.lock() {
             resources.extend(extra.iter().map(|name| {
@@ -569,6 +612,9 @@ impl MockServer {
             other => {
                 if let Some(id) = other.strip_prefix("mock://item/") {
                     return Some(ResourceContents::text(format!("item {id}"), other));
+                }
+                if let Some(rest) = other.strip_prefix(BIG_PREFIX) {
+                    return big_resource(other, rest);
                 }
                 let name = other.strip_prefix(EXTRA_PREFIX)?;
                 let added = self
@@ -711,6 +757,27 @@ impl MockServer {
             .map(|id| serde_json::json!({"id": id, "ok": true}))
             .collect();
         serde_json::Value::Array(rows).to_string()
+    }
+
+    /// Return about `kilobytes` of plain text as one text block, so a client
+    /// can be tested against a long answer that is not JSON.
+    #[tool]
+    fn text(&self, Parameters(args): Parameters<ProseArgs>) -> String {
+        prose(prose_bytes(&args))
+    }
+
+    /// Return about `kilobytes` of Markdown as an embedded `text/markdown`
+    /// resource, so a client can be tested against a long rendered answer.
+    #[tool]
+    fn markdown(&self, Parameters(args): Parameters<ProseArgs>) -> CallToolResult {
+        CallToolResult::success(vec![ContentBlock::resource(
+            ResourceContents::TextResourceContents {
+                uri: "mock://md/long".into(),
+                mime_type: Some("text/markdown".into()),
+                text: markdown(prose_bytes(&args)),
+                meta: None,
+            },
+        )])
     }
 
     /// Report `steps` progress notifications against the request's progress
@@ -923,6 +990,26 @@ impl MockServer {
             PromptMessage::new_text(Role::User, args.text),
         ]
     }
+
+    /// One message of about `kilobytes` of `kind` (`json`, `text` or
+    /// `markdown`), to try a large prompt.
+    #[prompt]
+    fn long(&self, Parameters(args): Parameters<LongArgs>) -> Vec<PromptMessage> {
+        let kilobytes = args
+            .kilobytes
+            .as_deref()
+            .and_then(|kb| kb.trim().parse().ok());
+        let bytes = prose_bytes(&ProseArgs { kilobytes });
+        let block = match big_block(&args.kind, bytes, &format!("{BIG_PREFIX}long")) {
+            Some(block) => block,
+            None => ContentBlock::text(format!(
+                "unknown kind `{}`: one of {}",
+                args.kind,
+                BIG_KINDS.join(", ")
+            )),
+        };
+        vec![PromptMessage::new(Role::User, block)]
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -1028,6 +1115,10 @@ impl ServerHandler for MockServer {
             ResourceTemplate::new("mock://item/{id}", "item")
                 .with_description("An item by id")
                 .with_mime_type("text/plain"),
+            ResourceTemplate::new(format!("{BIG_PREFIX}{{kind}}/{{kilobytes}}"), "big")
+                .with_description(
+                    "About `kilobytes` of `json`, `text` or `markdown`, to try a large read",
+                ),
         ]))
     }
 
@@ -1108,7 +1199,8 @@ impl ServerHandler for MockServer {
     }
 
     /// Suggestions for the `greet` prompt's `name`, the `summarize` prompt's
-    /// `style` and the item template's `id`, filtered by what is typed.
+    /// `style`, the item template's `id` and the kind of a large answer,
+    /// filtered by what is typed.
     async fn complete(
         &self,
         request: CompleteRequestParams,
@@ -1123,6 +1215,10 @@ impl ServerHandler for MockServer {
             }
             (Reference::Resource(template), "id") if template.uri == "mock://item/{id}" => {
                 &["1", "2", "42"]
+            }
+            (Reference::Prompt(prompt), "kind") if prompt.name == "long" => &BIG_KINDS,
+            (Reference::Resource(template), "kind") if template.uri.starts_with(BIG_PREFIX) => {
+                &BIG_KINDS
             }
             _ => &[],
         };
@@ -1154,6 +1250,112 @@ fn is_modern(context: &RequestContext<RoleServer>) -> bool {
     context
         .protocol_version()
         .is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
+}
+
+/// The bytes `text` and `markdown` were asked for.
+fn prose_bytes(args: &ProseArgs) -> usize {
+    let kilobytes = args.kilobytes.unwrap_or(DEFAULT_PROSE_KB).min(MAX_PROSE_KB);
+    usize::try_from(kilobytes)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(1024)
+}
+
+/// At least `bytes` of JSON: an object with a count and its records.
+fn big_json(bytes: usize) -> String {
+    let mut text = String::with_capacity(bytes + 256);
+    text.push_str("{\"records\":[");
+    let mut id = 0;
+    while text.len() < bytes {
+        if id > 0 {
+            text.push(',');
+        }
+        text.push_str(&format!(
+            "{{\"id\":{id},\"name\":\"record {id}\",\"tags\":[\"a\",\"b\"],\"score\":{}.5,\"ok\":true}}",
+            id % 100
+        ));
+        id += 1;
+    }
+    text.push_str(&format!("],\"count\":{id}}}"));
+    text
+}
+
+/// About `bytes` of `kind` as a content block: JSON and text as text
+/// blocks, Markdown as an embedded `text/markdown` resource at `uri`.
+fn big_block(kind: &str, bytes: usize, uri: &str) -> Option<ContentBlock> {
+    Some(match kind {
+        "json" => ContentBlock::text(big_json(bytes)),
+        "text" => ContentBlock::text(prose(bytes)),
+        "markdown" => ContentBlock::resource(ResourceContents::TextResourceContents {
+            uri: uri.to_owned(),
+            mime_type: Some("text/markdown".into()),
+            text: markdown(bytes),
+            meta: None,
+        }),
+        _ => return None,
+    })
+}
+
+/// The large resource `uri`, whose path under [`BIG_PREFIX`] is `rest`: one
+/// of the three listed at the default size, or `{kind}/{kilobytes}`.
+fn big_resource(uri: &str, rest: &str) -> Option<ResourceContents> {
+    let (kind, kilobytes) = match rest {
+        "rows.json" => ("json", None),
+        "prose.txt" => ("text", None),
+        "readme.md" => ("markdown", None),
+        _ => {
+            let (kind, kb) = rest.split_once('/')?;
+            (kind, Some(kb.parse::<u32>().ok()?))
+        }
+    };
+    let bytes = prose_bytes(&ProseArgs { kilobytes });
+    let (mime, text) = match kind {
+        "json" => ("application/json", big_json(bytes)),
+        "text" => ("text/plain", prose(bytes)),
+        "markdown" => ("text/markdown", markdown(bytes)),
+        _ => return None,
+    };
+    Some(ResourceContents::TextResourceContents {
+        uri: uri.to_owned(),
+        mime_type: Some(mime.into()),
+        text,
+        meta: None,
+    })
+}
+
+/// At least `bytes` of numbered lines of plain text.
+fn prose(bytes: usize) -> String {
+    let mut text = String::with_capacity(bytes + 128);
+    let mut line = 1;
+    while text.len() < bytes {
+        text.push_str(&format!(
+            "Line {line}: the quick brown fox jumps over the lazy dog, \
+             then reads the log, checks the schema and calls the tool again.\n"
+        ));
+        line += 1;
+    }
+    text
+}
+
+/// At least `bytes` of Markdown: numbered sections with a paragraph, a
+/// list, a code block and a table each.
+fn markdown(bytes: usize) -> String {
+    let mut text = String::with_capacity(bytes + 512);
+    text.push_str("# A long document\n\n");
+    let mut section = 1;
+    while text.len() < bytes {
+        text.push_str(&format!(
+            "## Section {section}\n\n\
+             This is paragraph {section}, with **bold**, _italic_ and `code` in it, \
+             long enough to wrap in a column of ordinary width.\n\n\
+             - first point of section {section}\n\
+             - second point\n\
+             - third point, with a [link](https://example.com/{section})\n\n\
+             ```json\n{{\"section\": {section}, \"ok\": true}}\n```\n\n\
+             | key | value |\n|---|---|\n| section | {section} |\n| ok | true |\n\n"
+        ));
+        section += 1;
+    }
+    text
 }
 
 fn text_result(text: impl Into<String>) -> CallToolResponse {
@@ -1326,6 +1528,25 @@ mod tests {
         }
         assert!(server.read("mock://item/42").is_some());
         assert!(server.read("mock://nope").is_none());
+        // The large ones at any size, of the three kinds.
+        for (uri, mime) in [
+            ("mock://big/json/8", "application/json"),
+            ("mock://big/text/8", "text/plain"),
+            ("mock://big/markdown/8", "text/markdown"),
+        ] {
+            match server.read(uri) {
+                Some(ResourceContents::TextResourceContents {
+                    mime_type, text, ..
+                }) => {
+                    assert_eq!(mime_type.as_deref(), Some(mime), "{uri}");
+                    assert!(text.len() >= 8 * 1024, "{uri}");
+                }
+                other => panic!("{uri}: {other:?}"),
+            }
+        }
+        assert!(server.read("mock://big/csv/8").is_none(), "no such kind");
+        assert!(server.read("mock://big/json/lots").is_none(), "not a size");
+        assert!(big_block("csv", 8, "mock://big/long").is_none());
     }
 
     #[test]
@@ -1347,6 +1568,40 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "echo"));
         assert!(server.read("mock://text/hello").is_some());
         assert!(server.read("mock://item/42").is_some());
+    }
+
+    #[test]
+    fn prose_and_markdown_reach_the_size_asked_for() {
+        let asked = 64 * 1024;
+        let plain = prose(asked);
+        assert!(
+            plain.len() >= asked && plain.len() < asked + 256,
+            "{}",
+            plain.len()
+        );
+        assert!(plain.starts_with("Line 1: "));
+        let md = markdown(asked);
+        assert!(md.len() >= asked && md.len() < asked + 1024, "{}", md.len());
+        assert!(md.starts_with("# A long document"));
+        assert!(md.contains("## Section 2"));
+        let json = big_json(asked);
+        assert!(
+            json.len() >= asked && json.len() < asked + 256,
+            "{}",
+            json.len()
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed["records"].as_array().map(Vec::len),
+            parsed["count"].as_u64().map(|n| n as usize),
+            "counted and well formed"
+        );
+        let default = ProseArgs { kilobytes: None };
+        assert_eq!(prose_bytes(&default), 256 * 1024);
+        let capped = ProseArgs {
+            kilobytes: Some(u32::MAX),
+        };
+        assert_eq!(prose_bytes(&capped), 8 * 1024 * 1024);
     }
 
     #[test]

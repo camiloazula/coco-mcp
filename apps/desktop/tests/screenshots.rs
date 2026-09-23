@@ -2165,10 +2165,6 @@ mod macos {
                 ] {
                     ws.collapsed.insert(key);
                 }
-                ws.unfolded.insert(format!("resp:{id}:Tools:log$"));
-                ws.unfolded.insert(format!("resp:{quiet}:Tools:log$"));
-                ws.revealed.insert(format!("resp:{id}:Tools:log"));
-                ws.revealed.insert("hist:call-chatty".to_owned());
             });
         });
         // A request the server is waiting on when it is deleted.
@@ -2210,24 +2206,22 @@ mod macos {
             assert!(s.responses.get(&elicit).is_none());
             assert!(!s.responses.is_pending(&elicit));
             let ws = workspace.read(cx);
-            for keys in [&ws.collapsed, &ws.unfolded, &ws.revealed] {
-                assert!(
-                    keys.iter()
-                        .all(|k| !k.contains(&id) && !k.contains("call-chatty")),
-                    "{keys:?}"
-                );
-            }
+            assert!(
+                ws.collapsed
+                    .iter()
+                    .all(|k| !k.contains(&id) && !k.contains("call-chatty")),
+                "{:?}",
+                ws.collapsed
+            );
             assert!(ws.collapsed.contains(&format!("schema:{quiet}:log$")));
-            assert!(ws.unfolded.contains(&format!("resp:{quiet}:Tools:log$")));
         })
         .unwrap();
     }
 
-    /// A result too large to draw waits for Show result with its size in the
-    /// header, and a tree longer than the line budget starts with its later
-    /// containers folded, which still open, fold again and copy.
+    /// A large result is drawn as soon as it is selected: every container of
+    /// its tree open, only the lines in view built, and the tree scrolls,
+    /// folds and copies.
     fn large_result_flow() {
-        use coco_mcp::views::LARGE_RESULT_BYTES;
         use mcp_store::{CallKind, CallRecord, CallStatus};
 
         let mut cx = context();
@@ -2245,14 +2239,11 @@ mod macos {
             elapsed_ms: 40,
             at: time::OffsetDateTime::UNIX_EPOCH,
         };
-        // Twenty thousand rows, led by an index long enough that the line
-        // budget folds it as well.
+        // Twenty thousand rows, led by an index longer than a screen.
         let rows: Vec<_> = (0..20_000).map(|i| json!({"id": i, "ok": true})).collect();
         let large = json!({"ids": (0..2_100).collect::<Vec<_>>(), "rows": rows});
-        assert!(mcp_exchange::json_size(&large) > LARGE_RESULT_BYTES);
         // Three thousand numbers: small in bytes, long in lines.
         let small = json!({"values": (0..3_000).collect::<Vec<_>>()});
-        assert!(mcp_exchange::json_size(&small) < LARGE_RESULT_BYTES);
         state.servers[0].push_call(call("call-large", "list_rows", large));
         state.servers[0].push_call(call("call-small", "list_values", small));
 
@@ -2271,63 +2262,43 @@ mod macos {
         })
         .unwrap();
 
-        let reveal = "hist:call-large-reveal";
         let root = "hist:call-large$";
         let large_row = item_index(&mut cx, &state, "list_rows");
+        let row = |i: usize| format!("rowhist:call-large$.rows[{i}]");
+        let ids = "hist:call-large$.ids";
+        let first_id = "rowhist:call-large$.ids[0]";
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(("item", large_row), cx);
             window.render_frame(cx);
-            assert!(
-                window.try_find(reveal).is_some(),
-                "a large result waits to be asked for"
-            );
-            assert!(window.try_find(root).is_none(), "nothing of it is drawn");
-        })
-        .unwrap();
-        // The header gives the size, measured once for the recorded call.
-        let measured = cx.update(|cx| {
-            state
-                .read(cx)
-                .servers
-                .iter()
-                .find_map(|s| s.result_size("call-large"))
-        });
-        assert!(
-            measured.is_some_and(|size| size > LARGE_RESULT_BYTES),
-            "{measured:?}"
-        );
-        snap(&mut cx, handle, "37-large-result");
-
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.click(reveal, cx);
-            window.render_frame(cx);
-            assert!(
-                window.try_find(root).is_some(),
-                "Show result draws the tree"
-            );
-            assert!(window.try_find(reveal).is_none());
-            assert!(
-                window.try_find("hist:call-large-folded").is_some(),
-                "the tree says how much the budget folded"
-            );
-            // Both lists are past the budget. Opening the index draws its
-            // first entry; folding it again hides it.
-            let ids = "hist:call-large$.ids";
-            let first = "rowhist:call-large$.ids[0]";
-            assert!(window.try_find(first).is_none(), "folded by the budget");
+            assert!(window.try_find(root).is_some(), "drawn as selected");
+            // Every container starts open, and only the lines in view are
+            // built: the index fills the panel, and the rows are below it.
+            assert!(window.try_find(first_id).is_some());
+            assert!(window.try_find(row(0)).is_none(), "out of view");
+            assert!(window.try_find(row(19_999)).is_none());
+            // Folding the index brings the rows up; opening it again does
+            // the reverse.
             window.click(ids, cx);
             window.render_frame(cx);
-            assert!(window.try_find(first).is_some(), "a budget fold opens");
+            assert!(window.try_find(first_id).is_none(), "folded");
+            assert!(
+                window.try_find(row(0)).is_some(),
+                "the rows follow the folded index"
+            );
+            assert!(window.try_find(row(19_999)).is_none(), "still out of view");
             window.click(ids, cx);
             window.render_frame(cx);
-            assert!(window.try_find(first).is_none(), "and folds again");
+            assert!(window.try_find(first_id).is_some(), "open again");
+            assert!(window.try_find(row(0)).is_none());
+            window.click(ids, cx);
+            window.render_frame(cx);
             window.right_click("rowhist:call-large$.rows", cx);
             window.render_frame(cx);
         })
         .unwrap();
         let entries = cx
             .update(|cx| coco_mcp::clip::menu(cx))
-            .expect("a folded line still has its copy menu")
+            .expect("a line has its copy menu")
             .0;
         let path = entries
             .iter()
@@ -2336,61 +2307,63 @@ mod macos {
         assert_eq!(path.as_deref(), Some("$.rows"));
         cx.update(coco_mcp::clip::close_menu);
 
-        // Opening the twenty thousand rows paints a budget of them, not all,
-        // and the line under them paints the next budget.
+        // A wheel brings the end of the rows into view, and folding the rows
+        // takes them all away.
         let rows = "hist:call-large$.rows";
-        let row = |i: usize| format!("rowhist:call-large$.rows[{i}]");
-        let more = |from: usize| format!("hist:call-large$.rows[+{from}]");
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click(rows, cx);
-            window.render_frame(cx);
-            assert!(window.try_find(row(0)).is_some(), "the fold opens");
-            assert!(window.try_find(row(1_999)).is_some());
-            assert!(window.try_find(row(2_000)).is_none(), "a budget of rows");
-            assert!(window.try_find(row(19_999)).is_none(), "not all of them");
-            assert!(window.try_find(more(2_000)).is_some());
-            let bottom = gpui_kit::point(px(0.), px(-400_000.));
+            let bottom = gpui_kit::point(px(0.), px(-4_000_000.));
             window.scroll(row(0), gpui_kit::ScrollDelta::Pixels(bottom), cx);
-            window.click(more(2_000), cx);
             window.render_frame(cx);
-            assert!(window.try_find(row(2_000)).is_some(), "the next budget");
-            assert!(window.try_find(row(3_999)).is_some());
-            assert!(window.try_find(row(4_000)).is_none());
-            assert!(window.try_find(more(4_000)).is_some());
-            let top = gpui_kit::point(px(0.), px(400_000.));
-            window.scroll(row(2_000), gpui_kit::ScrollDelta::Pixels(top), cx);
+            assert!(
+                window.try_find(row(19_999)).is_some(),
+                "scrolled to the end"
+            );
+            assert!(
+                window.try_find(row(0)).is_none(),
+                "the start is out of view"
+            );
+            let top = gpui_kit::point(px(0.), px(4_000_000.));
+            window.scroll(row(19_999), gpui_kit::ScrollDelta::Pixels(top), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(row(0)).is_some(), "and back");
             window.click(rows, cx);
             window.render_frame(cx);
-            assert!(window.try_find(row(0)).is_none(), "and folds again");
+            assert!(window.try_find(row(0)).is_none(), "folded");
+            assert!(window.try_find(rows).is_some(), "on its one line");
         })
         .unwrap();
+        snap(&mut cx, handle, "37-large-result");
 
-        // A result small in bytes is drawn at once, folded by the budget.
+        // A result small in bytes is drawn at once, every container open,
+        // and still only as far as the view reaches.
         let small_row = item_index(&mut cx, &state, "list_values");
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(("item", small_row), cx);
             window.render_frame(cx);
             assert!(window.try_find("hist:call-small$").is_some());
-            assert!(window.try_find("hist:call-small-folded").is_some());
-            assert!(window.try_find("hist:call-small-reveal").is_none());
+            assert!(window.try_find("rowhist:call-small$.values[0]").is_some());
+            assert!(
+                window
+                    .try_find("rowhist:call-small$.values[2999]")
+                    .is_none(),
+                "only the lines in view are built"
+            );
         })
         .unwrap();
-        // Show result is remembered for the row, like its folds.
+        // The folds are remembered for the row.
         cx.update_window(handle.into(), |_, window, cx| {
             window.click(("item", large_row), cx);
             window.render_frame(cx);
             assert!(window.try_find(root).is_some(), "still shown");
-            assert!(window.try_find(reveal).is_none());
+            assert!(window.try_find(row(0)).is_none(), "still folded");
         })
         .unwrap();
     }
 
-    /// A tool whose answer is too large to draw, called live: the response
-    /// waits for Show result with its size measured on the runtime, still
-    /// copies whole, and once shown is drawn folded by the line budget.
+    /// A tool with a large answer, called live: the response is drawn as it
+    /// arrives, open from its first row, and copies whole.
     fn live_large_result_flow() {
         use coco_mcp::calls::ResponseStatus;
-        use coco_mcp::views::LARGE_RESULT_BYTES;
         use std::time::Duration;
 
         let mock = mock_binary();
@@ -2436,22 +2409,25 @@ mod macos {
             wait_for_response(&mut cx, handle, &state),
             ResponseStatus::Ok
         );
-        let (prefix, size) = cx.update(|cx| {
-            let s = state.read(cx);
-            let (server, mode, name) = s.response_key().unwrap();
-            let size = s.response().unwrap().size;
-            (format!("resp:{server}:{mode:?}:{name}"), size)
+        let prefix = cx.update(|cx| {
+            let (server, mode, name) = state.read(cx).response_key().unwrap();
+            format!("resp:{server}:{mode:?}:{name}")
         });
-        assert!(size > LARGE_RESULT_BYTES, "{size}");
-        let reveal = format!("{prefix}-reveal");
         let tree = format!("{prefix}c0$");
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(
-                window.try_find(reveal.clone()).is_some(),
-                "a large answer waits to be asked for"
+                window.try_find(tree.clone()).is_some(),
+                "drawn as it arrives"
             );
-            assert!(window.try_find(tree.clone()).is_none(), "nothing is drawn");
+            assert!(
+                window.try_find(format!("row{prefix}c0$[0]")).is_some(),
+                "open from the first row"
+            );
+            assert!(
+                window.try_find(format!("row{prefix}c0$[19999]")).is_none(),
+                "only the lines in view are built"
+            );
             window.click(format!("{prefix}-copy"), cx);
             window.render_frame(cx);
         })
@@ -2465,20 +2441,6 @@ mod macos {
             Some(20_000),
             "the header copies the whole answer"
         );
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.click(reveal.clone(), cx);
-            window.render_frame(cx);
-            assert!(
-                window.try_find(tree.clone()).is_some(),
-                "Show result draws it"
-            );
-            assert!(window.try_find(reveal.clone()).is_none());
-            assert!(
-                window.try_find(format!("{prefix}c0-folded")).is_some(),
-                "the tree says how much the budget folded"
-            );
-        })
-        .unwrap();
         cx.update(|cx| state.update(cx, |s, cx| s.disconnect(0, cx)));
         cx.run_until_parked();
     }
@@ -2570,6 +2532,12 @@ mod macos {
             window.render_frame(cx);
             window.click(("item", add), cx);
             window.render_frame(cx);
+            // Before the first call the form has the whole pane to itself.
+            assert!(window.try_find("detail-input").is_some());
+            assert!(
+                window.try_find("response").is_none(),
+                "nothing to split yet"
+            );
             window.click("$.a", cx);
             window.input("2", cx);
             window.click("$.b", cx);
@@ -2578,6 +2546,29 @@ mod macos {
         })
         .unwrap();
         assert_eq!(wait_for_response(cx, handle, state), ResponseStatus::Ok);
+        // Answered, the pane splits: the form and the response each scroll
+        // on their own under the pinned header and toolbar.
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("detail-input").is_some());
+            assert!(
+                window.try_find("response-body").is_some(),
+                "its own scroll view"
+            );
+            assert!(window.try_find("call").is_some(), "the toolbar stays put");
+            // The separator settles where the short form ends, once the
+            // form has been measured, and the response has the rest.
+            for _ in 0..3 {
+                window.render_frame(cx);
+            }
+            let input = window.find("detail-input").bounds().size.height;
+            let response = window.find("response").bounds().size.height;
+            assert!(
+                input < response,
+                "a short form leaves the response the rest: {input:?} vs {response:?}"
+            );
+        })
+        .unwrap();
         let structured = cx.update(|cx| {
             state.read(cx).response().unwrap().raw["structuredContent"]["value"].clone()
         });
@@ -2669,7 +2660,7 @@ mod macos {
             window.render_frame(cx);
             let server_id = state.read(cx).servers[0].record.id.clone();
             let root = format!("schema:{server_id}:complex$");
-            let props = format!("{root}.properties");
+            let props = format!("{root}.$defs");
             assert!(window.try_find(root.clone()).is_some(), "schema tree shown");
             assert!(
                 window.try_find(props.clone()).is_some(),
@@ -2779,6 +2770,21 @@ mod macos {
             state.read(cx).response().unwrap().raw["messages"][0]["content"]["text"].clone()
         });
         assert!(text.as_str().unwrap().contains("Ada"), "{text}");
+        // A prompt's one message fills the response panel, like a tool's
+        // one text block.
+        let message = cx.update(|cx| {
+            let (server, mode, name) = state.read(cx).response_key().unwrap();
+            format!("resp:{server}:{mode:?}:{name}m0txt")
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find(message).is_some(),
+                "the message's text area"
+            );
+        })
+        .unwrap();
+        snap(cx, handle, "65-prompt-answer");
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("log-header", cx);
             window.render_frame(cx);
@@ -3395,7 +3401,166 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
+    /// TEMPORARY: frame timings over large results.
+    fn timing_flow() {
+        use mcp_store::{CallKind, CallRecord, CallStatus};
+        let mut cx = context();
+        let mut state = demo_state(true);
+        let server_id = state.servers[0].record.id.clone();
+        let call = |id: &str, name: &str, result: serde_json::Value| CallRecord {
+            id: id.into(),
+            server_id: server_id.clone(),
+            kind: CallKind::Tool,
+            name: name.into(),
+            args: json!({}),
+            result: Some(result),
+            status: CallStatus::Ok,
+            error: None,
+            elapsed_ms: 40,
+            at: time::OffsetDateTime::UNIX_EPOCH,
+        };
+        let rows = |n: usize| -> serde_json::Value {
+            serde_json::Value::Array((0..n).map(|i| json!({"id": i, "ok": true})).collect())
+        };
+        let text = |n: usize| json!({"content": [{"type": "text", "text": rows(n).to_string()}]});
+        let structured = |n: usize| {
+            let v = json!({"rows": rows(n)});
+            json!({"structuredContent": v, "content": [{"type": "text", "text": v.to_string()}]})
+        };
+        state.servers[0].push_call(call(
+            "call-base",
+            "baseline",
+            json!({"content": [{"type": "text", "text": "hi"}]}),
+        ));
+        state.servers[0].push_call(call("call-t1k", "text_1k", text(1_000)));
+        state.servers[0].push_call(call("call-t8k", "text_8k", text(8_000)));
+        state.servers[0].push_call(call("call-t100k", "text_100k", text(100_000)));
+        state.servers[0].push_call(call("call-s8k", "structured_8k", structured(8_000)));
+        let prose = |bytes: usize| {
+            let mut s = String::new();
+            let mut n = 1;
+            while s.len() < bytes {
+                s.push_str(&format!("Line {n}: the quick brown fox jumps over the lazy dog and reads the log again.\n"));
+                n += 1;
+            }
+            s
+        };
+        let plain = |bytes: usize| json!({"content": [{"type": "text", "text": prose(bytes)}]});
+        let md = |bytes: usize| {
+            let mut s = String::from("# Long\n\n");
+            let mut n = 1;
+            while s.len() < bytes {
+                s.push_str(&format!("## Section {n}\n\nParagraph {n} with **bold** and `code`.\n\n- one\n- two\n\n```json\n{{\"n\": {n}}}\n```\n\n"));
+                n += 1;
+            }
+            json!({"content": [{"type": "resource", "resource": {"uri": "mock://md/long", "mimeType": "text/markdown", "text": s}}]})
+        };
+        state.servers[0].push_call(call("call-p256", "plain_256k", plain(256 * 1024)));
+        state.servers[0].push_call(call("call-p2m", "plain_2m", plain(2 * 1024 * 1024)));
+        state.servers[0].push_call(call("call-m256", "markdown_256k", md(256 * 1024)));
+        let state = cx.update(|cx| cx.new(|_| state));
+        let state_for_window = state.clone();
+        let handle = cx
+            .open_window(size(px(1200.), px(760.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(state_for_window, window, cx));
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("mode", 3usize), cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        let cases: [(&str, &str, &str); 7] = [
+            ("baseline", "call-base", "c0"),
+            ("text_1k", "call-t1k", "c0"),
+            ("text_8k", "call-t8k", "c0"),
+            ("text_100k", "call-t100k", "c0"),
+            ("structured_8k", "call-s8k", "s"),
+            ("plain_2m", "call-p2m", "c0"),
+            ("markdown_256k", "call-m256", "c0"),
+        ];
+        for (name, id, tree) in cases {
+            let row = item_index(&mut cx, &state, name);
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("item", row), cx);
+                window.render_frame(cx);
+                let reveal = gpui_kit::SharedString::from(format!("hist:{id}-reveal"));
+                if window.try_find(reveal.clone()).is_some() {
+                    let t = std::time::Instant::now();
+                    window.click(reveal.clone(), cx);
+                    let clicked = t.elapsed();
+                    window.render_frame(cx);
+                    eprintln!(
+                        "TIMING {name:<14} first frame {:?} (click {clicked:?})",
+                        t.elapsed()
+                    );
+                }
+            })
+            .unwrap();
+            // Whatever the result parses in the background, let it finish.
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                    .unwrap();
+            }
+            cx.update_window(handle.into(), |_, window, cx| {
+                let time = |window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, label: &str| {
+                    let mut worst = std::time::Duration::ZERO;
+                    let frames: u32 = std::env::var("COCO_TIMING_FRAMES")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(10);
+                    let start = std::time::Instant::now();
+                    for _ in 0..frames {
+                        let t = std::time::Instant::now();
+                        window.render_frame(cx);
+                        worst = worst.max(t.elapsed());
+                    }
+                    let avg = start.elapsed() / frames;
+                    eprintln!("TIMING {name:<14} {label:<10} avg {avg:?} worst {worst:?}");
+                };
+                time(window, cx, "as drawn");
+                if name == "markdown_256k" {
+                    assert!(
+                        window
+                            .try_find(gpui_kit::SharedString::from(format!("hist:{id}c0mdbox")))
+                            .is_some(),
+                        "the document box is drawn"
+                    );
+                }
+                let root = format!("hist:{id}{tree}$");
+                let key = gpui_kit::SharedString::from(if tree == "c0" {
+                    root.clone()
+                } else {
+                    format!("{root}.rows")
+                });
+                if window.try_find(key.clone()).is_some() {
+                    window.click(key.clone(), cx);
+                    window.render_frame(cx);
+                    time(window, cx, "root folded");
+                    let deeper = gpui_kit::SharedString::from(format!("{key}[+2000]"));
+                    if false && window.try_find(deeper.clone()).is_some() {
+                        window.click(deeper.clone(), cx);
+                        window.render_frame(cx);
+                        time(window, cx, "4000 rows");
+                    }
+                }
+            })
+            .unwrap();
+            if name == "markdown_256k" {
+                snap(&mut cx, handle, "timing-markdown");
+            }
+        }
+    }
+
     pub fn run() {
+        if std::env::var_os("COCO_TIMING").is_some() {
+            timing_flow();
+            return;
+        }
         copy_and_export_flow();
         http_bearer_flow();
         add_server_flow();
@@ -3439,6 +3604,8 @@ mod macos {
         crate::interaction::log_level_filter_flow();
         crate::interaction::double_click_server_flow();
         crate::interaction::log_zoom_flow();
+        crate::interaction::plain_text_flow();
+        crate::interaction::markdown_result_flow();
         crate::unhappy::failed_call_flow();
         crate::unhappy::crash_mid_session_flow();
         crate::unhappy::request_outcomes_flow();

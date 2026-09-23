@@ -280,7 +280,6 @@ pub struct ServerEntry {
     history_load: HistoryLoad,
     /// What each listed call's result lays out, in bytes, by call id:
     /// measured off the GPUI thread, where the call was read or answered.
-    result_sizes: HashMap<String, usize>,
     /// The text the History filter matches, by call id, built once per call
     /// when its row is first listed and dropped with the call.
     search_text: RefCell<HashMap<String, Rc<str>>>,
@@ -349,7 +348,6 @@ impl ServerEntry {
             diff_expanded: false,
             history: Vec::new(),
             history_load: HistoryLoad::Read,
-            result_sizes: HashMap::new(),
             search_text: RefCell::new(HashMap::new()),
             history_waiters: Vec::new(),
             rev: 0,
@@ -498,12 +496,6 @@ impl ServerEntry {
             .collect()
     }
 
-    /// What the result of the listed call `id` lays out, when it was measured
-    /// where it was read or answered.
-    pub fn result_size(&self, id: &str) -> Option<usize> {
-        self.result_sizes.get(id).copied()
-    }
-
     /// Put a recorded call at the top of the history, keeping
     /// [`MAX_HISTORY`] rows. A call already listed stays listed once: the
     /// stored history may have been read after the call was written.
@@ -511,24 +503,13 @@ impl ServerEntry {
         if self.history.iter().any(|call| call.id == record.id) {
             return;
         }
-        // A call answered or read in the background arrives measured; one put
-        // here directly (a demo's) is measured once, as it is listed.
-        self.result_sizes
-            .entry(record.id.clone())
-            .or_insert_with(|| crate::views::stored_size(&record));
         self.history.insert(0, record);
-        let kept = self.history.len().min(MAX_HISTORY);
-        for call in self.history.drain(kept..) {
-            self.result_sizes.remove(&call.id);
-        }
+        self.history.truncate(MAX_HISTORY);
         self.rev += 1;
     }
 
     /// Replace the recorded calls, newest first.
     pub(crate) fn set_history(&mut self, calls: Vec<CallRecord>) {
-        let listed: HashSet<&str> = calls.iter().map(|call| call.id.as_str()).collect();
-        self.result_sizes
-            .retain(|id, _| listed.contains(id.as_str()));
         self.history = calls;
         self.rev += 1;
     }
@@ -1510,7 +1491,6 @@ impl AppState {
                     .cloned()
                     .collect();
                 entry.set_history(kept);
-                entry.result_sizes.remove(&call);
                 state.responses.forget_call(&id, &call);
                 if was_selected {
                     state.selected_item = None;
@@ -2873,7 +2853,6 @@ impl AppState {
             move || {
                 store
                     .list_calls(Some(&server), MAX_HISTORY)
-                    .map(persistence::measured)
                     .map_err(|e| e.to_string())
             },
             move |state, stored, cx| {
@@ -2887,7 +2866,7 @@ impl AppState {
 
     /// List the stored calls of server `id` beside the calls recorded while
     /// they were read. A failed read is reported and not tried again.
-    fn finish_history_load(&mut self, id: &str, stored: Result<Vec<(CallRecord, usize)>, String>) {
+    fn finish_history_load(&mut self, id: &str, stored: Result<Vec<CallRecord>, String>) {
         // The server may have been deleted while its calls were read.
         let Some(pos) = self.servers.iter().position(|s| s.record.id == id) else {
             return;
@@ -2900,14 +2879,6 @@ impl AppState {
         let waiters = std::mem::take(&mut entry.history_waiters);
         match stored {
             Ok(stored) => {
-                let (stored, sizes): (Vec<_>, Vec<_>) = stored
-                    .into_iter()
-                    .map(|(call, size)| {
-                        let id = call.id.clone();
-                        (call, (id, size))
-                    })
-                    .unzip();
-                entry.result_sizes.extend(sizes);
                 let session = std::mem::take(&mut entry.history);
                 entry.set_history(persistence::merge_history(session, stored));
             }
@@ -2923,19 +2894,6 @@ impl AppState {
         for waiter in waiters {
             let _ = waiter.send(());
         }
-    }
-
-    /// [`AppState::push_history`] for a call answered this session, whose
-    /// result was measured on the runtime as `size`.
-    pub(crate) fn push_measured_history(&mut self, record: CallRecord, size: usize) {
-        if let Some(entry) = self
-            .servers
-            .iter_mut()
-            .find(|s| s.record.id == record.server_id)
-        {
-            entry.result_sizes.insert(record.id.clone(), size);
-        }
-        self.push_history(record);
     }
 
     /// Remember a recorded call at the top of the server's history. The
@@ -3752,12 +3710,7 @@ mod tests {
         state.selected_item = Some(0);
         let stored = store.list_calls(Some(&record.id), MAX_HISTORY).unwrap();
         state.finish_history_load("deleted meanwhile", Ok(Vec::new()));
-        state.finish_history_load(&record.id, Ok(persistence::measured(stored.clone())));
-        // Each stored result was measured where it was read; the session's
-        // call, listed without a measurement, was measured once as it was
-        // listed (its empty result is `{}`).
-        assert_eq!(state.servers[0].result_size(&stored[0].id), Some(2));
-        assert_eq!(state.servers[0].result_size("session"), Some(2));
+        state.finish_history_load(&record.id, Ok(stored.clone()));
 
         assert_eq!(state.servers[0].history_load(), HistoryLoad::Read);
         assert!(!state.history_reading());

@@ -149,7 +149,8 @@ impl ToolForm {
         let editor = cx.new(|cx| {
             let mut state = EditorState::new(window, cx)
                 .language("json")
-                .line_number(false);
+                .line_number(false)
+                .folding(false);
             state.set_value(initial, window, cx);
             state
         });

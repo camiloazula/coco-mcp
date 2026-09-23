@@ -9,17 +9,17 @@ use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt as _, div, px,
+    StatefulInteractiveElement, Styled, TestSupportExt as _, Window, div, px,
 };
 use mcp_store::{CallKind, CallStatus};
 
 use crate::state::Status;
 use crate::theme::tokens;
 use crate::views::content::Draw;
-use crate::views::json::{Folds, json_tree_rc};
+use crate::views::json::{Fit, Folds, json_tree_rc};
 use crate::views::response::Shown;
 use crate::views::{
-    Workspace, accent_button, detail_header, kbd, mono, muted, response, tree_section,
+    Workspace, accent_button, detail_header, kbd, mono, muted, response, split, tree_section,
 };
 
 /// JSON-RPC method of a call kind.
@@ -43,7 +43,11 @@ pub(crate) fn when_label(at: time::OffsetDateTime) -> String {
 ///
 /// The record and its result are borrowed from the model, not copied, for
 /// as long as the row stays selected.
-pub fn render(ws: &mut Workspace, cx: &Context<Workspace>) -> Option<AnyElement> {
+pub fn render(
+    ws: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Option<AnyElement> {
     let t = *tokens(cx);
     // Both trees are keyed by the call id, so a replay keeps the folds.
     let toggle = ws.collapse_toggle(cx);
@@ -138,21 +142,25 @@ pub fn render(ws: &mut Workspace, cx: &Context<Workspace>) -> Option<AnyElement>
     // A replay shown under this row wins over the stored result.
     let shown = match state.response() {
         Some(live) => Shown::live(live).waiting(state.response_waiting()),
-        None => {
-            let measured = state.server().and_then(|s| s.result_size(&record.id));
-            Shown::stored(record, measured)
-        }
+        None => Shown::stored(record),
     };
     let prefix = format!("hist:{}", record.id);
-    let revealed = ws.revealed.contains(&prefix);
     // Field by field, so the blob cache can be borrowed mutably beside them.
     let folds = Folds {
         collapsed: &ws.collapsed,
-        unfolded: &ws.unfolded,
+        rev: ws.collapse_rev,
         toggle: &toggle,
     };
     let sent = Rc::new(record.args.clone());
-    let args_tree = json_tree_rc(sent.clone(), &folds, &format!("args:{}", record.id), cx);
+    // The arguments take their rows, so a short call leaves the result the
+    // rest of the pane.
+    let args_tree = json_tree_rc(
+        sent.clone(),
+        &folds,
+        &format!("args:{}", record.id),
+        Fit::Rows,
+        cx,
+    );
     let args = v_flex().px(px(24.)).py(px(16.)).child(tree_section(
         cx,
         "ARGUMENTS",
@@ -164,17 +172,24 @@ pub fn render(ws: &mut Workspace, cx: &Context<Workspace>) -> Option<AnyElement>
         folds: &folds,
         decoded: &mut ws.decoded,
     };
+    let response = response::render(shown, &prefix, &mut draw, cx);
+    let key = ws.state.read(cx).response_key();
     Some(
         v_flex()
             .id("detail")
-            .flex_1()
+            .size_full()
             .min_h_0()
-            .overflow_y_scroll()
             .child(header)
             .child(toolbar)
-            .child(args)
-            .child(div().flex_1())
-            .child(response::render(shown, &prefix, revealed, &mut draw, cx))
+            .child(split::render(
+                ws,
+                key,
+                vec![args.into_any_element()],
+                false,
+                Some(response),
+                window,
+                cx,
+            ))
             .into_any_element(),
     )
 }

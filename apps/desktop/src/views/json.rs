@@ -4,41 +4,46 @@
 //!
 //! Every tree in the app is interactive. A node's key is its `prefix` plus
 //! its JSON path (`log:{server}:{row id}$.tools[0]`), which is both the
-//! element id and the entry in the workspace's fold sets, so two trees on
+//! element id and the entry in the workspace's fold set, so two trees on
 //! screen at once never share folds.
 //!
-//! A tree paints a bounded number of lines: containers past
-//! `TREE_NODE_BUDGET` start folded (see `json_budget.rs`), an open
-//! container paints its children a budget at a time under a `… N more` line,
-//! and a line under the tree says how many nodes both leave out.
+//! A tree is a list of its lines. The value is walked once into a plan of
+//! lines for the folds in force (`lines.rs`), kept until the value or the
+//! folds change, and a uniform list builds only the lines in view from it.
+//! So a tree of a hundred thousand rows costs a frame what a tree of ten
+//! does, and every container starts open.
 //!
 //! Every node is also copyable: right-clicking a line offers its value, its
 //! path and its key. The menu addresses a node by the steps taken from the
 //! root rather than by the printed path, because a key may itself contain
 //! `.` or `[`; the path is only ever produced for a person to read.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
-    AnyElement, App, Div, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, StyledText, TestSupportExt as _,
-    Window, div, px,
+    AnyElement, App, Div, Hsla, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
+    ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, StyledText,
+    TestSupportExt as _, Window, div, px, uniform_list,
 };
 use mcp_exchange::{Segment, copy_text, path_string, resolve};
 use serde_json::Value;
 
 use crate::clip;
 use crate::theme::tokens;
-use crate::views::json_budget::{
-    Budget, Fold, TREE_NODE_BUDGET, child_key, more_key, nodes, plan, window,
-};
 
 mod lines;
 
 use lines::*;
+
+/// Height of one line: mono 12px at line height 1.6.
+pub const LINE_HEIGHT: f32 = 19.2;
+
+/// Rows a tree takes at most when it is not given a height: about half a
+/// tall window. A longer tree scrolls inside.
+pub const MAX_TREE_ROWS: usize = 30;
 
 /// Called with the key of the chevron that was clicked and whether its node
 /// was open at the time.
@@ -47,10 +52,10 @@ pub type Toggle = Rc<dyn Fn(String, bool, &mut Window, &mut App)>;
 /// What every tree reads to decide which nodes are folded, and the callback
 /// that changes it.
 pub struct Folds<'a> {
-    /// Nodes folded by the user or by code; a fold here always wins.
+    /// Nodes folded by the user or by code.
     pub collapsed: &'a HashSet<String>,
-    /// Nodes the budget folded that the user opened.
-    pub unfolded: &'a HashSet<String>,
+    /// Bumped on every fold, so a plan made under other folds is not reused.
+    pub rev: u64,
     /// Flips one node.
     pub toggle: &'a Toggle,
 }
@@ -59,8 +64,27 @@ impl std::fmt::Debug for Folds<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Folds")
             .field("collapsed", &self.collapsed.len())
-            .field("unfolded", &self.unfolded.len())
+            .field("rev", &self.rev)
             .finish_non_exhaustive()
+    }
+}
+
+/// How a tree takes its height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    /// As many rows as it has, up to [`MAX_TREE_ROWS`], scrolling inside
+    /// past that: a tree beside other things.
+    Rows,
+    /// The height it is given, scrolling inside: the one block of a response.
+    Fill,
+}
+
+/// Fold key of a child: `{parent}.{key}` for a member, `{parent}[{i}]` for an
+/// element. The plan and the chevrons both spell keys through this.
+pub fn child_key(parent: &str, segment: &Segment) -> String {
+    match segment {
+        Segment::Key(k) => format!("{parent}.{k}"),
+        Segment::Index(i) => format!("{parent}[{i}]"),
     }
 }
 
@@ -77,120 +101,50 @@ fn styled(runs: Vec<Run>) -> StyledText {
     StyledText::new(text).with_highlights(highlights)
 }
 
-/// Tree root keys, each with the value its plan was made from.
-type Plans = HashMap<String, (Weak<Value>, Rc<Budget>)>;
+/// Tree root keys, each with the value and the fold revision its plan was
+/// made under.
+type Plans = HashMap<String, (Weak<Value>, u64, Rc<Plan>)>;
 
 thread_local! {
-    /// The line plan of each tree, by its root key, with the value it was
-    /// planned from. A plan walks the whole value, so a tree drawn on every
-    /// frame from one value, such as a response's text parsed once in
-    /// `Decoded`, plans it once. A value built afresh for each render (the
-    /// one clone `json_tree` makes) plans again, costing what that clone
-    /// already costs. Plans of values since dropped are let go.
-    static PLANS: RefCell<Plans> =
-        RefCell::new(HashMap::new());
+    /// The line plan of each tree, by its root key. A plan walks the whole
+    /// value, so a tree drawn on every frame from one value, such as a
+    /// response's text parsed once in `Decoded`, plans it once per fold. A
+    /// value built afresh for each render (the one clone `json_tree` makes)
+    /// plans again, costing what that clone already costs. Plans of values
+    /// since dropped are let go.
+    static PLANS: RefCell<Plans> = RefCell::new(HashMap::new());
 }
 
-/// The plan of the tree keyed `key` over `root`, planned only when `root` is
-/// not the value it was last planned from.
-fn planned(root: &Rc<Value>, key: &str) -> Rc<Budget> {
+/// The plan of the tree keyed `key` over `root` under `folds`, planned only
+/// when `root` is not the value it was last planned from or the folds have
+/// changed since.
+fn planned(root: &Rc<Value>, key: &str, folds: &Folds<'_>) -> Rc<Plan> {
     PLANS.with(|plans| {
         let mut plans = plans.borrow_mut();
-        if let Some((value, budget)) = plans.get(key)
+        if let Some((value, rev, plan)) = plans.get(key)
+            && *rev == folds.rev
             && value
                 .upgrade()
                 .is_some_and(|value| Rc::ptr_eq(&value, root))
         {
-            return budget.clone();
+            return plan.clone();
         }
-        let budget = Rc::new(plan(root, key, TREE_NODE_BUDGET));
-        plans.retain(|_, (value, _)| value.strong_count() > 0);
-        plans.insert(key.to_owned(), (Rc::downgrade(root), budget.clone()));
-        budget
+        let plan = Rc::new(plan(root, key, folds.collapsed));
+        plans.retain(|_, (value, _, _)| value.strong_count() > 0);
+        plans.insert(
+            key.to_owned(),
+            (Rc::downgrade(root), folds.rev, plan.clone()),
+        );
+        plan
     })
 }
 
-struct Ctx<'a> {
-    folds: &'a Folds<'a>,
-    budget: Rc<Budget>,
-    /// Nodes hidden by the budget's folds and by the children an open
-    /// container leaves unpainted, among the lines drawn so far.
-    hidden: Cell<usize>,
-    root: Rc<Value>,
-}
-
-impl Ctx<'_> {
-    /// Whether the container at `at` is drawn folded.
-    fn folded(&self, at: &At) -> bool {
-        match self
-            .budget
-            .fold(&at.key, self.folds.collapsed, self.folds.unfolded)
-        {
-            Fold::Open => false,
-            Fold::Collapsed => true,
-            Fold::Budget(nodes) => {
-                self.hide(nodes);
-                true
-            }
-        }
-    }
-
-    fn hide(&self, nodes: usize) {
-        self.hidden.set(self.hidden.get() + nodes);
-    }
-}
-
-/// Where a line sits: its fold key, and the steps from the root to its value.
-#[derive(Clone)]
-struct At {
-    key: String,
-    path: Vec<Segment>,
-}
-
-impl At {
-    fn child(&self, segment: Segment) -> Self {
-        let key = child_key(&self.key, &segment);
-        let mut path = self.path.clone();
-        path.push(segment);
-        Self { key, path }
-    }
-}
-
-fn chevron(open: bool, key: String, ctx: &Ctx<'_>, cx: &App) -> AnyElement {
-    let toggle = ctx.folds.toggle.clone();
+fn chevron(open: bool, key: String, toggle: &Toggle, cx: &App) -> AnyElement {
+    let toggle = toggle.clone();
     super::fold_icon(open, cx)
         .id(SharedString::from(key.clone()))
         .cursor_pointer()
         .on_click(move |_, window, cx| toggle(key.clone(), open, window, cx))
-        .test_support()
-        .into_any_element()
-}
-
-/// The line under the painted children of the open container `key` when it
-/// has more: how many are left, and a press paints the next budget of them.
-fn more(
-    indent: usize,
-    key: &str,
-    shown: usize,
-    left: usize,
-    noun: &str,
-    ctx: &Ctx<'_>,
-    cx: &App,
-) -> AnyElement {
-    let t = *tokens(cx);
-    let key = more_key(key, shown);
-    let toggle = ctx.folds.toggle.clone();
-    let next = left.min(TREE_NODE_BUDGET);
-    h_flex()
-        .id(SharedString::from(key.clone()))
-        .pl(px(16. * indent as f32))
-        .whitespace_nowrap()
-        .text_color(t.muted)
-        .hover(|s| s.text_color(t.fg))
-        .cursor_pointer()
-        .child(div().w(px(14.)).flex_none())
-        .child(format!("… {left} more {noun} · show {next}"))
-        .on_click(move |_, window, cx| toggle(key.clone(), false, window, cx))
         .test_support()
         .into_any_element()
 }
@@ -237,56 +191,45 @@ fn copy_menu(row: Stateful<Div>, root: Rc<Value>, path: Vec<Segment>) -> AnyElem
 ///
 /// The value is cloned once per tree so the copy menus can resolve a node
 /// after the render that built them has ended.
-pub fn json_tree(value: &Value, folds: &Folds<'_>, prefix: &str, cx: &App) -> AnyElement {
-    json_tree_rc(Rc::new(value.clone()), folds, prefix, cx)
+pub fn json_tree(value: &Value, folds: &Folds<'_>, prefix: &str, fit: Fit, cx: &App) -> AnyElement {
+    json_tree_rc(Rc::new(value.clone()), folds, prefix, fit, cx)
 }
 
 /// [`json_tree`] over a value the caller already holds in an `Rc`, so a
 /// block that also copies the value (`views::tree_section`) shares the one
 /// clone instead of making a second.
-pub fn json_tree_rc(root: Rc<Value>, folds: &Folds<'_>, prefix: &str, cx: &App) -> AnyElement {
+pub fn json_tree_rc(
+    root: Rc<Value>,
+    folds: &Folds<'_>,
+    prefix: &str,
+    fit: Fit,
+    cx: &App,
+) -> AnyElement {
     let key = format!("{prefix}$");
-    let budget = planned(&root, &key);
-    let ctx = Ctx {
-        folds,
-        budget,
-        hidden: Cell::new(0),
-        root: root.clone(),
-    };
-    let mut lines = Vec::new();
-    push(
-        &mut lines,
-        &root,
-        At {
-            key,
-            path: Vec::new(),
-        },
-        0,
-        Vec::new(),
-        "",
-        &ctx,
-        cx,
-    );
-    let hidden = ctx.hidden.get();
-    let note = (hidden > 0).then(|| {
-        let noun = if hidden == 1 { "node" } else { "nodes" };
-        div()
-            .id(SharedString::from(format!("{prefix}-folded")))
-            .pl(px(14.))
-            .text_color(tokens(cx).muted)
-            .child(format!(
-                "{hidden} {noun} folded to keep this tree responsive"
-            ))
-            .test_support()
-    });
-    v_flex()
-        .font_family(cx.theme().mono_font_family.clone())
-        .text_size(px(12.))
-        .line_height(px(19.2))
-        .text_color(tokens(cx).fg)
-        .children(lines)
-        .children(note)
-        .into_any_element()
+    let plan = planned(&root, &key, folds);
+    let count = plan.lines.len();
+    let toggle = folds.toggle.clone();
+    let list = uniform_list(SharedString::from(format!("{prefix}-tree")), count, {
+        let root = root.clone();
+        move |range, _window, cx| {
+            range
+                .map(|ix| line_element(&plan, ix, &root, &toggle, cx))
+                .collect()
+        }
+    })
+    // Its rows' height, up to what it is given.
+    .with_sizing_behavior(ListSizingBehavior::Infer)
+    .w_full()
+    .font_family(cx.theme().mono_font_family.clone())
+    .text_size(px(12.))
+    .line_height(px(LINE_HEIGHT))
+    .text_color(tokens(cx).fg);
+    match fit {
+        Fit::Rows => list
+            .max_h(px(LINE_HEIGHT * MAX_TREE_ROWS as f32))
+            .into_any_element(),
+        Fit::Fill => list.flex_1().min_h_0().into_any_element(),
+    }
 }
 
 #[cfg(test)]
@@ -294,15 +237,30 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn folds<'a>(collapsed: &'a HashSet<String>, rev: u64, toggle: &'a Toggle) -> Folds<'a> {
+        Folds {
+            collapsed,
+            rev,
+            toggle,
+        }
+    }
+
     #[test]
-    fn a_tree_is_planned_once_per_value() {
+    fn a_tree_is_planned_once_per_value_and_fold() {
+        let toggle: Toggle = Rc::new(|_, _, _, _| {});
+        let none = HashSet::new();
         let value = Rc::new(json!([1, 2, {"a": [3]}]));
-        let first = planned(&value, "t$");
-        assert!(Rc::ptr_eq(&first, &planned(&value, "t$")), "kept");
+        let first = planned(&value, "t$", &folds(&none, 0, &toggle));
+        assert!(
+            Rc::ptr_eq(&first, &planned(&value, "t$", &folds(&none, 0, &toggle))),
+            "kept"
+        );
         let other = Rc::new(json!([1, 2, {"a": [3]}]));
         assert!(
-            !Rc::ptr_eq(&first, &planned(&other, "t$")),
+            !Rc::ptr_eq(&first, &planned(&other, "t$", &folds(&none, 0, &toggle))),
             "another value under the same key is planned afresh"
         );
+        let refolded = planned(&value, "t$", &folds(&none, 1, &toggle));
+        assert!(!Rc::ptr_eq(&first, &refolded), "and so is a fold");
     }
 }

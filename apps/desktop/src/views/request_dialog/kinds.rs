@@ -135,7 +135,13 @@ pub(super) fn message_row(
     // its structure instead of being stringified into one line.
     let body = if text.is_empty() {
         let toggle = ws.collapse_toggle(cx);
-        json_tree(content, &ws.folds(&toggle), &format!("req:msg{index}"), cx)
+        json_tree(
+            content,
+            &ws.folds(&toggle),
+            &format!("req:msg{index}"),
+            Fit::Rows,
+            cx,
+        )
     } else {
         div()
             .text_size(px(12.))

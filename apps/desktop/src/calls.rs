@@ -73,10 +73,6 @@ pub struct Response {
     pub status: ResponseStatus,
     /// Round-trip time.
     pub elapsed: Duration,
-    /// The bytes of `raw` that drawing it lays out (`views::laid_out_size`).
-    /// An answer is measured on the runtime thread, so the response view can
-    /// decide whether to draw it for free.
-    pub size: usize,
     /// Where `structuredContent` breaks the output schema the tool declared,
     /// checked on the runtime thread when the answer arrived.
     pub issues: Vec<String>,
@@ -146,7 +142,6 @@ impl Responses {
             key,
             Response {
                 method,
-                size: mcp_exchange::json_size(&raw),
                 raw,
                 status: ResponseStatus::Pending,
                 elapsed: Duration::ZERO,
@@ -248,21 +243,8 @@ impl Responses {
 /// What a request yields: the raw result, the round trip and `isError`.
 type Answer = Result<(Value, Duration, bool), mcp_core::Error>;
 
-/// Result of a bridge-executed request, with the raw result's size.
-type CallResult = Option<Result<(Value, usize, Duration, bool), mcp_core::Error>>;
-
-/// `fut`, a `method` request, with its result measured where it runs, on the
-/// runtime, so a large result is never serialized on the UI thread just to
-/// learn its size.
-async fn measured(
-    method: &str,
-    fut: impl Future<Output = Answer>,
-) -> Result<(Value, usize, Duration, bool), mcp_core::Error> {
-    fut.await.map(|(raw, elapsed, is_error)| {
-        let size = crate::views::laid_out_size(method, &raw);
-        (raw, size, elapsed, is_error)
-    })
-}
+/// Result of a bridge-executed request.
+type CallResult = Option<Result<(Value, Duration, bool), mcp_core::Error>>;
 
 /// `fut`, a `method` request, settled where it runs, on the runtime: the
 /// response it shows, checked against `output_schema` when the tool declared
@@ -275,7 +257,7 @@ async fn settled(
     output_schema: Option<Value>,
     fut: impl Future<Output = Answer>,
 ) -> (Response, Option<Value>) {
-    let mut response = outcome(method, Some(measured(method, fut).await));
+    let mut response = outcome(method, Some(fut.await));
     if let Some(schema) = &output_schema
         && response.status == ResponseStatus::Ok
     {
@@ -302,10 +284,9 @@ fn output_issues(schema: &Value, raw: &Value) -> Vec<String> {
 
 /// The response a finished request shows.
 fn outcome(method: &'static str, result: CallResult) -> Response {
-    let (raw, size, status, elapsed) = match result {
-        Some(Ok((raw, size, elapsed, is_error))) => (
+    let (raw, status, elapsed) = match result {
+        Some(Ok((raw, elapsed, is_error))) => (
             raw,
-            size,
             if is_error {
                 ResponseStatus::ToolError
             } else {
@@ -313,11 +294,11 @@ fn outcome(method: &'static str, result: CallResult) -> Response {
             },
             elapsed,
         ),
-        Some(Err(mcp_core::Error::Cancelled)) => {
-            let raw = Value::Object(Map::new());
-            let size = mcp_exchange::json_size(&raw);
-            (raw, size, ResponseStatus::Cancelled, Duration::ZERO)
-        }
+        Some(Err(mcp_core::Error::Cancelled)) => (
+            Value::Object(Map::new()),
+            ResponseStatus::Cancelled,
+            Duration::ZERO,
+        ),
         // Keep a server error's structured `data`: the response view shows
         // it as a tree under the message.
         Some(Err(e)) => {
@@ -335,27 +316,19 @@ fn outcome(method: &'static str, result: CallResult) -> Response {
                 }),
                 _ => Value::Object(Map::new()),
             };
-            let size = mcp_exchange::json_size(&raw);
-            (
-                raw,
-                size,
-                ResponseStatus::Failed(e.to_string()),
-                Duration::ZERO,
-            )
+            (raw, ResponseStatus::Failed(e.to_string()), Duration::ZERO)
         }
-        None => {
-            let raw = Value::Object(Map::new());
-            let size = mcp_exchange::json_size(&raw);
-            let status = ResponseStatus::Failed("call task failed".into());
-            (raw, size, status, Duration::ZERO)
-        }
+        None => (
+            Value::Object(Map::new()),
+            ResponseStatus::Failed("call task failed".into()),
+            Duration::ZERO,
+        ),
     };
     Response {
         method,
         raw,
         status,
         elapsed,
-        size,
         issues: Vec::new(),
         answer: 0,
     }
@@ -703,13 +676,12 @@ impl AppState {
                     response.status,
                     ResponseStatus::Ok | ResponseStatus::ToolError
                 );
-                let size = response.size;
                 if !state.responses.finish(&key, stamp, response) {
                     return;
                 }
                 let known = state.servers.iter().any(|s| s.record.id == server_id);
                 match recorded {
-                    Some(Ok(record)) => state.push_measured_history(record, size),
+                    Some(Ok(record)) => state.push_history(record),
                     Some(Err(e)) if known => state.note_failure(&not_recorded, e),
                     _ => {}
                 }
@@ -737,12 +709,7 @@ mod tests {
         let raw = serde_json::json!({ "content": [{ "type": "text", "text": text }] });
         outcome(
             "tools/call",
-            Some(Ok((
-                raw.clone(),
-                raw.to_string().len(),
-                Duration::from_millis(1),
-                false,
-            ))),
+            Some(Ok((raw.clone(), Duration::from_millis(1), false))),
         )
     }
 
@@ -910,7 +877,6 @@ mod tests {
         };
         let (response, result) = run(true, Ok((raw.clone(), Duration::from_millis(2), false)));
         assert_eq!(response.raw, raw);
-        assert_eq!(response.size, raw.to_string().len());
         assert_eq!(result, Some(raw.clone()), "the history row's own copy");
         let (_, unrecorded) = run(false, Ok((raw.clone(), Duration::ZERO, false)));
         assert_eq!(unrecorded, None, "nothing is copied without a database");
@@ -926,41 +892,5 @@ mod tests {
         );
         assert!(matches!(failed.status, ResponseStatus::Failed(_)));
         assert_eq!(data, Some(failed.raw), "a failure's error data is recorded");
-    }
-
-    #[test]
-    fn every_response_carries_the_size_of_its_result() {
-        let size = |r: &Response| (r.size, r.raw.to_string().len());
-        let mut responses = Responses::default();
-        let (stamp, _) = responses.begin(key(), "tools/call").unwrap();
-        let (pending, expected) = size(responses.get(&key()).unwrap());
-        assert_eq!(pending, expected, "pending");
-
-        // An answer is measured by the future the runtime runs.
-        let raw = serde_json::json!({"content": [{"type": "text", "text": "18 °C, \"clear\""}]});
-        let sent = raw.clone();
-        let result = futures::executor::block_on(measured("tools/call", async move {
-            Ok((sent, Duration::from_millis(3), true))
-        }));
-        let answered = outcome("tools/call", Some(result));
-        assert_eq!(answered.size, raw.to_string().len());
-        assert_eq!(answered.status, ResponseStatus::ToolError);
-        assert!(responses.finish(&key(), stamp, answered));
-        let (stored, expected) = size(responses.get(&key()).unwrap());
-        assert_eq!(stored, expected, "answered");
-
-        // A failure is measured where it is built.
-        let failed = outcome(
-            "tools/call",
-            Some(Err(mcp_core::Error::Server {
-                code: -32602,
-                message: "bad arguments".into(),
-                data: Some(serde_json::json!({"field": "city"})),
-            })),
-        );
-        assert_eq!(size(&failed).0, size(&failed).1, "failed with data");
-        assert!(matches!(failed.status, ResponseStatus::Failed(_)));
-        let lost = outcome("tools/call", None);
-        assert_eq!(size(&lost).0, size(&lost).1, "task lost");
     }
 }

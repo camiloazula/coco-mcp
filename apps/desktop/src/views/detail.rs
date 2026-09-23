@@ -15,11 +15,11 @@ use crate::clip;
 use crate::state::{Mode, Status};
 use crate::theme::tokens;
 use crate::views::content::Draw;
-use crate::views::json::{Folds, json_tree, json_tree_rc};
+use crate::views::json::{Fit, Folds, json_tree, json_tree_rc};
 use crate::views::list_failures::detail_note;
 use crate::views::response::Shown;
 use crate::views::{
-    Workspace, accent_button, detail_header, history, kbd, mono, muted, response, text_tab,
+    Workspace, accent_button, detail_header, history, kbd, mono, muted, response, split, text_tab,
     tree_section,
 };
 
@@ -59,7 +59,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         if ws.state.read(cx).history_reading() {
             return centered_note(cx, "Reading history…");
         }
-        return history::render(ws, cx)
+        return history::render(ws, window, cx)
             .unwrap_or_else(|| centered_note(cx, "Select a call to see it"));
     }
     match status {
@@ -100,7 +100,11 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             Mode::History | Mode::Server => None,
         }
     };
-    let body = match selection {
+    let Parts {
+        pinned,
+        body,
+        fills,
+    } = match selection {
         Some(Selection::Tool(tool)) => tool_detail(ws, &tool, &meta, window, cx),
         Some(Selection::Resource(r)) => {
             let declared = serde_json::to_value(&r).unwrap_or_default();
@@ -151,33 +155,44 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             );
         }
     };
-    let toggle = ws.collapse_toggle(cx);
-    let prefix = ws.response_prefix(cx);
-    let revealed = ws.revealed.contains(&prefix);
-    // Field by field, so the blob cache can be borrowed mutably beside them.
-    let folds = Folds {
-        collapsed: &ws.collapsed,
-        unfolded: &ws.unfolded,
-        toggle: &toggle,
+    let response = {
+        let toggle = ws.collapse_toggle(cx);
+        let prefix = ws.response_prefix(cx);
+        // Field by field, so the blob cache can be borrowed mutably beside them.
+        let folds = Folds {
+            collapsed: &ws.collapsed,
+            rev: ws.collapse_rev,
+            toggle: &toggle,
+        };
+        let mut draw = Draw {
+            folds: &folds,
+            decoded: &mut ws.decoded,
+        };
+        let state = ws.state.read(cx);
+        state.response().map(|r| {
+            let shown = Shown::live(r).waiting(state.response_waiting());
+            response::render(shown, &prefix, &mut draw, cx)
+        })
     };
-    let mut draw = Draw {
-        folds: &folds,
-        decoded: &mut ws.decoded,
-    };
-    let state = ws.state.read(cx);
-    let response = state.response().map(|r| {
-        let shown = Shown::live(r).waiting(state.response_waiting());
-        response::render(shown, &prefix, revealed, &mut draw, cx)
-    });
+    let key = ws.state.read(cx).response_key();
+    // The header and toolbar stay put; the tab body and the response each
+    // scroll on their own below them.
     v_flex()
         .id("detail")
-        .flex_1()
+        .size_full()
         .min_h_0()
-        .overflow_y_scroll()
-        .children(body)
-        .child(div().flex_1())
-        .children(response)
+        .children(pinned)
+        .child(split::render(ws, key, body, fills, response, window, cx))
         .into_any_element()
+}
+
+/// A detail's pieces: what stays above the split (header, description,
+/// toolbar), and the body of the active tab under it, which scrolls, or,
+/// when it `fills` (one tree), takes the height and scrolls inside.
+struct Parts {
+    pinned: Vec<AnyElement>,
+    body: Vec<AnyElement>,
+    fills: bool,
 }
 
 enum Selection {

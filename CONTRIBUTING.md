@@ -78,24 +78,23 @@ two modes. These rules keep it that way.
   unique within one server (log row ids, tool names). `json.rs` owns the
   chevron and the `{ … N keys }` / `[ … N items ]` summaries; the generated
   form reuses both through `views::fold_icon`. There is no non-interactive
-  tree renderer: do not add one. A tree starts with about
-  `TREE_NODE_BUDGET` lines painted: `json_budget.rs` works out from the value
-  alone which containers would pass it, and those start folded. An open
-  container paints its children a budget at a time, under a `… N more` line
-  that paints the next budget when pressed, so opening a fold paints at most
-  about twice the budget however wide the container is. A line under the tree
-  says how many nodes the folds and the unpainted children hide. A budget
-  fold the user opens, and each `… more` pressed, is kept in
-  `Workspace.unfolded`, and a fold in `collapsed` always wins. A result that
-  lays out more than `LARGE_RESULT_BYTES` (base64 drawn as an image or a save
-  button does not count) is not drawn until Show result is pressed; its
-  header gives its size and top-level shape instead.
+  tree renderer: do not add one. A tree is a list of its lines: the value is
+  walked once into a plan of lines under the folds in force (`json/lines.rs`,
+  one small entry per line, what a line says being read from the value when
+  it is drawn), kept until the value or `Workspace.collapse_rev` changes,
+  and a uniform list builds only the lines in view from it. Every container
+  starts open; only `Workspace.collapsed` folds one. A tree takes its rows
+  up to `json::MAX_TREE_ROWS` and scrolls inside past that (`Fit::Rows`),
+  or, as the one thing in a panel (a response that is one tree, the schema
+  tab, a recorded call's arguments), the panel's height (`Fit::Fill`).
+  Nothing is held back for its size: a result is drawn as it arrives, and a
+  hundred thousand rows are parsed and planned in one frame.
 - A selected response is drawn on every frame, so nothing it shows may cost
-  per frame what it can cost once: a result is measured on the runtime when
-  it arrives (`Response.size`), and a stored call where its history is read
-  off the GPUI thread (`persistence::measured`); copy buttons build their
-  text when pressed; and decoded images, and text blocks parsed and copied
-  once, stay in `Workspace.decoded` until a frame no longer draws them.
+  per frame what it can cost once: copy buttons build their text when
+  pressed; decoded images, text blocks parsed and copied once, and the
+  `Rc` a tree's value is cloned into once per answer stay in
+  `Workspace.decoded` until a frame no longer draws them; and a tree's line
+  plan is kept in `views::json` until its value or the folds change.
 - Everything on screen has a way out, and a client configuration has a way
   in; `mcp-exchange` owns every shared format, in both directions, so the app
   and the CLI cannot disagree. A JSON tree line carries a right-click
@@ -440,6 +439,34 @@ artifacts, publishing nothing.
   open, under the `Dialog` key context: Enter and `⌘⏎` accept, Esc cancels,
   and the window's shortcuts are bound to `NoAction` there, so they wait
   until it closes. Closing it gives focus back to the list.
+- The detail pane is split once a selection has a response: the header,
+  description and toolbar stay put, and the input (form, arguments or
+  declaration) and the response scroll each on their own, with a draggable
+  separator between them (`views/split.rs`). The separator starts where a
+  scrolling input body ends (its height is read back from a canvas in the
+  scroll view and the panel resized to it, half the pane at most), so a
+  short form leaves the response the rest; a body that fills (the schema
+  tab, the raw editor) starts halfway. A resize the fit did not ask for is
+  the user's, and from then on the split is theirs. It is remembered per
+  selection, like folds, so the split that suits one tool's form is not
+  forced on another's; a deleted server or a cleared call takes its splits
+  with it. Before the first call the input has the whole pane.
+- A plain-text block of a response is a read-only text area
+  (`views/plain.rs`, on gpui-kit's input engine): the text sits in a rope
+  and only the lines in view are laid out, so a block of any length costs a
+  frame the same, and it can be selected and copied. The text area is kept
+  by the block's element id while the block is drawn and its text set again
+  only when `kept::Decoded` stamps it as another text. A text that is the
+  whole response fills the response panel; beside other blocks it takes its
+  own rows, up to `plain::MAX_ROWS`, and scrolls inside. JSON text is still
+  a tree.
+- Markdown is gpui-kit's text view, which lays out every block of a
+  document on every frame unless it scrolls, when it draws the blocks in
+  view through a list. So a document scrolls: in the whole panel when it is
+  the response, in a box of its own beside other blocks once it is longer
+  than `SCROLLED_MARKDOWN_BYTES`, and at its own height only when short and
+  beside others. The view parses a long document in the background, so it
+  is blank for a moment after the answer.
 - The log drawer opens and closes only by its header buttons, `⌘J` and
   `⌘⇧J`, the View menu and the palette, never by Esc: reading a log must not
   end by accident. Zoomed (`drawer_zoomed`), it takes the columns' place
@@ -467,6 +494,11 @@ artifacts, publishing nothing.
   `--stalled-resources`, `--ignore-pings`, `--paged-resources`) and tools
   (`progress`, `stderr`, `exit`, `elicit` with a `url`) give each unhappy
   path a test. `exit` only ends a server serving its own process over stdio.
+  `rows`, `text` and `markdown` return results as large as asked, the
+  `long` prompt one message of `json`, `text` or `markdown`, and the
+  resources under `mock://big/` (three listed at 256 KB, and the template
+  `mock://big/{kind}/{kilobytes}` for any size) the same three kinds, for
+  trying the window against a long answer of every kind from every mode.
 - The mock server speaks both eras from one binary, over stdio and HTTP. On
   a 2026-07-28 request `elicit`, `sample` and `roots` answer `input_required`
   (`elicit` with `repeat` keeps asking, to reach the round limit), `bump` and

@@ -9,7 +9,7 @@ pub(super) fn resource_detail(
     meta: &str,
     window: &mut Window,
     cx: &mut Context<Workspace>,
-) -> Vec<AnyElement> {
+) -> Parts {
     let t = *tokens(cx);
     let mut info = vec![facts.mime.unwrap_or_else(|| "unknown type".into())];
     if let Some(size) = facts.size {
@@ -25,9 +25,9 @@ pub(super) fn resource_detail(
         info.insert(0, facts.name.clone());
     }
     let title = facts.title.clone().unwrap_or_else(|| facts.name.clone());
-    let mut parts: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
-    parts.extend(description(cx, facts.description.as_deref()).map(IntoElement::into_any_element));
-    parts.push(
+    let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
+    pinned.extend(description(cx, facts.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.push(
         v_flex()
             .px(px(24.))
             .pb(px(16.))
@@ -37,15 +37,20 @@ pub(super) fn resource_detail(
             .children(watch)
             .into_any_element(),
     );
-    parts.push(toolbar(ws, cx, Tabs::Declared, "Read").into_any_element());
+    pinned.push(toolbar(ws, cx, Tabs::Declared, "Read").into_any_element());
+    let mut body: Vec<AnyElement> = Vec::new();
     if ws.selection.schema_tab {
         let what = if facts.concrete {
             "resource"
         } else {
             "template"
         };
-        parts.push(declaration(ws, facts.declared, what, &facts.uri, cx));
-        return parts;
+        body.push(declaration(ws, facts.declared, what, &facts.uri, cx));
+        return Parts {
+            pinned,
+            body,
+            fills: true,
+        };
     }
     if !vars.is_empty() {
         let rows: Vec<AnyElement> = vars
@@ -65,18 +70,21 @@ pub(super) fn resource_detail(
             })
             .collect();
         let expanded = ws.expand_template(&facts.uri, cx);
-        parts.push(
+        body.push(
             v_flex()
                 .px(px(24.))
                 .py(px(16.))
                 .gap(px(10.))
-                .max_w(px(640.))
                 .children(rows)
                 .child(mono(cx, 11., expanded).text_color(t.muted))
                 .into_any_element(),
         );
     }
-    parts
+    Parts {
+        pinned,
+        body,
+        fills: false,
+    }
 }
 
 pub(super) fn prompt_detail(
@@ -85,15 +93,21 @@ pub(super) fn prompt_detail(
     meta: &str,
     window: &mut Window,
     cx: &mut Context<Workspace>,
-) -> Vec<AnyElement> {
+) -> Parts {
     let title = prompt.title.clone().unwrap_or_else(|| prompt.name.clone());
-    let mut parts: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
-    parts.extend(description(cx, prompt.description.as_deref()).map(IntoElement::into_any_element));
-    parts.push(toolbar(ws, cx, Tabs::Declared, "Get").into_any_element());
+    let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
+    pinned
+        .extend(description(cx, prompt.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.push(toolbar(ws, cx, Tabs::Declared, "Get").into_any_element());
+    let mut body: Vec<AnyElement> = Vec::new();
     if ws.selection.schema_tab {
         let declared = serde_json::to_value(prompt).unwrap_or_default();
-        parts.push(declaration(ws, declared, "prompt", &prompt.name, cx));
-        return parts;
+        body.push(declaration(ws, declared, "prompt", &prompt.name, cx));
+        return Parts {
+            pinned,
+            body,
+            fills: true,
+        };
     }
     let rows: Vec<AnyElement> = prompt
         .arguments
@@ -113,19 +127,22 @@ pub(super) fn prompt_detail(
             arg_row(cx, label, a.required == Some(true), control)
         })
         .collect();
-    parts.push(
+    body.push(
         v_flex()
             .px(px(24.))
             .py(px(16.))
             .gap(px(10.))
-            .max_w(px(640.))
             .when(rows.is_empty(), |el| {
                 el.child(muted(cx, 12., "No arguments"))
             })
             .children(rows)
             .into_any_element(),
     );
-    parts
+    Parts {
+        pinned,
+        body,
+        fills: false,
+    }
 }
 
 /// Everything the server declared about a resource, template or prompt, as
@@ -141,17 +158,23 @@ pub(super) fn declaration(
     let toggle = ws.collapse_toggle(cx);
     let prefix = format!("decl:{}:{what}:{name}", ws.server_scope(cx));
     let value = Rc::new(value);
-    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, cx);
+    let body = json_tree_rc(value.clone(), &ws.folds(&toggle), &prefix, Fit::Fill, cx);
     v_flex()
         .px(px(24.))
         .py(px(16.))
-        .child(tree_section(
-            cx,
-            what.to_owned(),
-            SharedString::from(format!("{prefix}-copy")),
-            value,
-            body,
-        ))
+        .flex_1()
+        .min_h_0()
+        .child(
+            tree_section(
+                cx,
+                what.to_owned(),
+                SharedString::from(format!("{prefix}-copy")),
+                value,
+                body,
+            )
+            .flex_1()
+            .min_h_0(),
+        )
         .into_any_element()
 }
 

@@ -56,10 +56,10 @@ async fn snapshot_lists_everything() {
         "add declares structured output"
     );
 
-    assert_eq!(snap.resources.len(), 5);
-    assert_eq!(snap.resource_templates.len(), 1);
+    assert_eq!(snap.resources.len(), 8);
+    assert_eq!(snap.resource_templates.len(), 2);
     assert_eq!(snap.resource_templates[0].uri_template, "mock://item/{id}");
-    assert_eq!(snap.prompts.len(), 2);
+    assert_eq!(snap.prompts.len(), 3);
     let summarize = snap.prompt("summarize").unwrap();
     assert!(
         summarize
@@ -130,7 +130,7 @@ async fn a_failing_list_does_not_fail_the_snapshot() {
     for expected in ["echo", "add", "fail", "sleep", "bump"] {
         assert!(snap.tool(expected).is_some(), "missing {expected}");
     }
-    assert_eq!(snap.prompts.len(), 2);
+    assert_eq!(snap.prompts.len(), 3);
     assert!(snap.resources.is_empty());
     assert!(snap.resource_templates.is_empty());
     // Method-not-found is the server's answer, not a failure.

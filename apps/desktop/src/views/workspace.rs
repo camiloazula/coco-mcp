@@ -78,18 +78,14 @@ pub struct Workspace {
     /// prefix plus the node's path. One set so the log drawer, a tool's
     /// schema and a response can each keep their own folds.
     pub collapsed: HashSet<String>,
-    /// Nodes a tree's line budget folded that the user opened, by the same
-    /// keys. A key here never folds anything, and `collapsed` still wins.
-    pub unfolded: HashSet<String>,
-    /// Bumped on every fold so the log drawer's list re-measures the row
-    /// whose payload changed height.
+    /// Bumped on every fold, so a tree plans its lines again and the log
+    /// drawer's list re-measures the row whose payload changed height.
     pub collapse_rev: u64,
-    /// Response prefixes whose large result the user asked to see. Kept per
-    /// selection, like folds, so running the same item again stays shown.
-    pub revealed: HashSet<String>,
     /// Decoded blobs and parsed text of the responses on screen, dropped
     /// once not drawn.
     pub decoded: Decoded,
+    /// Where the separator between input and response sits, per selection.
+    pub(crate) splits: crate::views::split::Splits,
     /// The diff-banner row whose before/after values are open, identified by
     /// the change itself so it cannot follow an index onto another server.
     pub expanded_change: Option<String>,
@@ -177,10 +173,9 @@ impl Workspace {
             followed: (None, None),
             log_list: LogList::default(),
             collapsed: HashSet::new(),
-            unfolded: HashSet::new(),
             collapse_rev: 0,
-            revealed: HashSet::new(),
             decoded: Decoded::default(),
+            splits: Default::default(),
             expanded_change: None,
             roots_editor: None,
             _subscriptions: subscriptions,

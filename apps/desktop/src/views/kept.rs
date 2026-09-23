@@ -65,8 +65,13 @@ struct Text {
     json: Option<Option<Rc<Value>>>,
     /// Whether the text is the JSON of the result's structuredContent.
     mirrors: Option<bool>,
-    /// The text as HTML that shows it verbatim.
-    html: Option<SharedString>,
+}
+
+/// Which value of which answer a tree's `Rc` was cloned from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ValueStamp {
+    answer: u64,
+    at: usize,
 }
 
 /// The decoded blobs and parsed text blocks of the responses on screen, by
@@ -79,6 +84,9 @@ struct Text {
 pub struct Decoded {
     blobs: HashMap<String, Blob>,
     texts: HashMap<String, Text>,
+    /// Values drawn as trees, each cloned once into the `Rc` its tree and
+    /// copy button share, with what it was cloned from.
+    values: HashMap<String, (ValueStamp, Rc<Value>)>,
     drawn: HashSet<String>,
     /// The answer the texts drawn next belong to (`Response::answer`).
     answer: u64,
@@ -105,6 +113,7 @@ impl Decoded {
         let drawn = &self.drawn;
         self.blobs.retain(|id, _| drawn.contains(id));
         self.texts.retain(|id, _| drawn.contains(id));
+        self.values.retain(|id, _| drawn.contains(id));
     }
 
     /// Name the answer whose texts are drawn next: a text under an id is only
@@ -152,7 +161,6 @@ impl Decoded {
             shared: None,
             json: None,
             mirrors: None,
-            html: None,
         };
         match self.texts.entry(id.to_owned()) {
             Entry::Occupied(mut entry) => {
@@ -173,12 +181,58 @@ impl Decoded {
             .clone()
     }
 
-    /// `text`, drawn as `id`, as HTML that shows it verbatim, built once.
-    pub fn verbatim_html(&mut self, id: &str, text: &str) -> SharedString {
-        self.text(id, text)
-            .html
-            .get_or_insert_with(|| SharedString::from(verbatim_html(text)))
-            .clone()
+    /// A number that changes when `id` shows another text than it did, so
+    /// an element keeping its own copy of the text (a text area) can tell
+    /// without comparing them.
+    pub fn stamp(&mut self, id: &str, text: &str) -> u64 {
+        let fingerprint = self.text(id, text).fingerprint;
+        let mut hasher = DefaultHasher::new();
+        (
+            fingerprint.answer,
+            fingerprint.at,
+            fingerprint.len,
+            fingerprint.edges,
+        )
+            .hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// `value`, drawn as the tree `id`, cloned once into an `Rc` for as long
+    /// as `id` shows this value of this answer, so the tree plans it once.
+    pub fn value(&mut self, id: &str, value: &Value) -> Rc<Value> {
+        self.mark(id);
+        let stamp = ValueStamp {
+            answer: self.answer,
+            at: std::ptr::from_ref(value) as usize,
+        };
+        match self.values.entry(id.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().0 != stamp {
+                    entry.insert((stamp, Rc::new(value.clone())));
+                }
+                entry.get().1.clone()
+            }
+            Entry::Vacant(entry) => entry.insert((stamp, Rc::new(value.clone()))).1.clone(),
+        }
+    }
+
+    /// `value`, built for this frame and drawn as the tree `id`, kept from
+    /// the frame that first built it while it comes out the same.
+    pub fn owned(&mut self, id: &str, value: Value) -> Rc<Value> {
+        self.mark(id);
+        let stamp = ValueStamp {
+            answer: self.answer,
+            at: 0,
+        };
+        match self.values.entry(id.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().0 != stamp || *entry.get().1 != value {
+                    entry.insert((stamp, Rc::new(value)));
+                }
+                entry.get().1.clone()
+            }
+            Entry::Vacant(entry) => entry.insert((stamp, Rc::new(value))).1.clone(),
+        }
     }
 
     /// `text`, drawn as `id`, parsed once as JSON; `None` when it is not.
@@ -203,29 +257,6 @@ impl Decoded {
         self.text(id, text).mirrors = Some(mirrors);
         mirrors
     }
-}
-
-/// `text` as HTML that reads as the text itself: markup escaped, line breaks
-/// and runs of spaces kept. A text view renders HTML selectable, which plain
-/// text drawn as a string is not.
-fn verbatim_html(text: &str) -> String {
-    let mut html = String::with_capacity(text.len() + 16);
-    html.push_str("<p>");
-    let mut space = false;
-    for c in text.chars() {
-        match c {
-            '&' => html.push_str("&amp;"),
-            '<' => html.push_str("&lt;"),
-            '>' => html.push_str("&gt;"),
-            '"' => html.push_str("&quot;"),
-            '\n' => html.push_str("<br>"),
-            ' ' if space => html.push_str("&nbsp;"),
-            other => html.push(other),
-        }
-        space = c == ' ';
-    }
-    html.push_str("</p>");
-    html
 }
 
 #[cfg(test)]
@@ -287,11 +318,50 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_is_kept_verbatim_as_html() {
-        assert_eq!(
-            verbatim_html("a <b> & \"c\"\n  two  spaces"),
-            "<p>a &lt;b&gt; &amp; &quot;c&quot;<br> &nbsp;two &nbsp;spaces</p>"
+    fn a_stamp_follows_the_text_and_the_answer() {
+        let mut decoded = Decoded::default();
+        decoded.begin_frame();
+        decoded.answer(1);
+        let text = "plain words".to_owned();
+        let first = decoded.stamp("respc0", &text);
+        assert_eq!(first, decoded.stamp("respc0", &text), "the same text");
+        let other = "other words".to_owned();
+        assert_ne!(first, decoded.stamp("respc0", &other));
+        decoded.answer(2);
+        assert_ne!(
+            first,
+            decoded.stamp("respc0", &text),
+            "the same text in a newer answer"
         );
+    }
+
+    #[test]
+    fn a_tree_value_is_cloned_once_per_answer() {
+        let mut decoded = Decoded::default();
+        let value = serde_json::json!({"rows": [1, 2, 3]});
+        decoded.begin_frame();
+        decoded.answer(1);
+        let first = decoded.value("resps", &value);
+        assert!(Rc::ptr_eq(&first, &decoded.value("resps", &value)));
+        decoded.answer(2);
+        assert!(
+            !Rc::ptr_eq(&first, &decoded.value("resps", &value)),
+            "another answer at the same address"
+        );
+        let rest = || serde_json::json!({"isError": true});
+        let kept = decoded.owned("respo", rest());
+        assert!(
+            Rc::ptr_eq(&kept, &decoded.owned("respo", rest())),
+            "the same fields"
+        );
+        assert!(!Rc::ptr_eq(
+            &kept,
+            &decoded.owned("respo", serde_json::json!({"x": 1}))
+        ));
+        decoded.end_frame();
+        decoded.begin_frame();
+        decoded.end_frame();
+        assert!(decoded.values.is_empty(), "not drawn, dropped");
     }
 
     #[test]

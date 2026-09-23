@@ -33,8 +33,8 @@ yesterday. So Coco does those things first:
   session, wire log and history, all connected together; switching is a
   click or `⌘K`.
 - **Fast, and still fast an hour later.** A native binary drawn on the GPU,
-  with lists that build only the rows in view and a drawing budget for big
-  results, so a long session costs no more per frame than a short one.
+  where every list, tree and text builds only the lines in view, so a
+  result of a hundred thousand rows costs a frame what ten rows do.
 - **Memory.** Servers, calls and snapshots persist, a call can be replayed
   or opened back in the form, and each connect is diffed against the last
   snapshot so a breaking change in a server is noticed, not discovered.
@@ -87,7 +87,8 @@ use:
   (nested objects, arrays, enums, `oneOf`), or edit the raw JSON. Arguments
   are validated against the schema before they are sent.
 - **See** responses as collapsible JSON, text, Markdown or images, with
-  round-trip times, and every wire message in a filterable log drawer (`⌘J`,
+  round-trip times, in a panel of their own under the form, split by a
+  separator you drag, and every wire message in a filterable log drawer (`⌘J`,
   zoomed over the columns with `⌘⇧J`),
   where rows unfold, each on its own, into the same tree as a response,
   and a toggled row moves to the top of the drawer. A reconnect keeps
@@ -344,9 +345,9 @@ are worth knowing:
   opened, the dialog shows the URL first, and nothing is opened without your
   answer. Links inside a Markdown response open in the browser when clicked.
 - A server can only claim what it returns; nothing it sends is executed
-  here. Responses larger than the drawing budget are held back until asked
-  for, lists are read for at most a thousand pages, and a child's stderr is
-  kept a line at a time.
+  here. A response of any size is drawn a screen at a time, lists are read
+  for at most a thousand pages, and a child's stderr is kept a line at a
+  time.
 
 ## The command-line mode
 

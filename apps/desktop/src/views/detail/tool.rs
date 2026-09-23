@@ -21,11 +21,13 @@ pub(super) fn tool_detail(
     meta: &str,
     window: &mut Window,
     cx: &mut Context<Workspace>,
-) -> Vec<AnyElement> {
+) -> Parts {
     let title = tool.title.clone().unwrap_or_else(|| tool.name.clone());
-    let mut parts: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
-    parts.extend(description(cx, tool.description.as_deref()).map(IntoElement::into_any_element));
-    parts.push(toolbar(ws, cx, Tabs::Tool, "Call").into_any_element());
+    let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
+    pinned.extend(description(cx, tool.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.push(toolbar(ws, cx, Tabs::Tool, "Call").into_any_element());
+    let mut body: Vec<AnyElement> = Vec::new();
+    let mut fills = false;
     if ws.selection.schema_tab {
         // Everything the server declared about the tool, foldable. Nothing
         // else in the app shows the output schema or the annotations.
@@ -57,13 +59,18 @@ pub(super) fn tool_detail(
         for (name, value) in &tool.extra {
             trees.push((name.clone(), Rc::new(value.clone()), key(name)));
         }
-        parts.push(
+        // The one tree of a tool that declared nothing but its input schema
+        // has the whole panel; several share it, each scrolling inside.
+        fills = trees.len() == 1;
+        let fit = if fills { Fit::Fill } else { Fit::Rows };
+        body.push(
             v_flex()
                 .px(px(24.))
                 .py(px(16.))
                 .gap(px(12.))
+                .when(fills, |column| column.flex_1().min_h_0())
                 .children(trees.into_iter().map(|(label, value, prefix)| {
-                    let body = json_tree_rc(value.clone(), &folds, &prefix, cx);
+                    let body = json_tree_rc(value.clone(), &folds, &prefix, fit, cx);
                     tree_section(
                         cx,
                         label,
@@ -71,6 +78,7 @@ pub(super) fn tool_detail(
                         value,
                         body,
                     )
+                    .when(fills, |section| section.flex_1().min_h_0())
                 }))
                 .into_any_element(),
         );
@@ -79,20 +87,29 @@ pub(super) fn tool_detail(
             let f = form.read(cx);
             (f.raw_mode, f.errors.clone())
         };
-        let body = form.update(cx, |f, cx| {
+        let fields = form.update(cx, |f, cx| {
             if raw {
                 f.render_raw(cx)
             } else {
                 f.render_fields(window, cx)
             }
         });
-        parts.push(div().px(px(24.)).py(px(16.)).child(body).into_any_element());
-        parts.extend(errors(cx, &errs).map(IntoElement::into_any_element));
+        // The raw editor has the whole panel; the fields scroll in it.
+        fills = raw;
+        body.push(
+            div()
+                .px(px(24.))
+                .py(px(16.))
+                .when(raw, |box_| box_.flex_1().min_h_0().flex().flex_col())
+                .child(fields)
+                .into_any_element(),
+        );
+        body.extend(errors(cx, &errs).map(IntoElement::into_any_element));
     } else {
         // No form for this schema: show it as a tree the user can fold.
         let toggle = ws.collapse_toggle(cx);
         let scope = ws.server_scope(cx);
-        parts.push(
+        body.push(
             div()
                 .px(px(24.))
                 .py(px(16.))
@@ -100,10 +117,15 @@ pub(super) fn tool_detail(
                     &tool.input_schema,
                     &ws.folds(&toggle),
                     &format!("schema:{scope}:{}", tool.name),
+                    Fit::Rows,
                     cx,
                 ))
                 .into_any_element(),
         );
     }
-    parts
+    Parts {
+        pinned,
+        body,
+        fills,
+    }
 }

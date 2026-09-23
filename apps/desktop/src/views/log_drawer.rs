@@ -19,7 +19,7 @@ use crate::clip;
 use crate::features::{Availability, DEPRECATED, Feature};
 use crate::state::{Dir, LogFilter, LogRow};
 use crate::theme::tokens;
-use crate::views::json::json_tree;
+use crate::views::json::{Fit, json_tree};
 use crate::views::log_list::{LogView, fold_prefix};
 use crate::views::log_menu::row_entries;
 use crate::views::{Workspace, mono};
