@@ -20,7 +20,8 @@ use crate::actions::{
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, SelectServer, ShowHistory,
-    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleTheme, WORKSPACE, ZoomLog,
+    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
+    WORKSPACE, ZoomLog,
 };
 use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
 use crate::theme::{self, tokens};

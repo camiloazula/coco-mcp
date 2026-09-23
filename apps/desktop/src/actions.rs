@@ -26,6 +26,8 @@ gpui_kit::actions!(
         ZoomLog,
         /// Clear the log drawer.
         ClearLog,
+        /// Show or hide the response panel's body (⌘⇧A).
+        ToggleResponse,
         /// Open the command palette (⌘K).
         CommandPalette,
         /// Switch between dark and light theme.
@@ -141,6 +143,7 @@ pub fn bind(cx: &mut App) {
             KeyBinding::new("escape", Cancel, Some(WORKSPACE)),
             KeyBinding::new("cmd-j", ToggleLog, Some(WORKSPACE)),
             KeyBinding::new("cmd-shift-j", ZoomLog, Some(WORKSPACE)),
+            KeyBinding::new("cmd-shift-a", ToggleResponse, Some(WORKSPACE)),
             KeyBinding::new("cmd-k", CommandPalette, Some(WORKSPACE)),
             KeyBinding::new("cmd-1", ShowTools, Some(WORKSPACE)),
             KeyBinding::new("cmd-2", ShowResources, Some(WORKSPACE)),

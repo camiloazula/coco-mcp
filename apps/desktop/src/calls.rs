@@ -595,6 +595,8 @@ impl AppState {
         let Some((stamp, control)) = self.responses.begin(key.clone(), method) else {
             return;
         };
+        // What was asked for is about to arrive: a collapsed panel opens.
+        self.response_open = true;
         let server_id = key.0.clone();
         let not_recorded = format!("call to `{name}` was not recorded");
         let record = record && self.store.is_some();

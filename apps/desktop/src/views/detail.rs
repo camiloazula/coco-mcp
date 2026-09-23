@@ -169,12 +169,16 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             decoded: &mut ws.decoded,
         };
         let state = ws.state.read(cx);
+        let open = state.response_open;
         state.response().map(|r| {
             let shown = Shown::live(r).waiting(state.response_waiting());
-            response::render(shown, &prefix, &mut draw, cx)
+            response::render(shown, &prefix, &mut draw, open, cx)
         })
     };
-    let key = ws.state.read(cx).response_key();
+    let (key, open) = {
+        let state = ws.state.read(cx);
+        (state.response_key(), state.response_open)
+    };
     // The header and toolbar stay put; the tab body and the response each
     // scroll on their own below them.
     v_flex()
@@ -182,7 +186,15 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         .size_full()
         .min_h_0()
         .children(pinned)
-        .child(split::render(ws, key, body, fills, response, window, cx))
+        .child(split::render(
+            ws,
+            key,
+            body,
+            fills,
+            response.map(|element| split::Panel { element, open }),
+            window,
+            cx,
+        ))
         .into_any_element()
 }
 

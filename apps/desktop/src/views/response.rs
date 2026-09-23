@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -98,6 +98,7 @@ pub fn render(
     shown: Shown<'_>,
     prefix: &str,
     draw: &mut Draw<'_>,
+    open: bool,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = *tokens(cx);
@@ -109,26 +110,52 @@ pub fn render(
         (false, _) => elapsed_label(shown.elapsed),
     };
     let has_body = shown.raw.as_object().is_some_and(|o| !o.is_empty());
+    // The header is the toggle, like the log drawer's: a click on it
+    // collapses the body to the header or shows it again, and the button at
+    // the right does the same for those who look for one.
+    let (toggle_icon, toggle_caption) = if open {
+        (IconName::PanelBottomClose, "Hide the response")
+    } else {
+        (IconName::PanelBottomOpen, "Show the response")
+    };
     let header = h_flex()
+        .id("response-header")
         .h(px(36.))
         .flex_none()
         .px(px(24.))
         .justify_between()
+        .cursor_pointer()
+        .hover(|s| s.bg(t.hover))
+        .on_click(cx.listener(|ws, _, _, cx| {
+            ws.state.update(cx, |s, cx| s.toggle_response(cx));
+        }))
         .child(
             h_flex()
                 .gap(px(12.))
-                .items_baseline()
+                .items_center()
+                .child(
+                    div().w(px(10.)).text_color(t.muted).child(
+                        Icon::new(if open {
+                            gpui_kit::component::IconName::ChevronDown
+                        } else {
+                            gpui_kit::component::IconName::ChevronRight
+                        })
+                        .with_size(px(10.))
+                        .text_color(t.muted),
+                    ),
+                )
                 .child(div().text_size(px(12.)).child("Response"))
                 .child(muted(cx, 11., meta(&shown))),
         )
         .child(
             h_flex()
+                .id("response-controls")
+                .h_full()
                 .gap(px(10.))
                 .items_center()
-                // The views show a curated reading of the result; this is the
-                // only way to take the whole of what the server sent. It reads
-                // the model when pressed, as Copy Response does.
-                // A request that hangs has a way out short of its timeout.
+                // A click on a control, or between them, must not reach the
+                // header toggle.
+                .on_click(|_, _, cx| cx.stop_propagation())
                 .children(pending.then(|| {
                     div()
                         .id("cancel-call")
@@ -153,8 +180,27 @@ pub fn render(
                     .on_click(cx.listener(|ws, _, _, cx| ws.copy_response(cx)))
                     .test_support()
                 }))
-                .child(mono(cx, 11., elapsed).text_color(t.muted)),
-        );
+                .child(mono(cx, 11., elapsed).text_color(t.muted))
+                .child(
+                    clip::icon_button(cx, "toggle-response", toggle_icon, toggle_caption)
+                        .on_click(cx.listener(|ws, _, _, cx| {
+                            ws.state.update(cx, |s, cx| s.toggle_response(cx));
+                        }))
+                        .test_support(),
+                ),
+        )
+        .test_support();
+    if !open {
+        // Collapsed: the header alone, under the input, which has the rest.
+        return v_flex()
+            .id("response")
+            .flex_none()
+            .border_t_1()
+            .border_color(t.hair)
+            .child(header)
+            .test_support()
+            .into_any_element();
+    }
     let mut fills = false;
     let body: AnyElement = match &shown.status {
         ResponseStatus::Pending => v_flex()
