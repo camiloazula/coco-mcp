@@ -182,20 +182,26 @@ it. Tags never move: a wrong release gets the next patch version.
    `skip-changelog` leaves one out. There is no changelog file: the
    Releases page is the changelog, one line per PR, so a PR title says
    what changed for a user.
-3. From an up-to-date `main`, create the tag and the release in one step:
+3. From an up-to-date `main`, push the tag, and only the tag:
 
    ```bash
-   gh release create vX.Y.Z --title "Coco MCP X.Y.Z" --generate-notes
+   git tag -a vX.Y.Z -m "Coco MCP X.Y.Z"
    ```
 
-   `--draft` keeps it unpublished until you press the button on the site;
-   `--notes-file` replaces the generated notes. A bare
-   `git push origin vX.Y.Z` also works, and the workflow then creates the
-   release itself with generated notes. Never `git push --tags`.
+   ```bash
+   git push origin vX.Y.Z
+   ```
+
+   Never `git push --tags`, and never `gh release create` for a version:
+   a release is immutable once published, nothing can be added to it
+   after, and a tag name an immutable release has used cannot be released
+   again. The workflow makes the release.
 4. The tag starts `.github/workflows/release.yml`, which refuses a tag that
    does not match `Cargo.toml`, builds the binary for macOS (arm64 and
-   x86_64), Linux (x86_64) and Windows (x86_64), and attaches the archives
-   and a `SHA256SUMS` file to the release.
+   x86_64), Linux (x86_64) and Windows (x86_64), then creates the release
+   as a draft with the generated notes, attaches the archives and a
+   `SHA256SUMS` file, and publishes it. The notes can still be edited on
+   the site afterwards; the files and the tag cannot.
 5. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
    tag's archive and checksum, for example with
    `brew bump-formula-pr --tag vX.Y.Z camiloazula/coco/coco-mcp`.

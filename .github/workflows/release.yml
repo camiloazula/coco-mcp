@@ -113,9 +113,9 @@ jobs:
           if-no-files-found: error
 
   # Attach every archive and one checksum file to the release of the tag.
-  # `gh release create` makes the release before the tag reaches here, so
-  # this normally only uploads; a bare `git push origin vX.Y.Z` gets a
-  # release with generated notes instead.
+  # Releases are immutable once published: nothing can be added after, so
+  # the release is made as a draft, the files go in, and only then is it
+  # published, with the generated notes.
   publish:
     name: publish
     needs: [version, build]
@@ -134,11 +134,12 @@ jobs:
           cd dist
           sha256sum coco-mcp-* > SHA256SUMS
           cat SHA256SUMS
-      - name: Upload
+      - name: Upload and publish
         run: |
           tag="$GITHUB_REF_NAME"
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --verify-tag --generate-notes \
+            gh release create "$tag" --verify-tag --draft --generate-notes \
               --title "Coco MCP ${{ needs.version.outputs.version }}"
           fi
           gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false --latest
