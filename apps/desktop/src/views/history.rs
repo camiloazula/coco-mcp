@@ -150,6 +150,7 @@ pub fn render(
         collapsed: &ws.collapsed,
         rev: ws.collapse_rev,
         toggle: &toggle,
+        scrolls: &ws.tree_scrolls,
     };
     let sent = Rc::new(record.args.clone());
     // The arguments take their rows, so a short call leaves the result the

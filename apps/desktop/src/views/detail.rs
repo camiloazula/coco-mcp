@@ -163,6 +163,7 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             collapsed: &ws.collapsed,
             rev: ws.collapse_rev,
             toggle: &toggle,
+            scrolls: &ws.tree_scrolls,
         };
         let mut draw = Draw {
             folds: &folds,
