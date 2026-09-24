@@ -66,6 +66,9 @@ pub struct Workspace {
     pub palette_open: bool,
     /// Scroll state of the middle list's rows.
     pub(crate) item_scroll: UniformListScrollHandle,
+    /// The scroll position of every JSON tree, by prefix, so a tree keeps
+    /// its place across renders and takes the wheel while it can move.
+    pub(crate) tree_scrolls: crate::views::json::TreeScrolls,
     /// Scroll state of the sidebar's server rows.
     pub(crate) server_scroll: ScrollHandle,
     /// Focus of the open dialog, which takes the window's keys while open.
@@ -169,6 +172,7 @@ impl Workspace {
             palette: None,
             palette_open: false,
             item_scroll: UniformListScrollHandle::new(),
+            tree_scrolls: Default::default(),
             server_scroll: ScrollHandle::new(),
             dialog_focus: cx.focus_handle(),
             followed: (None, None),

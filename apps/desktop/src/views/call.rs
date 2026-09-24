@@ -220,6 +220,7 @@ impl Workspace {
             collapsed: &self.collapsed,
             rev: self.collapse_rev,
             toggle,
+            scrolls: &self.tree_scrolls,
         }
     }
 

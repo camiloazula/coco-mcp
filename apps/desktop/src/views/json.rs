@@ -18,15 +18,15 @@
 //! root rather than by the printed path, because a key may itself contain
 //! `.` or `[`; the path is only ever produced for a person to read.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
     AnyElement, App, Div, Hsla, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
-    ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, StyledText,
-    TestSupportExt as _, Window, div, px, uniform_list,
+    ParentElement, Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled, StyledText,
+    TestSupportExt as _, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use mcp_exchange::{Segment, copy_text, path_string, resolve};
 use serde_json::Value;
@@ -49,8 +49,8 @@ pub const MAX_TREE_ROWS: usize = 30;
 /// was open at the time.
 pub type Toggle = Rc<dyn Fn(String, bool, &mut Window, &mut App)>;
 
-/// What every tree reads to decide which nodes are folded, and the callback
-/// that changes it.
+/// What every tree reads to decide which nodes are folded, the callback
+/// that changes it, and where the trees keep their scroll positions.
 pub struct Folds<'a> {
     /// Nodes folded by the user or by code.
     pub collapsed: &'a HashSet<String>,
@@ -58,6 +58,62 @@ pub struct Folds<'a> {
     pub rev: u64,
     /// Flips one node.
     pub toggle: &'a Toggle,
+    /// The scroll position of every tree, by prefix.
+    pub scrolls: &'a TreeScrolls,
+}
+
+/// The scroll handle of every tree drawn so far, by prefix, and where each
+/// was last seen. A tree that scrolls inside a scrolling panel takes the
+/// wheel while it can still move; the handle is what tells whether it did.
+#[derive(Default)]
+pub struct TreeScrolls(RefCell<HashMap<String, TreeScroll>>);
+
+impl std::fmt::Debug for TreeScrolls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("TreeScrolls")
+            .field(&self.0.borrow().len())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+struct TreeScroll {
+    handle: UniformListScrollHandle,
+    /// The position after the last wheel event, clamped to the rows.
+    seen: Rc<Cell<Pixels>>,
+}
+
+impl TreeScrolls {
+    /// The scroll of the tree drawn under `prefix`, made on first sight.
+    fn of(&self, prefix: &str) -> TreeScroll {
+        self.0
+            .borrow_mut()
+            .entry(prefix.to_owned())
+            .or_insert_with(|| TreeScroll {
+                handle: UniformListScrollHandle::new(),
+                seen: Rc::new(Cell::new(Pixels::ZERO)),
+            })
+            .clone()
+    }
+}
+
+impl TreeScroll {
+    /// Whether the tree moved on the wheel event being handled. Its own
+    /// scroll listener has run by now, so a position that changed, clamped
+    /// to the rows it has, means the wheel was for it; at an end the raw
+    /// offset overshoots, clamps back to where it was, and the wheel goes
+    /// on to the panel around it.
+    fn took_the_wheel(&self) -> bool {
+        let state = self.handle.0.borrow();
+        let Some(size) = state.last_item_size else {
+            return false;
+        };
+        let lowest = (size.item.height - size.contents.height).min(Pixels::ZERO);
+        let now = state.base_handle.offset().y.clamp(lowest, Pixels::ZERO);
+        let moved = now != self.seen.get();
+        self.seen.set(now);
+        moved
+    }
 }
 
 impl std::fmt::Debug for Folds<'_> {
@@ -209,6 +265,7 @@ pub fn json_tree_rc(
     let plan = planned(&root, &key, folds);
     let count = plan.lines.len();
     let toggle = folds.toggle.clone();
+    let scroll = folds.scrolls.of(prefix);
     let list = uniform_list(SharedString::from(format!("{prefix}-tree")), count, {
         let root = root.clone();
         move |range, _window, cx| {
@@ -219,6 +276,15 @@ pub fn json_tree_rc(
     })
     // Its rows' height, up to what it is given.
     .with_sizing_behavior(ListSizingBehavior::Infer)
+    .track_scroll(&scroll.handle)
+    // A wheel the tree moved on is its own: the panel around it, which
+    // would otherwise scroll on the same event, stays put until the tree
+    // reaches an end.
+    .on_scroll_wheel(move |_, _, cx| {
+        if scroll.took_the_wheel() {
+            cx.stop_propagation();
+        }
+    })
     .w_full()
     .font_family(cx.theme().mono_font_family.clone())
     .text_size(px(12.))
@@ -241,11 +307,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn folds<'a>(collapsed: &'a HashSet<String>, rev: u64, toggle: &'a Toggle) -> Folds<'a> {
+    fn folds<'a>(
+        collapsed: &'a HashSet<String>,
+        rev: u64,
+        toggle: &'a Toggle,
+        scrolls: &'a TreeScrolls,
+    ) -> Folds<'a> {
         Folds {
             collapsed,
             rev,
             toggle,
+            scrolls,
         }
     }
 
@@ -253,18 +325,25 @@ mod tests {
     fn a_tree_is_planned_once_per_value_and_fold() {
         let toggle: Toggle = Rc::new(|_, _, _, _| {});
         let none = HashSet::new();
+        let scrolls = TreeScrolls::default();
         let value = Rc::new(json!([1, 2, {"a": [3]}]));
-        let first = planned(&value, "t$", &folds(&none, 0, &toggle));
+        let first = planned(&value, "t$", &folds(&none, 0, &toggle, &scrolls));
         assert!(
-            Rc::ptr_eq(&first, &planned(&value, "t$", &folds(&none, 0, &toggle))),
+            Rc::ptr_eq(
+                &first,
+                &planned(&value, "t$", &folds(&none, 0, &toggle, &scrolls))
+            ),
             "kept"
         );
         let other = Rc::new(json!([1, 2, {"a": [3]}]));
         assert!(
-            !Rc::ptr_eq(&first, &planned(&other, "t$", &folds(&none, 0, &toggle))),
+            !Rc::ptr_eq(
+                &first,
+                &planned(&other, "t$", &folds(&none, 0, &toggle, &scrolls))
+            ),
             "another value under the same key is planned afresh"
         );
-        let refolded = planned(&value, "t$", &folds(&none, 1, &toggle));
+        let refolded = planned(&value, "t$", &folds(&none, 1, &toggle, &scrolls));
         assert!(!Rc::ptr_eq(&first, &refolded), "and so is a fold");
     }
 }

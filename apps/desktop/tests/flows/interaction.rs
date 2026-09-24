@@ -4,7 +4,7 @@
 //! replay that needs a session, and the log drawer zoomed and restored.
 
 use coco_mcp::calls::ResponseStatus;
-use coco_mcp::state::{AppState, Confirm, LogFilter, Mode, Screen, Status};
+use coco_mcp::state::{AppState, Confirm, Dir, LogFilter, Mode, Screen, Status};
 use coco_mcp::views::json::{LINE_HEIGHT, MAX_TREE_ROWS};
 use gpui_kit::px;
 use gpui_kit::test::TestWindowExt as _;
@@ -186,9 +186,12 @@ pub fn schema_blocks_flow() {
         );
     });
     snap(&mut live.cx, live.handle, "66-schema-blocks");
+    // A wheel over a block's label is the tab's; over its tree it would be
+    // the tree's first (`tree_takes_the_wheel_flow`).
     live.ui(|window, cx| {
         let down = gpui_kit::point(px(0.), px(-800.));
-        window.scroll("detail-input", gpui_kit::ScrollDelta::Pixels(down), cx);
+        let label = gpui_kit::SharedString::from(format!("outschema:{id}:declared-copy"));
+        window.scroll(label, gpui_kit::ScrollDelta::Pixels(down), cx);
     });
     live.ui(|window, _| {
         for (what, path) in [("annot", "$"), ("_meta", "$"), ("_meta", "$.stable")] {
@@ -197,6 +200,117 @@ pub fn schema_blocks_flow() {
         }
     });
     snap(&mut live.cx, live.handle, "66-schema-blocks-scrolled");
+}
+
+/// A wheel over a tree that scrolls inside the tab moves the tree and not
+/// the tab around it, until the tree reaches its end; then the tab takes
+/// the wheel.
+pub fn tree_takes_the_wheel_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.select(Mode::Tools, "declared");
+    live.ui(|window, cx| window.click("tab-schema", cx));
+    let id = live
+        .cx
+        .update(|cx| live.state.read(cx).servers[0].record.id.clone());
+    let row = |what: &str, path: &str| {
+        gpui_kit::SharedString::from(format!("row{what}:{id}:declared{path}"))
+    };
+    let top = |window: &mut gpui_kit::Window, id: gpui_kit::SharedString| {
+        window.find(id).bounds().origin.y
+    };
+    let (tab, tree) = live.ui(|window, _| {
+        (
+            top(window, row("schema", "$")),
+            top(window, row("outschema", "$.properties.id")),
+        )
+    });
+    let over = |window: &mut gpui_kit::Window,
+                target: gpui_kit::SharedString,
+                by: f32,
+                cx: &mut gpui_kit::App| {
+        let delta = gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-by)));
+        window.scroll(target, delta, cx);
+    };
+    // Two rows' worth over the output schema: it moves, the tab does not.
+    live.ui(|window, cx| {
+        over(
+            window,
+            row("outschema", "$.properties.id"),
+            2. * LINE_HEIGHT,
+            cx,
+        )
+    });
+    live.ui(|window, _| {
+        assert_eq!(top(window, row("schema", "$")), tab, "the tab stays put");
+        let moved = tree - top(window, row("outschema", "$.properties.id"));
+        assert!(
+            (moved - px(2. * LINE_HEIGHT)).abs() < px(1.),
+            "the tree scrolled two rows, not {moved:?}"
+        );
+    });
+    // On to its end in one wheel: still the tree's.
+    live.ui(|window, cx| over(window, row("outschema", "$.properties.id"), 3000., cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            top(window, row("schema", "$")),
+            tab,
+            "the tab stays put at the end"
+        );
+        assert!(
+            window.try_find(row("outschema", "$.required")).is_some(),
+            "at its end"
+        );
+    });
+    // The tree has no further to go: the tab takes the next wheel, over a
+    // row the tree shows at its end that is above the tab's fold.
+    live.ui(|window, cx| over(window, row("outschema", "$.properties.counts"), 100., cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            top(window, row("schema", "$")),
+            tab - px(100.),
+            "the tab scrolled"
+        );
+    });
+    snap(&mut live.cx, live.handle, "67-tree-took-the-wheel");
+
+    // The same in the log drawer: the `tools/list` answer is a result far
+    // past the cap, so it scrolls inside its row, and a wheel over it leaves
+    // the rows around it where they are.
+    live.ui(|window, cx| window.click("toggle-log", cx));
+    live.wait("the drawer opens", |s| s.drawer_open);
+    let (ix, prefix) = live.cx.update(|cx| {
+        let entry = &live.state.read(cx).servers[0];
+        let ix = entry
+            .log()
+            .iter()
+            .position(|row| row.method == "tools/list" && row.dir == Dir::In)
+            .expect("the tools/list answer is logged");
+        let prefix = coco_mcp::views::fold_prefix(&entry.record.id, entry.log()[ix].row_id);
+        (ix, prefix)
+    });
+    // A row a few down, still built once the tree has scrolled two.
+    let tools = gpui_kit::SharedString::from(format!("row{prefix}$.tools[0].inputSchema"));
+    live.ui(|window, cx| window.click(("log-row", ix), cx));
+    let (line, payload) = live.ui(|window, _| {
+        (
+            window.find(("log-row", ix)).bounds().origin.y,
+            top(window, tools.clone()),
+        )
+    });
+    live.ui(|window, cx| over(window, tools.clone(), 2. * LINE_HEIGHT, cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find(("log-row", ix)).bounds().origin.y,
+            line,
+            "the log rows stay put"
+        );
+        let moved = payload - top(window, tools.clone());
+        assert!(
+            (moved - px(2. * LINE_HEIGHT)).abs() < px(1.),
+            "the payload scrolled two rows, not {moved:?}"
+        );
+    });
+    snap(&mut live.cx, live.handle, "67-log-tree-took-the-wheel");
 }
 
 /// A recorded call cannot be replayed without a session, and the row says
