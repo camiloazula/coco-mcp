@@ -1138,20 +1138,35 @@ mod macos {
             window.render_frame(cx);
         })
         .unwrap();
-        for _ in 0..200 {
-            if cx.update(|cx| state.read(cx).screen != Screen::AddServer) {
+        // Saved, the server is connected with the form kept open; its host
+        // cannot be reached, so the form stays with the failure under the
+        // fields rather than closing.
+        for _ in 0..400 {
+            if cx.update(|cx| matches!(state.read(cx).servers[remote_ix].status, Status::Error(_)))
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
             cx.run_until_parked();
         }
-        cx.update(|cx| {
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
             let s = state.read(cx);
-            assert_eq!(s.screen, Screen::Detail, "the form closes once saved");
-            assert!(s.editing.is_none());
+            assert!(matches!(s.servers[remote_ix].status, Status::Error(_)));
+            assert_eq!(
+                s.screen,
+                Screen::AddServer,
+                "the form stays until connected"
+            );
+            assert_eq!(s.editing, Some(remote_ix));
             assert_eq!(s.servers[remote_ix].record.name, "remote-api");
             assert_eq!(s.persistence, Persistence::Saved);
-        });
+            assert!(
+                window.try_find("connect-error").is_some(),
+                "the failure is under the fields"
+            );
+        })
+        .unwrap();
         let stored = store.get_server(&record.id).unwrap().unwrap();
         assert_eq!(stored.name, "remote-api");
         assert_eq!(stored.spec, remote, "only the name changed");
@@ -1914,7 +1929,8 @@ mod macos {
             window.render_frame(cx);
         })
         .unwrap();
-        for _ in 0..100 {
+        // The form closes once the saved server connects, not on the save.
+        for _ in 0..400 {
             if cx.update(|cx| state.read(cx).editing.is_none()) {
                 break;
             }
@@ -3727,6 +3743,7 @@ mod macos {
         crate::unhappy::refused_token_flow();
         crate::unhappy::expired_token_flow();
         crate::unhappy::unreachable_server_flow();
+        crate::unhappy::form_stays_until_connected_flow();
         capture("03-empty", demo_state(false), true);
         let mut s = demo_state(true);
         s.screen = Screen::Detail;

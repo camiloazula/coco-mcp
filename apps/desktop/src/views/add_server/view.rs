@@ -19,7 +19,25 @@ impl Render for AddServerForm {
         // Opened on purpose, the form can be left; shown because the server
         // is off, it is the pane, and there is nothing to go back to.
         let opened = self.state.read(cx).screen == Screen::AddServer;
+        // How connecting with the saved settings is going, under the fields:
+        // the form stays until it succeeds.
+        let status = self.editing.as_ref().and_then(|(ix, _)| {
+            self.state
+                .read(cx)
+                .servers
+                .get(*ix)
+                .map(|s| s.status.clone())
+        });
+        let connecting = status == Some(Status::Connecting);
+        let failed = match status {
+            Some(Status::Error(text)) => Some(text),
+            _ => None,
+        };
         let (title, subtitle) = match (editing, opened) {
+            (true, true) if failed.is_some() => (
+                "Edit server",
+                "The connection failed. Change the settings and connect again.",
+            ),
             (true, true) => (
                 "Edit server",
                 "Saved, then connected with the new settings.",
@@ -197,9 +215,36 @@ impl Render for AddServerForm {
                                 .text_color(t.err)
                                 .child(e)
                                 .test_support()
-                        })),
+                        }))
+                        .when(self.error.is_none() && connecting, |row| {
+                            row.child(
+                                muted(cx, 12., "Connecting…")
+                                    .id("form-connecting")
+                                    .test_support(),
+                            )
+                        }),
                 ),
         );
+        // The failure of the last connect, on a line of its own under the
+        // button, wrapped to the form's width.
+        if let Some(text) = failed.filter(|_| self.error.is_none() && !connecting) {
+            grid = grid.child(
+                h_flex()
+                    .gap(px(16.))
+                    .child(div().w(px(140.)).flex_none())
+                    .child(
+                        div()
+                            .id("connect-error")
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(12.))
+                            .text_color(t.err)
+                            .whitespace_normal()
+                            .child(text)
+                            .test_support(),
+                    ),
+            );
+        }
         v_flex()
             .id("add-server-form")
             .flex_1()
