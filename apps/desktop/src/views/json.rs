@@ -225,8 +225,12 @@ pub fn json_tree_rc(
     .line_height(px(LINE_HEIGHT))
     .text_color(tokens(cx).fg);
     match fit {
+        // Its rows' height, given outright: a list left to infer its height
+        // inside a flex column is handed the column's, and draws only the
+        // rows that fit the cap while taking far more room than they need.
         Fit::Rows => list
-            .max_h(px(LINE_HEIGHT * MAX_TREE_ROWS as f32))
+            .flex_none()
+            .h(px(LINE_HEIGHT * count.min(MAX_TREE_ROWS) as f32))
             .into_any_element(),
         Fit::Fill => list.flex_1().min_h_0().into_any_element(),
     }

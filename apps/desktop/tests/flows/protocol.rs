@@ -15,7 +15,7 @@ use gpui_kit::{AppContext as _, Entity, HeadlessAppContext, SharedString, Window
 use mcp_core::ServerSpec;
 use serde_json::{Value, json};
 
-use crate::macos::{context, item_index, mock_binary, snap, wait_for_request};
+use crate::macos::{click_item, context, item_index, mock_binary, snap, wait_for_request};
 
 /// A window on the mock server, started with `args` and connected.
 ///
@@ -133,7 +133,7 @@ impl Live {
     pub(crate) fn select(&mut self, mode: Mode, label: &str) {
         self.show(mode);
         let ix = item_index(&mut self.cx, &self.state, label);
-        self.ui(|window, cx| window.click(("item", ix), cx));
+        self.ui(|window, cx| click_item(window, ix, cx));
     }
 
     /// Select tool `name` and call it with `args`, as the Call button does
