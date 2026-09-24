@@ -1,7 +1,6 @@
 # Build the binaries of a release and attach them to its GitHub release.
 #
-# Runs only when a version tag is pushed, which `gh release create vX.Y.Z`
-# does (CONTRIBUTING.md, "Releasing"). Pushes to a branch and pull requests
+# Runs only when a version tag is pushed (CONTRIBUTING.md, "Releasing"). Pushes to a branch and pull requests
 # never reach this file; `ci.yml` covers those. A manual run from the
 # Actions tab builds every target and keeps the results as workflow
 # artifacts without publishing anything, to prove the matrix before a tag.
@@ -143,3 +142,25 @@ jobs:
           fi
           gh release upload "$tag" dist/* --clobber
           gh release edit "$tag" --draft=false --latest
+      # The Homebrew tap and the npm packages follow the release: a
+      # `release` dispatch starts the workflow of each, which bumps the
+      # formula or publishes the packages. Both also run every hour, so a
+      # missing token or a refused dispatch delays them, never loses them,
+      # and the release itself is never failed for it.
+      - name: Tell the tap and the npm packages
+        env:
+          DISPATCH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::notice::no RELEASE_DISPATCH_TOKEN: the tap and npm take the release within the hour"
+            exit 0
+          fi
+          for repo in homebrew-coco coco-mcp-npm; do
+            if GH_TOKEN="$DISPATCH_TOKEN" gh api "repos/camiloazula/$repo/dispatches" \
+                -f event_type=release -f "client_payload[version]=$VERSION" > /dev/null; then
+              echo "told $repo about $VERSION"
+            else
+              echo "::warning::$repo was not told; its hourly run takes the release"
+            fi
+          done

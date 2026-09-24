@@ -202,12 +202,19 @@ it. Tags never move: a wrong release gets the next patch version.
    as a draft with the generated notes, attaches the archives and a
    `SHA256SUMS` file, and publishes it. The notes can still be edited on
    the site afterwards; the files and the tag cannot.
-5. Bump the Homebrew formula in `camiloazula/homebrew-coco` to the new
-   tag's archive and checksum, for example with
-   `brew bump-formula-pr --tag vX.Y.Z camiloazula/coco/coco-mcp`.
-6. The npm packages follow on their own: the workflow in
-   `camiloazula/coco-mcp-npm` publishes the latest release within the
-   hour, or at once when run by hand with the version.
+5. The Homebrew formula and the npm packages follow on their own. Once
+   the release is published, the workflow sends a `release` dispatch with
+   the version to `camiloazula/homebrew-coco`, whose `bump` workflow points
+   the formula at the new archives and merges that through a pull request,
+   and to `camiloazula/coco-mcp-npm`, whose `publish` workflow publishes the
+   five packages through npm trusted publishing. Nothing is published from
+   a machine.
+
+   The dispatch uses the secret `RELEASE_DISPATCH_TOKEN`: a fine-grained
+   token with Contents read and write on those two repositories. Without
+   it, or if a dispatch is refused, both workflows still take the release
+   on their hourly run. Either can also be run by hand from its Actions tab
+   with a version.
 
 To rehearse the matrix without a tag, run the workflow by hand from the
 Actions tab: it builds every target and keeps the archives as workflow
