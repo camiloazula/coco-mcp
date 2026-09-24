@@ -5,6 +5,8 @@
 
 use coco_mcp::calls::ResponseStatus;
 use coco_mcp::state::{AppState, Confirm, LogFilter, Mode, Screen, Status};
+use coco_mcp::views::json::{LINE_HEIGHT, MAX_TREE_ROWS};
+use gpui_kit::px;
 use gpui_kit::test::TestWindowExt as _;
 use serde_json::json;
 
@@ -150,6 +152,51 @@ pub fn titles_and_declaration_flow() {
     live.cx.update(|cx| {
         assert!(!live.workspace.read(cx).selection.schema_tab);
     });
+}
+
+/// The Schema tab of a tool that declares several blocks lays them out one
+/// after another in one scrolling column: a long block is capped at
+/// [`MAX_TREE_ROWS`] and scrolls inside, and the blocks under it follow
+/// right away and are drawn once scrolled to.
+pub fn schema_blocks_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.select(Mode::Tools, "declared");
+    live.ui(|window, cx| window.click("tab-schema", cx));
+    let id = live
+        .cx
+        .update(|cx| live.state.read(cx).servers[0].record.id.clone());
+    let row = |what: &str, path: &str| {
+        gpui_kit::SharedString::from(format!("row{what}:{id}:declared{path}"))
+    };
+    live.ui(|window, _| {
+        let output = window.find(row("outschema", "$")).bounds().origin.y;
+        let annotations = window.find(row("annot", "$")).bounds().origin.y;
+        let meta = window.find(row("_meta", "$")).bounds().origin.y;
+        // The output schema has more rows than the cap, so the annotations
+        // start one cap, a label and a gap below it: not a row further.
+        let cap = px(LINE_HEIGHT * MAX_TREE_ROWS as f32);
+        assert!(
+            annotations > output + cap && annotations < output + cap + px(60.),
+            "annotations at {annotations:?} follow the output schema at {output:?}"
+        );
+        assert!(meta > annotations, "_meta at {meta:?} follows annotations");
+        assert!(
+            !window.find(row("_meta", "$.stable")).visible(),
+            "the last row is below the fold"
+        );
+    });
+    snap(&mut live.cx, live.handle, "66-schema-blocks");
+    live.ui(|window, cx| {
+        let down = gpui_kit::point(px(0.), px(-800.));
+        window.scroll("detail-input", gpui_kit::ScrollDelta::Pixels(down), cx);
+    });
+    live.ui(|window, _| {
+        for (what, path) in [("annot", "$"), ("_meta", "$"), ("_meta", "$.stable")] {
+            let found = window.find(row(what, path));
+            assert!(found.visible(), "{what}{path} is drawn once scrolled to");
+        }
+    });
+    snap(&mut live.cx, live.handle, "66-schema-blocks-scrolled");
 }
 
 /// A recorded call cannot be replayed without a session, and the row says

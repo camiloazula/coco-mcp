@@ -371,6 +371,18 @@ mod macos {
         })
     }
 
+    /// Click row `ix` of the item list, scrolled to it first: a list drawn
+    /// above the log drawer shows fewer rows than the mock server lists, and
+    /// a row out of view is not built.
+    pub(crate) fn click_item(window: &mut gpui_kit::Window, ix: usize, cx: &mut gpui_kit::App) {
+        if window.try_find(("item", ix)).is_none() {
+            let down = point(px(0.), px(-28. * ix as f32));
+            window.scroll("item-rows", gpui_kit::ScrollDelta::Pixels(down), cx);
+            window.render_frame(cx);
+        }
+        window.click(("item", ix), cx);
+    }
+
     /// Wait until the server has asked something (a dialog is open).
     pub(crate) fn wait_for_request(
         cx: &mut HeadlessAppContext,
@@ -470,7 +482,7 @@ mod macos {
         // roots/list: one URI per line.
         let roots = item_index(cx, state, "roots");
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click(("item", roots), cx);
+            click_item(window, roots, cx);
             window.render_frame(cx);
             window.click("call", cx);
         })
@@ -3700,6 +3712,7 @@ mod macos {
         crate::interaction::dialog_keyboard_flow();
         crate::interaction::empty_states_flow();
         crate::interaction::titles_and_declaration_flow();
+        crate::interaction::schema_blocks_flow();
         crate::interaction::replay_needs_session_flow();
         crate::interaction::log_level_filter_flow();
         crate::interaction::double_click_server_flow();

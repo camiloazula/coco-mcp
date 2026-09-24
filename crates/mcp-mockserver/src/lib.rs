@@ -966,6 +966,25 @@ impl MockServer {
         CallToolResult::structured(serde_json::json!({"value": "three"}))
     }
 
+    /// Declare everything a tool can beside its input: a long output
+    /// schema, annotations and `_meta`, so a client's schema view is tested
+    /// on several blocks at once.
+    #[tool(
+        output_schema = declared_schema(),
+        annotations(title = "Declared", read_only_hint = true, idempotent_hint = true),
+        meta = declared_meta()
+    )]
+    fn declared(&self) -> CallToolResult {
+        CallToolResult::structured(serde_json::json!({
+            "id": "declared-1",
+            "name": "declared",
+            "tags": ["mock"],
+            "address": {"street": "1 Mock St", "city": "Mockville", "postcode": "00000", "country": "XX"},
+            "items": [],
+            "counts": {"read": 0, "written": 0, "failed": 0},
+        }))
+    }
+
     /// Ask the client to answer a question: with `elicitation/create` on a
     /// legacy request, as an input request of a round trip on a 2026-07-28
     /// one.
@@ -1366,6 +1385,74 @@ fn number_value_schema() -> Arc<rmcp::model::JsonObject> {
         "required": ["value"],
     });
     Arc::new(schema.as_object().cloned().unwrap_or_default())
+}
+
+/// The output schema `declared` declares: a record with nested objects and
+/// an array of objects, long enough to need a scroll of its own.
+fn declared_schema() -> Arc<rmcp::model::JsonObject> {
+    let schema = serde_json::json!({
+        "type": "object",
+        "title": "Declared record",
+        "description": "Everything a record can carry.",
+        "properties": {
+            "id": {"type": "string", "description": "Unique id."},
+            "name": {"type": "string", "description": "Display name."},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Free-form labels."},
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": {"type": "string"},
+                    "city": {"type": "string"},
+                    "postcode": {"type": "string", "pattern": "^[0-9]{5}$"},
+                    "country": {"type": "string", "minLength": 2, "maxLength": 2}
+                },
+                "required": ["street", "city", "country"]
+            },
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "sku": {"type": "string"},
+                        "quantity": {"type": "integer", "minimum": 0},
+                        "price": {"type": "number", "minimum": 0},
+                        "currency": {"type": "string", "enum": ["EUR", "USD", "GBP"]},
+                        "dimensions": {
+                            "type": "object",
+                            "properties": {
+                                "width": {"type": "number"},
+                                "height": {"type": "number"},
+                                "depth": {"type": "number"},
+                                "unit": {"type": "string", "enum": ["mm", "cm", "m"]}
+                            }
+                        }
+                    },
+                    "required": ["sku", "quantity"]
+                }
+            },
+            "counts": {
+                "type": "object",
+                "properties": {
+                    "read": {"type": "integer"},
+                    "written": {"type": "integer"},
+                    "failed": {"type": "integer"}
+                },
+                "required": ["read", "written", "failed"]
+            }
+        },
+        "required": ["id", "name"],
+    });
+    Arc::new(schema.as_object().cloned().unwrap_or_default())
+}
+
+/// The `_meta` `declared` carries.
+fn declared_meta() -> rmcp::model::MetaObject {
+    let meta = serde_json::json!({
+        "vendor": SERVER_NAME,
+        "since": "2026-09-24",
+        "stable": true,
+    });
+    rmcp::model::MetaObject(meta.as_object().cloned().unwrap_or_default())
 }
 
 /// Whether `context` is a 2026-07-28 request, which is asked for input inside
