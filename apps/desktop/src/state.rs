@@ -806,6 +806,11 @@ pub struct AppState {
     /// The edit form opened for a refused token focuses the token field
     /// rather than the name; taken by the form when it opens.
     pub focus_token: bool,
+    /// The server the form saved and is connecting. The form stays open on
+    /// it, showing how the connect goes under the fields, and closes once
+    /// the connection is made; a failure leaves the settings there to
+    /// change and try again.
+    pub form_awaits: Option<usize>,
     /// How long a quiet server goes before the session pings it.
     pub keepalive: Option<Duration>,
     /// How an OAuth authorization URL is opened: the system browser, unless
@@ -977,6 +982,7 @@ impl AppState {
             confirm: None,
             editing: None,
             focus_token: false,
+            form_awaits: None,
             keepalive: SessionOptions::default().keepalive,
             oauth_open: None,
             items: RefCell::default(),
@@ -1572,8 +1578,27 @@ impl AppState {
     /// Leave the add-server form.
     pub fn cancel_add_server(&mut self, cx: &mut Context<Self>) {
         self.editing = None;
+        self.form_awaits = None;
         self.screen = Screen::Detail;
         self.changed(cx);
+    }
+
+    /// Connect server `ix`, just saved from the form, with the form kept
+    /// open on it until the connection is made. Nobody is moved to a pane
+    /// with nothing to show: a failure is written under the fields, where
+    /// the settings can be changed and connected again.
+    fn await_connect(&mut self, ix: usize, cx: &mut Context<Self>) {
+        // Selecting shows the detail pane; the form is put back over it.
+        self.select_server(ix, cx);
+        // Nothing to wait for without a runtime to connect on.
+        if self.bridge.is_none() {
+            self.editing = None;
+            return;
+        }
+        self.editing = Some(ix);
+        self.screen = Screen::AddServer;
+        self.form_awaits = Some(ix);
+        self.connect(ix, cx);
     }
 
     /// Save server `ix` under a new name, spec and protocol, then reconnect
@@ -1614,10 +1639,7 @@ impl AppState {
                 let saved = saved.unwrap_or_else(|| Err("save task failed".into()));
                 let _ = done.send(saved.map(|saved| {
                     if let Some(ix) = state.apply_edit(saved) {
-                        state.editing = None;
-                        state.screen = Screen::Detail;
-                        state.select_server(ix, cx);
-                        state.connect(ix, cx);
+                        state.await_connect(ix, cx);
                     }
                 }));
             },
@@ -1705,8 +1727,7 @@ impl AppState {
                 let saved = saved.unwrap_or_else(|| Err("save task failed".into()));
                 let _ = done.send(saved.map(|saved| {
                     let ix = state.push_saved(saved);
-                    state.select_server(ix, cx);
-                    state.connect(ix, cx);
+                    state.await_connect(ix, cx);
                 }));
             },
             cx,
@@ -2387,6 +2408,16 @@ impl AppState {
                         entry.status = Status::Error(explain(&e, Some(&entry.record.spec)));
                     }
                     None => entry.status = Status::Error("connect task failed".into()),
+                }
+                // Connected, the form that saved the server has done its
+                // job; failed, it stays with the failure under its fields.
+                if state.form_awaits == Some(pos) && state.servers[pos].status == Status::Connected
+                {
+                    state.form_awaits = None;
+                    if state.screen == Screen::AddServer && state.editing == Some(pos) {
+                        state.editing = None;
+                        state.screen = Screen::Detail;
+                    }
                 }
                 if let Some((level, unread, name)) = after {
                     if state.selected_server == Some(pos) {

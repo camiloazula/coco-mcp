@@ -341,3 +341,59 @@ pub fn unreachable_server_flow() {
     assert!(!text.contains('['), "no type paths: {text}");
     snap(&mut live.cx, live.handle, "68-unreachable");
 }
+
+/// A server saved from the form is connected with the form kept open: a
+/// command that cannot start leaves the form there with the failure under
+/// its fields, and once the command is fixed and connects, the form closes.
+pub fn form_stays_until_connected_flow() {
+    let store = mcp_store::Store::open_in_memory().unwrap();
+    let model = AppState::new(
+        Some(coco_mcp::bridge::Bridge::new().unwrap()),
+        Some(store.clone()),
+    );
+    let mut live = crate::protocol::open(model, store);
+    live.ui(|window, cx| {
+        window.click("add-server", cx);
+        window.render_frame(cx);
+        window.click("name", cx);
+        window.input("local", cx);
+        window.click("command", cx);
+        window.input("nope-not-a-server", cx);
+        window.click("connect", cx);
+    });
+    live.wait("the connect fails", |s| {
+        matches!(s.servers.first().map(|e| &e.status), Some(Status::Error(_)))
+    });
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert_eq!(s.screen, Screen::AddServer, "the form stays");
+        assert_eq!(s.editing, Some(0), "on the saved server");
+    });
+    live.ui(|window, _| {
+        assert!(
+            window.try_find("connect-error").is_some(),
+            "the failure is under the fields"
+        );
+        assert!(window.try_find("connect").is_some(), "ready to try again");
+    });
+    snap(&mut live.cx, live.handle, "69-form-connect-failed");
+
+    let mock = crate::macos::mock_binary().display().to_string();
+    live.ui(|window, cx| {
+        window.click("command", cx);
+        window.press("cmd-a", cx);
+        window.input(&mock, cx);
+        window.click("connect", cx);
+    });
+    live.wait("the fixed command connects", |s| {
+        s.servers[0].status == Status::Connected
+    });
+    live.wait("the form closes", |s| {
+        s.screen == Screen::Detail && s.editing.is_none()
+    });
+    assert_eq!(
+        live.store.list_servers().unwrap().len(),
+        1,
+        "saved in place, not added again"
+    );
+}

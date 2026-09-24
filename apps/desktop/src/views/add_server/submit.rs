@@ -90,6 +90,9 @@ impl AddServerForm {
                 return;
             }
         };
+        // What an earlier save was refused for no longer applies; the form
+        // stays open through the connect, so it would be read as current.
+        self.error = None;
         let editing = self.editing.as_ref().map(|(ix, _)| *ix);
         let protocol = self.protocol;
         let mut saving = self.state.update(cx, |state, cx| match editing {
