@@ -11,6 +11,7 @@
 // unwrap()/expect() are denied in shipped code but fine inside tests.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod import;
 mod saved;
 mod source;
 mod style;
@@ -523,46 +524,7 @@ async fn run(cli: Cli) -> Result<u8, String> {
             let text =
                 std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let config = mcp_exchange::read_client_config(&text)?;
-            let secrets: std::sync::Arc<dyn mcp_auth::SecretStore> =
-                std::sync::Arc::new(mcp_auth::KeyringStore::default());
-            let mut added = Vec::new();
-            for (name, why) in &config.skipped {
-                style::warn(format!("`{name}` skipped: {why}"));
-            }
-            for note in &config.notes {
-                style::warn(note);
-            }
-            for server in config.servers {
-                let existing = store
-                    .find_server_by_name(&server.name)
-                    .map_err(|e| e.to_string())?;
-                if existing.is_some() {
-                    style::warn(format!("`{}` is already saved", server.name));
-                    continue;
-                }
-                // A fresh keyring entry per server, holding the token the
-                // file carried; a placeholder leaves the entry empty.
-                let mut spec = server.spec;
-                if let ServerSpec::Http { auth, .. } = &mut spec
-                    && let mcp_core::AuthRef::Bearer { keyring_id }
-                    | mcp_core::AuthRef::OAuth { keyring_id } = auth
-                {
-                    *keyring_id = mcp_auth::new_keyring_id();
-                    match &server.token {
-                        Some(token) => secrets
-                            .set(keyring_id, token)
-                            .map_err(|e| format!("keyring: {e}"))?,
-                        None => {
-                            style::warn(format!("`{}` still needs its bearer token", server.name))
-                        }
-                    }
-                }
-                store
-                    .add_server(&server.name, &spec, &ServerRequestPolicy::default())
-                    .map_err(|e| e.to_string())?;
-                style::status("Imported", &server.name);
-                added.push(server.name);
-            }
+            let added = import::import(store, &mcp_auth::KeyringStore::default(), config)?;
             ctx.print(&json!({ "imported": added }))?;
             Ok(EXIT_OK)
         }
