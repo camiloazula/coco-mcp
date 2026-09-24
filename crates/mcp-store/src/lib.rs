@@ -19,7 +19,7 @@ mod store;
 pub use records::{
     CallKind, CallRecord, CallStatus, NewCall, ServerRecord, SnapshotRecord, SnapshotSummary,
 };
-pub use store::Store;
+pub use store::{NewServer, Store};
 
 /// Errors produced by the store.
 #[derive(Debug, thiserror::Error)]

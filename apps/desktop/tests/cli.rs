@@ -917,6 +917,39 @@ fn export_config_prints_saved_servers_without_secrets() {
     let _ = std::fs::remove_file(&db);
 }
 
+/// A file with an entry the store refuses lands nowhere: the servers
+/// before it are not left behind for a rerun to skip.
+#[test]
+fn import_config_saves_a_file_whole_or_not_at_all() {
+    let db = temp_path("import-whole.db");
+    let config = temp_path("mcp-whole.json");
+    std::fs::write(
+        &config,
+        r#"{"mcpServers": {
+            "files": {"command": "srv", "args": ["/tmp"]},
+            "leaky": {"command": "srv", "env": {"API_TOKEN": "x"}}
+        }}"#,
+    )
+    .unwrap();
+    let out = cli()
+        .args([
+            "--db",
+            db.to_str().unwrap(),
+            "import-config",
+            config.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("refusing to store a secret"),
+        "{}",
+        stderr(&out)
+    );
+    let store = mcp_store::Store::open(&db).unwrap();
+    assert!(store.list_servers().unwrap().is_empty(), "nothing landed");
+}
+
 #[test]
 fn import_config_adds_the_servers_a_client_file_names() {
     let db = temp_path("import.db");

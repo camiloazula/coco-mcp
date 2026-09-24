@@ -49,6 +49,19 @@ fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+/// A server to save with [`Store::add_servers`].
+#[derive(Debug, Clone, Copy)]
+pub struct NewServer<'a> {
+    /// Unique display name.
+    pub name: &'a str,
+    /// How to connect.
+    pub spec: &'a ServerSpec,
+    /// How the app answers the server's requests.
+    pub policy: &'a ServerRequestPolicy,
+    /// The protocol era it is connected in.
+    pub protocol: ProtocolMode,
+}
+
 impl Store {
     /// Open (creating if needed) the database at `path` and migrate it.
     pub fn open(path: &Path) -> Result<Self> {
@@ -152,6 +165,39 @@ impl Store {
         )?;
         self.get_server(&id)?
             .ok_or_else(|| Error::NotFound(format!("server {id}")))
+    }
+
+    /// Save several servers in one transaction: all of them or, when one
+    /// is refused or fails, none. Names must be unique, among themselves as
+    /// well as against the servers already saved.
+    pub fn add_servers(&self, servers: &[NewServer<'_>]) -> Result<Vec<ServerRecord>> {
+        for server in servers {
+            Self::check_spec(server.spec)?;
+        }
+        let ids: Vec<String> = servers.iter().map(|_| new_id()).collect();
+        {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction()?;
+            for (server, id) in servers.iter().zip(&ids) {
+                tx.execute(
+                    "INSERT INTO servers (id, name, spec, policy, protocol) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        id,
+                        server.name,
+                        serde_json::to_string(server.spec)?,
+                        serde_json::to_string(server.policy)?,
+                        server.protocol.as_str()
+                    ],
+                )?;
+            }
+            tx.commit()?;
+        }
+        ids.iter()
+            .map(|id| {
+                self.get_server(id)?
+                    .ok_or_else(|| Error::NotFound(format!("server {id}")))
+            })
+            .collect()
     }
 
     /// Update name, spec, policy and protocol of an existing server.
@@ -564,6 +610,55 @@ mod tests {
         assert!(!store.delete_server(&rec.id).unwrap());
         assert!(store.get_server(&rec.id).unwrap().is_none());
         assert!(store.update_server(&updated).is_err());
+    }
+
+    #[test]
+    fn a_batch_is_saved_whole_or_not_at_all() {
+        let store = Store::open_in_memory().unwrap();
+        let policy = ServerRequestPolicy::default();
+        let stdio = ServerSpec::Stdio {
+            command: "srv".into(),
+            args: vec![],
+            env: Default::default(),
+            cwd: None,
+        };
+        let new = |name| NewServer {
+            name,
+            spec: &stdio,
+            policy: &policy,
+            protocol: ProtocolMode::Legacy,
+        };
+        // The second name is the first one's: the whole batch is refused.
+        let err = store.add_servers(&[new("a"), new("a")]).unwrap_err();
+        assert!(err.is_refusal(), "{err}");
+        assert!(store.list_servers().unwrap().is_empty(), "nothing saved");
+
+        let saved = store.add_servers(&[new("a"), new("b")]).unwrap();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].name, "a");
+        assert_eq!(saved[1].name, "b");
+        assert_eq!(store.list_servers().unwrap().len(), 2);
+
+        // A spec the store refuses anywhere in the batch saves none of it.
+        let leaky = ServerSpec::Stdio {
+            command: "srv".into(),
+            args: vec![],
+            env: [("API_TOKEN".to_owned(), "x".to_owned())].into(),
+            cwd: None,
+        };
+        let refused = store
+            .add_servers(&[
+                new("c"),
+                NewServer {
+                    name: "d",
+                    spec: &leaky,
+                    policy: &policy,
+                    protocol: ProtocolMode::Legacy,
+                },
+            ])
+            .unwrap_err();
+        assert!(matches!(refused, Error::SecretInSpec(_)), "{refused}");
+        assert_eq!(store.list_servers().unwrap().len(), 2, "still the two");
     }
 
     #[test]
