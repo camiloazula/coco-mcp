@@ -4,7 +4,7 @@
 //! prompts History recorded.
 
 use coco_mcp::calls::ResponseStatus;
-use coco_mcp::state::{AppState, Mode, Status};
+use coco_mcp::state::{AppState, Mode, Screen, Status};
 use gpui_kit::test::TestWindowExt as _;
 use serde_json::{Map, Value, json};
 
@@ -223,4 +223,121 @@ pub fn replay_reads_and_prompts_flow() {
             .is_some_and(|t| t.starts_with("Hello")),
         "{raw}"
     );
+}
+
+/// A window on an HTTP server that wants `expected` as its bearer token,
+/// with `held` saved as the token to send.
+fn bearer_live(expected: &str, held: &str) -> (mcp_mockserver::http::HttpServer, Live) {
+    let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+    let server = futures::executor::block_on(bridge.run(mcp_mockserver::http::serve_http(
+        mcp_mockserver::Schema::V1,
+        mcp_mockserver::http::HttpAuth::Bearer(expected.into()),
+    )))
+    .unwrap()
+    .unwrap();
+    let mut model = AppState::new(Some(bridge), None);
+    model.add_demo_server(
+        "remote",
+        mcp_core::ServerSpec::Http {
+            url: server.url.clone(),
+            headers: Default::default(),
+            auth: mcp_core::AuthRef::Bearer {
+                keyring_id: "remote-token".into(),
+            },
+        },
+        Status::Off,
+    );
+    model.secrets.set("remote-token", held).unwrap();
+    let live = crate::protocol::open(model, mcp_store::Store::open_in_memory().unwrap());
+    (server, live)
+}
+
+/// The failure text of the selected server.
+fn failure(live: &mut Live) -> String {
+    live.cx
+        .update(|cx| match &live.state.read(cx).servers[0].status {
+            Status::Error(text) => text.clone(),
+            other => panic!("not failed: {other:?}"),
+        })
+}
+
+/// A bearer token the server refuses is named as the problem, in a
+/// sentence, and the pane's button opens the settings on the token.
+pub fn refused_token_flow() {
+    let (_server, mut live) = bearer_live("s3cret", "expired");
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
+    live.wait("the token is refused", |s| {
+        matches!(s.servers[0].status, Status::Error(_))
+    });
+    let text = failure(&mut live);
+    assert_eq!(
+        text,
+        "The server refused the token. Update it in the server settings."
+    );
+    live.ui(|window, _| {
+        assert!(window.try_find("authorize").is_some(), "a way to the token");
+    });
+    snap(&mut live.cx, live.handle, "68-token-refused");
+    live.ui(|window, cx| window.click("authorize", cx));
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert_eq!(s.screen, Screen::AddServer);
+        assert_eq!(s.editing, Some(0));
+    });
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("token").focused(),
+            Some(true),
+            "the token field takes the keyboard"
+        );
+    });
+}
+
+/// A token the server stops accepting mid-session fails the next call in
+/// the same words, so the pane points at the setting rather than at the
+/// transport.
+pub fn expired_token_flow() {
+    let (server, mut live) = bearer_live("s3cret", "s3cret");
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
+    live.wait("connected", |s| s.servers[0].status == Status::Connected);
+    server.revoke_tokens();
+    live.call("add", json!({"a": 1, "b": 2}));
+    match live.answered().0 {
+        ResponseStatus::Failed(text) => assert_eq!(
+            text,
+            "The server refused the token. Update it in the server settings."
+        ),
+        other => panic!("{other:?}"),
+    }
+    snap(&mut live.cx, live.handle, "68-token-expired");
+}
+
+/// A server that cannot be reached is named by its address, in a sentence,
+/// with the transport's reason after it and none of its type paths.
+pub fn unreachable_server_flow() {
+    let mut model = AppState::new(Some(coco_mcp::bridge::Bridge::new().unwrap()), None);
+    model.add_demo_server(
+        "nowhere",
+        mcp_core::ServerSpec::Http {
+            url: "http://127.0.0.1:9/mcp".into(),
+            headers: Default::default(),
+            auth: mcp_core::AuthRef::None,
+        },
+        Status::Off,
+    );
+    let mut live = crate::protocol::open(model, mcp_store::Store::open_in_memory().unwrap());
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
+    live.wait("the connect fails", |s| {
+        matches!(s.servers[0].status, Status::Error(_))
+    });
+    let text = failure(&mut live);
+    assert!(
+        text.starts_with("Could not reach the server at http://127.0.0.1:9/mcp: "),
+        "{text}"
+    );
+    assert!(!text.contains('['), "no type paths: {text}");
+    snap(&mut live.cx, live.handle, "68-unreachable");
 }

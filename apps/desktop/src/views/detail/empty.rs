@@ -25,7 +25,7 @@ pub(super) fn connect_state(
     title: &'static str,
     detail: Option<String>,
     action: &'static str,
-    authorize: bool,
+    authorize: Option<&'static str>,
 ) -> AnyElement {
     let t = *tokens(cx);
     let entity = ws.state.clone();
@@ -50,9 +50,9 @@ pub(super) fn connect_state(
                 .gap(px(16.))
                 .mt(px(12.))
                 .items_center()
-                .when(authorize, |el| {
+                .when_some(authorize, |el, label| {
                     el.child(
-                        accent_button(cx, "Authorize", 26.)
+                        accent_button(cx, label, 26.)
                             .id("authorize")
                             .on_click(move |_, _, cx| {
                                 authorizer.update(cx, |s, cx| {
@@ -66,7 +66,7 @@ pub(super) fn connect_state(
                 })
                 .child(
                     accent_button(cx, action, 26.)
-                        .when(authorize, |el| el.bg(t.sunk).text_color(t.fg))
+                        .when(authorize.is_some(), |el| el.bg(t.sunk).text_color(t.fg))
                         .id("connect-server")
                         .on_click(move |_, _, cx| {
                             entity.update(cx, |s, cx| {

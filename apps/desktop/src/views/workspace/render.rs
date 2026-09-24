@@ -90,7 +90,17 @@ impl Render for Workspace {
             // A form opened on purpose takes the keyboard; one shown for an
             // off server leaves it with the list, so ↑ ↓ still move.
             if opened {
-                form.update(cx, |f, cx| f.focus(window, cx));
+                let token = self.state.read(cx).focus_token;
+                form.update(cx, |f, cx| {
+                    if token {
+                        f.focus_token(window, cx);
+                    } else {
+                        f.focus(window, cx);
+                    }
+                });
+                if token {
+                    self.state.update(cx, |s, _| s.focus_token = false);
+                }
             }
             self.add_form = Some(form);
             self.add_form_target = wanted;

@@ -13,6 +13,7 @@ pub mod assets;
 pub mod bridge;
 pub mod calls;
 pub mod clip;
+pub mod explain;
 pub mod features;
 pub mod menus;
 pub mod persistence;

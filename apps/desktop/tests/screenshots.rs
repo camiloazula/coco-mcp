@@ -3724,6 +3724,9 @@ mod macos {
         crate::unhappy::crash_mid_session_flow();
         crate::unhappy::request_outcomes_flow();
         crate::unhappy::replay_reads_and_prompts_flow();
+        crate::unhappy::refused_token_flow();
+        crate::unhappy::expired_token_flow();
+        crate::unhappy::unreachable_server_flow();
         capture("03-empty", demo_state(false), true);
         let mut s = demo_state(true);
         s.screen = Screen::Detail;

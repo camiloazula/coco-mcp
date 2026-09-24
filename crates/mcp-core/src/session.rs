@@ -448,9 +448,13 @@ impl Session {
                     // reason for the failure reaches the log.
                     let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
                 }
+                // A transport that never carried the handshake is a server
+                // that could not be reached, not one that answered it badly.
+                let reached = !matches!(error, ClientInitializeError::TransportError { .. });
                 return Err(match auth {
                     Some(challenge) => Error::AuthRequired { challenge },
-                    None => Error::Initialize(detail),
+                    None if reached => Error::Initialize(detail),
+                    None => Error::Transport(detail),
                 });
             }
         };

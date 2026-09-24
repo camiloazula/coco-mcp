@@ -62,6 +62,7 @@ pub struct HttpServer {
     pub url: String,
     /// Auth counters.
     pub stats: Arc<OAuthStats>,
+    state: Arc<Mutex<AuthState>>,
     shutdown: CancellationToken,
 }
 
@@ -69,6 +70,15 @@ impl HttpServer {
     /// Stop serving.
     pub fn shutdown(&self) {
         self.shutdown.cancel();
+    }
+
+    /// Refuse every token from now on, bearer or issued, as a server does
+    /// once a token has expired: a client connected before sees `401` on
+    /// its next request.
+    pub fn revoke_tokens(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.revoked = true;
+        }
     }
 }
 
@@ -78,16 +88,19 @@ impl Drop for HttpServer {
     }
 }
 
+#[derive(Debug)]
 struct Issued {
     expires_at: Instant,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct AuthState {
     codes: HashMap<String, String>, // code -> pkce challenge
     access: HashMap<String, Issued>,
     refresh: HashMap<String, ()>,
     counter: u32,
+    /// Every token is refused from now on, as after an expiry.
+    revoked: bool,
 }
 
 #[derive(Clone)]
@@ -100,6 +113,9 @@ struct Shared {
 
 impl Shared {
     fn token_ok(&self, header: Option<&HeaderValue>) -> bool {
+        if self.state.lock().is_ok_and(|s| s.revoked) {
+            return false;
+        }
         let token = header
             .and_then(|h| h.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "))
@@ -373,7 +389,8 @@ pub async fn serve_http_with(
     Ok(HttpServer {
         url: format!("{base}/mcp"),
         base,
-        stats: shared.stats,
+        stats: shared.stats.clone(),
+        state: shared.state.clone(),
         shutdown,
     })
 }
