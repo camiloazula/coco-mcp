@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::bridge::{Bridge, drain_ready};
 use crate::calls::{Progress, Responses};
+use crate::explain::explain;
 use crate::features::{Feature, Features};
 use crate::persistence::{
     self, Persistence, SavedServer, Saving, Unsaved, compare_and_store, refused,
@@ -802,6 +803,9 @@ pub struct AppState {
     pub confirm: Option<Confirm>,
     /// Server index the add/edit form is editing (`None` = adding).
     pub editing: Option<usize>,
+    /// The edit form opened for a refused token focuses the token field
+    /// rather than the name; taken by the form when it opens.
+    pub focus_token: bool,
     /// How long a quiet server goes before the session pings it.
     pub keepalive: Option<Duration>,
     /// How an OAuth authorization URL is opened: the system browser, unless
@@ -972,6 +976,7 @@ impl AppState {
             pending: Vec::new(),
             confirm: None,
             editing: None,
+            focus_token: false,
             keepalive: SessionOptions::default().keepalive,
             oauth_open: None,
             items: RefCell::default(),
@@ -2379,7 +2384,7 @@ impl AppState {
                             entry.unauthorized = true;
                             entry.auth_challenge = challenge.clone();
                         }
-                        entry.status = Status::Error(e.to_string());
+                        entry.status = Status::Error(explain(&e, Some(&entry.record.spec)));
                     }
                     None => entry.status = Status::Error("connect task failed".into()),
                 }
@@ -2432,7 +2437,15 @@ impl AppState {
                 cx,
             );
         } else {
+            // A refused bearer token is fixed in the settings, on the token.
             self.selected_server = Some(ix);
+            self.focus_token = matches!(
+                entry.record.spec,
+                ServerSpec::Http {
+                    auth: mcp_core::AuthRef::Bearer { .. },
+                    ..
+                }
+            );
             self.show_edit_selected(cx);
         }
     }
@@ -2543,7 +2556,7 @@ impl AppState {
                         state.servers[pos].apply_relisted(fresh, &kinds);
                         None
                     }
-                    Some(Err(e)) => Some(e.to_string()),
+                    Some(Err(e)) => Some(explain(&e, Some(&state.servers[pos].record.spec))),
                     None => Some("relist task failed".to_owned()),
                 };
                 if let Some(e) = failure {
@@ -2607,7 +2620,10 @@ impl AppState {
                         entry.subscription_error = None;
                         entry.set_subscribed(uri, on);
                     }
-                    Some(Err(e)) => entry.subscription_error = Some((uri, e.to_string())),
+                    Some(Err(e)) => {
+                        entry.subscription_error =
+                            Some((uri, explain(&e, Some(&entry.record.spec))));
+                    }
                     None => {
                         entry.subscription_error = Some((uri, "subscribe task failed".into()));
                     }

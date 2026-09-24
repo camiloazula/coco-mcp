@@ -11,6 +11,8 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, TestSupportExt as _, Window, div, px,
 };
 
+use mcp_core::ServerSpec;
+
 use crate::clip;
 use crate::state::{Mode, Status};
 use crate::theme::tokens;
@@ -65,20 +67,35 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
     match status {
         Status::Connecting => return centered_note(cx, "Connecting…"),
         Status::Error(e) => {
-            let unauthorized = ws.state.read(cx).server().is_some_and(|s| s.unauthorized);
-            let title = if unauthorized {
+            // The way in when the server refused the credentials: sign in
+            // again for OAuth, the settings on the token for a bearer token,
+            // the settings for a server that has none.
+            let fix = ws.state.read(cx).server().and_then(|s| {
+                s.unauthorized.then_some(match &s.record.spec {
+                    ServerSpec::Http {
+                        auth: mcp_core::AuthRef::OAuth { .. },
+                        ..
+                    } => "Authorize",
+                    ServerSpec::Http {
+                        auth: mcp_core::AuthRef::Bearer { .. },
+                        ..
+                    } => "Update token",
+                    _ => "Open settings",
+                })
+            });
+            let title = if fix.is_some() {
                 "Authorization required"
             } else {
                 "Connection failed"
             };
-            return connect_state(ws, cx, title, Some(e), "Retry", unauthorized);
+            return connect_state(ws, cx, title, Some(e), "Retry", fix);
         }
         // Off, the server is shown as its settings, ready to connect; the
         // form is built by the workspace before the pane is drawn.
         Status::Off => {
             return match ws.server_form() {
                 Some(form) => form.into_any_element(),
-                None => connect_state(ws, cx, "Disconnected", None, "Connect", false),
+                None => connect_state(ws, cx, "Disconnected", None, "Connect", None),
             };
         }
         Status::Connected => {}

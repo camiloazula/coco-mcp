@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui_kit::Context;
+use mcp_core::ServerSpec;
 use mcp_core::{RequestControl, Session};
 use mcp_store::{CallKind, CallRecord, CallStatus, NewCall};
 use serde_json::{Map, Value};
@@ -255,9 +256,10 @@ async fn settled(
     method: &'static str,
     record: bool,
     output_schema: Option<Value>,
+    spec: Option<ServerSpec>,
     fut: impl Future<Output = Answer>,
 ) -> (Response, Option<Value>) {
-    let mut response = outcome(method, Some(fut.await));
+    let mut response = outcome(method, Some(fut.await), spec.as_ref());
     if let Some(schema) = &output_schema
         && response.status == ResponseStatus::Ok
     {
@@ -282,8 +284,9 @@ fn output_issues(schema: &Value, raw: &Value) -> Vec<String> {
     }
 }
 
-/// The response a finished request shows.
-fn outcome(method: &'static str, result: CallResult) -> Response {
+/// The response a finished request shows; `spec` is the server asked, for
+/// the wording of a failure.
+fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) -> Response {
     let (raw, status, elapsed) = match result {
         Some(Ok((raw, elapsed, is_error))) => (
             raw,
@@ -316,7 +319,11 @@ fn outcome(method: &'static str, result: CallResult) -> Response {
                 }),
                 _ => Value::Object(Map::new()),
             };
-            (raw, ResponseStatus::Failed(e.to_string()), Duration::ZERO)
+            (
+                raw,
+                ResponseStatus::Failed(crate::explain::explain(&e, spec)),
+                Duration::ZERO,
+            )
         }
         None => (
             Value::Object(Map::new()),
@@ -622,9 +629,17 @@ impl AppState {
         })
         .detach();
 
-        let run = bridge.run(settled(method, record, output_schema, send(control)));
+        let spec = self
+            .servers
+            .iter()
+            .find(|s| s.record.id == server_id)
+            .map(|s| s.record.spec.clone());
+        let unanswered = spec.clone();
+        let run = bridge.run(settled(method, record, output_schema, spec, send(control)));
         cx.spawn(async move |this, cx| {
-            let (response, result) = run.await.unwrap_or_else(|| (outcome(method, None), None));
+            let (response, result) = run
+                .await
+                .unwrap_or_else(|| (outcome(method, None, unanswered.as_ref()), None));
             let answered = this.update(cx, |state, _| {
                 if !state.responses.is_current(&key, stamp) {
                     return None;
@@ -712,6 +727,7 @@ mod tests {
         outcome(
             "tools/call",
             Some(Ok((raw.clone(), Duration::from_millis(1), false))),
+            None,
         )
     }
 
@@ -803,7 +819,7 @@ mod tests {
         let (stamp, control) = responses.begin(key(), "tools/call").unwrap();
         assert!(responses.cancel(&key()));
         assert!(control.is_cancelled());
-        let stopped = outcome("tools/call", Some(Err(mcp_core::Error::Cancelled)));
+        let stopped = outcome("tools/call", Some(Err(mcp_core::Error::Cancelled)), None);
         assert_eq!(stopped.status, ResponseStatus::Cancelled);
         assert!(responses.finish(&key(), stamp, stopped));
         assert!(!responses.is_pending(&key()));
@@ -843,6 +859,7 @@ mod tests {
                 "tools/call",
                 false,
                 Some(schema.clone()),
+                None,
                 async move { Ok((raw, Duration::ZERO, false)) },
             ))
             .0
@@ -865,6 +882,7 @@ mod tests {
             "tools/call",
             false,
             Some(schema.clone()),
+            None,
             async move { Ok((serde_json::json!({"content": []}), Duration::ZERO, true)) },
         ))
         .0;
@@ -874,9 +892,12 @@ mod tests {
     #[test]
     fn a_recorded_result_is_copied_where_it_is_answered() {
         let raw = serde_json::json!({"content": [{"type": "text", "text": "clear"}]});
-        let run = |record: bool, answer: Answer| {
-            futures::executor::block_on(settled("tools/call", record, None, async move { answer }))
-        };
+        let run =
+            |record: bool, answer: Answer| {
+                futures::executor::block_on(settled("tools/call", record, None, None, async move {
+                    answer
+                }))
+            };
         let (response, result) = run(true, Ok((raw.clone(), Duration::from_millis(2), false)));
         assert_eq!(response.raw, raw);
         assert_eq!(result, Some(raw.clone()), "the history row's own copy");

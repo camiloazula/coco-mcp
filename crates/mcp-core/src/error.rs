@@ -80,7 +80,80 @@ impl From<rmcp::ServiceError> for Error {
             },
             rmcp::ServiceError::TransportClosed => Self::Closed,
             rmcp::ServiceError::Timeout { timeout } => Self::Timeout(timeout),
+            // A `401`/`403` to a request of a running session: the token was
+            // refused or has expired since the handshake.
+            rmcp::ServiceError::TransportSend(e) => match auth_challenge(&e) {
+                Some(challenge) => Self::AuthRequired { challenge },
+                None => Self::Transport(e.to_string()),
+            },
             other => Self::Transport(other.to_string()),
         }
+    }
+}
+
+/// The `WWW-Authenticate` challenge behind a transport error the server
+/// answered with `401`/`403`, wherever it sits in the error's chain of
+/// causes; `None` for any other failure.
+fn auth_challenge(error: &(dyn std::error::Error + 'static)) -> Option<Option<String>> {
+    use rmcp::transport::streamable_http_client::AuthRequiredError;
+    let mut current = Some(error);
+    while let Some(e) = current {
+        if let Some(auth) = e.downcast_ref::<AuthRequiredError>() {
+            let header = auth.www_authenticate_header.trim();
+            return Some((!header.is_empty()).then(|| header.to_owned()));
+        }
+        current = e.source();
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::transport::streamable_http_client::AuthRequiredError;
+
+    /// A transport's failure with the refusal further down its chain of
+    /// causes, as `rmcp` wraps it.
+    #[derive(Debug)]
+    struct Wrapped(AuthRequiredError);
+
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "send failed: {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn a_refusal_is_found_down_the_chain() {
+        let refused = Wrapped(AuthRequiredError::new("Bearer".into()));
+        assert_eq!(auth_challenge(&refused), Some(Some("Bearer".to_owned())));
+        let bare = Wrapped(AuthRequiredError::new("  ".into()));
+        assert_eq!(
+            auth_challenge(&bare),
+            Some(None),
+            "an empty header is no challenge"
+        );
+        let other = std::io::Error::other("connection refused");
+        assert_eq!(auth_challenge(&other), None);
+    }
+
+    #[test]
+    fn the_other_service_errors_keep_their_kinds() {
+        assert!(matches!(
+            Error::from(rmcp::ServiceError::TransportClosed),
+            Error::Closed
+        ));
+        assert!(matches!(
+            Error::from(rmcp::ServiceError::Timeout {
+                timeout: std::time::Duration::from_secs(1)
+            }),
+            Error::Timeout(_)
+        ));
     }
 }
