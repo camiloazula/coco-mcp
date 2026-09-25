@@ -54,7 +54,7 @@ pub struct Workspace {
     rows: Entity<ResizableState>,
     add_form: Option<Entity<AddServerForm>>,
     /// What `add_form` was built for (see [`Self::wanted_form`]).
-    add_form_target: Option<(Option<usize>, bool)>,
+    add_form_target: Option<(Option<String>, bool)>,
     filter_mode: Mode,
     /// Per-selection entities (form, argument inputs, collapse state).
     pub selection: crate::views::Selection,
@@ -235,12 +235,14 @@ impl Workspace {
     /// flag says which, so opening the pane's form with the pencil, and
     /// cancelling back to the pane, each start from the saved settings
     /// again. History stays readable without a session, so it is not
-    /// replaced.
-    fn wanted_form(state: &AppState) -> Option<(Option<usize>, bool)> {
+    /// replaced. The server is named by its id: after a delete the next
+    /// server takes the same place in the list, and must get its own form.
+    fn wanted_form(state: &AppState) -> Option<(Option<String>, bool)> {
+        let id = |ix: usize| state.servers.get(ix).map(|s| s.record.id.clone());
         if state.screen == Screen::AddServer {
-            return Some((state.editing, true));
+            return Some((state.editing.and_then(id), true));
         }
-        state.settings_pane().map(|ix| (Some(ix), false))
+        state.settings_pane().map(|ix| (id(ix), false))
     }
 
     /// The filter placeholder follows the mode; needs the window, so it runs in render.

@@ -1722,6 +1722,110 @@ mod macos {
     /// spaces). Retyped with shell quoting, each quoted argument stays whole
     /// and the untouched environment stays as stored; a line a shell could
     /// not split is refused.
+    /// The settings pane names its server by id. A save keeps the keyring
+    /// entry the server has now, even one an earlier save from the same
+    /// form made; and after a delete, the server that takes the deleted
+    /// one's place in the list gets its own settings, not the deleted one's.
+    fn pane_form_follows_its_server_flow() {
+        use mcp_core::AuthRef;
+        let store = mcp_store::Store::open_in_memory().unwrap();
+        let http = |url: &str, auth| ServerSpec::Http {
+            url: url.into(),
+            headers: Default::default(),
+            auth,
+        };
+        let policy = mcp_core::ServerRequestPolicy::default();
+        let alpha = store
+            .add_server(
+                "alpha",
+                &http("http://127.0.0.1:9/a", AuthRef::None),
+                &policy,
+            )
+            .unwrap();
+        let beta_spec = http("http://127.0.0.1:9/b", AuthRef::None);
+        let beta = store.add_server("beta", &beta_spec, &policy).unwrap();
+        let mut cx = context();
+        let state = cx.update(|cx| cx.new(|_| AppState::new(None, Some(store.clone()))));
+        let state_for_window = state.clone();
+        let handle = cx
+            .open_window(size(px(1200.), px(760.)), |window, cx| {
+                let workspace = cx.new(|cx| Workspace::new(state_for_window, window, cx));
+                cx.new(|cx| Root::new(workspace, window, cx))
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            state.update(cx, |s, cx| s.select_server(0, cx));
+            window.render_frame(cx);
+            assert_eq!(window.find("name").value(), Some("alpha"));
+        })
+        .unwrap();
+
+        // An earlier save from this form gave the server an OAuth entry
+        // (and the login stored there); the pane's form is still the same.
+        let oauth = AuthRef::OAuth {
+            keyring_id: "alpha-login".into(),
+        };
+        let mut saved = alpha.clone();
+        saved.spec = http("http://127.0.0.1:9/a", oauth.clone());
+        store.update_server(&saved).unwrap();
+        cx.update(|cx| {
+            state.update(cx, |s, cx| {
+                s.servers[0].record = saved.clone();
+                cx.notify();
+            })
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("auth-oauth", cx);
+            window.click("connect", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        match store.get_server(&alpha.id).unwrap().unwrap().spec {
+            ServerSpec::Http { auth, .. } => {
+                assert_eq!(auth, oauth, "the entry holding the login is kept")
+            }
+            other => panic!("expected an HTTP spec, got {other:?}"),
+        }
+
+        // Delete alpha: beta moves into its place in the list and is shown
+        // as its own settings, which Connect saves unchanged.
+        cx.update_window(handle.into(), |_, window, cx| {
+            state.update(cx, |s, cx| s.select_server(0, cx));
+            window.render_frame(cx);
+            window.click("delete-server", cx);
+            window.render_frame(cx);
+            window.click("confirm-accept", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        for _ in 0..200 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            cx.run_until_parked();
+            if cx.update(|cx| state.read(cx).servers.len() == 1) {
+                break;
+            }
+        }
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(state.read(cx).selected_server, Some(0));
+            assert_eq!(
+                window.find("name").value(),
+                Some("beta"),
+                "the pane shows the server now selected"
+            );
+            window.click("connect", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let kept = store.get_server(&beta.id).unwrap().unwrap();
+        assert_eq!(kept.name, "beta", "beta was not overwritten");
+        assert_eq!(kept.spec, beta_spec);
+        assert!(store.get_server(&alpha.id).unwrap().is_none());
+    }
+
     fn edit_form_round_trip_flow() {
         let store = mcp_store::Store::open_in_memory().unwrap();
         let stored_env: std::collections::BTreeMap<String, String> = [
@@ -3705,6 +3809,7 @@ mod macos {
         failed_list_beside_items_flow();
         long_list_flow();
         edit_form_round_trip_flow();
+        pane_form_follows_its_server_flow();
         form_follows_its_target_flow();
         refused_edit_keeps_its_token_flow();
         stored_token_read_later_flow();

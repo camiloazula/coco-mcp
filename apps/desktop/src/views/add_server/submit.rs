@@ -49,14 +49,16 @@ impl AddServerForm {
                 &self.headers.read(cx).value(),
                 |text| parse_pairs(text, ':'),
             )?;
-            // Keep the entry an edited server already has, so stored OAuth
-            // credentials survive; a new server gets a fresh one.
-            let keyring_id = match &self.editing {
-                Some((_, AuthRef::Bearer { keyring_id } | AuthRef::OAuth { keyring_id })) => {
-                    keyring_id.clone()
-                }
-                _ => mcp_auth::new_keyring_id(),
-            };
+            // Keep the entry the edited server has now, so stored OAuth
+            // credentials survive; a new server gets a fresh one. Read from
+            // the saved record, not from when the form opened: an earlier
+            // save from this form may have made it.
+            let keyring_id = self
+                .edited(cx)
+                .and_then(|ix| {
+                    crate::state::keyring_id(&self.state.read(cx).servers[ix].record.spec)
+                })
+                .unwrap_or_else(mcp_auth::new_keyring_id);
             let (auth, token) = match self.auth {
                 AuthKind::None => (AuthRef::None, None),
                 AuthKind::Bearer => {
@@ -93,7 +95,14 @@ impl AddServerForm {
         // What an earlier save was refused for no longer applies; the form
         // stays open through the connect, so it would be read as current.
         self.error = None;
-        let editing = self.editing.as_ref().map(|(ix, _)| *ix);
+        let editing = self.edited(cx);
+        // The server was deleted while its settings were open: saving would
+        // add it back, or land on another.
+        if self.editing.is_some() && editing.is_none() {
+            self.error = Some("This server was deleted.".into());
+            cx.notify();
+            return;
+        }
         let protocol = self.protocol;
         let mut saving = self.state.update(cx, |state, cx| match editing {
             Some(ix) => state.update_server(ix, &name, spec, protocol, token, cx),
