@@ -38,6 +38,16 @@ pub fn render(
     let clearable = state.mode == Mode::History && !reading && state.items_total() > 0;
     // Above the rows rather than among them: every row is sized from the first.
     let notice = list_notice(&state.list_failures(state.mode), cx);
+    // Without a session the rows are the last connection's: shown, not opened.
+    let opens = state.list_opens();
+    let stale = (!opens && count > 0).then(|| {
+        muted(cx, 11., "From the last connection. Connect to open one.")
+            .id("list-stale")
+            .px(px(12.))
+            .pt(px(8.))
+            .whitespace_normal()
+            .test_support()
+    });
 
     let filter_row = h_flex()
         .h(px(36.))
@@ -88,10 +98,12 @@ pub fn render(
         cx.processor(|this, range: Range<usize>, _window, cx| {
             let state = this.state.read(cx);
             let items = state.items();
+            let opens = state.list_opens();
+            let selected = state.selected_item.filter(|_| opens);
             range
                 .filter_map(|ix| {
                     let item = items.get(ix)?;
-                    Some(item_row(ix, item, state.selected_item, &this.state, cx))
+                    Some(item_row(ix, item, selected, opens, &this.state, cx))
                 })
                 .collect::<Vec<_>>()
         }),
@@ -143,6 +155,7 @@ pub fn render(
         .w_full()
         .child(filter_row)
         .children(notice)
+        .children(stale)
         .child(body)
         .into_any_element()
 }
@@ -178,11 +191,13 @@ pub(crate) fn reveal_selection(ws: &Workspace, cx: &App) {
     }
 }
 
-/// One 28px row, with the accent bar when selected.
+/// One 28px row, with the accent bar when selected. A row that `opens`
+/// nothing is drawn faint and takes no click.
 fn item_row(
     ix: usize,
     item: &Item,
     selected: Option<usize>,
+    opens: bool,
     entity: &Entity<AppState>,
     cx: &App,
 ) -> AnyElement {
@@ -208,10 +223,12 @@ fn item_row(
             FontWeight::NORMAL
         })
         .when(is_selected, |el| el.bg(t.sel))
-        .hover(|s| s.bg(t.hover))
-        .on_click(move |_, _, cx| {
-            entity.update(cx, |state, cx| state.open_item(ix, cx));
+        .when(opens, |el| {
+            el.hover(|s| s.bg(t.hover)).on_click(move |_, _, cx| {
+                entity.update(cx, |state, cx| state.open_item(ix, cx));
+            })
         })
+        .when(!opens, |el| el.opacity(0.5).cursor_default())
         .child(
             div()
                 .absolute()

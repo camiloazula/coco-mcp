@@ -40,7 +40,7 @@ pub fn explain(error: &Error, spec: Option<&ServerSpec>) -> String {
             Some(ServerSpec::Http {
                 auth: AuthRef::OAuth { .. },
                 ..
-            }) => "The server needs authorization. Authorize to sign in again.",
+            }) => "The server refused the login.",
             _ => {
                 "The server needs credentials. Add a token or authorization in the server settings."
             }
@@ -119,7 +119,10 @@ mod tests {
         let oauth = http(AuthRef::OAuth {
             keyring_id: "k".into(),
         });
-        assert!(explain(&refused, Some(&oauth)).starts_with("The server needs authorization"));
+        assert_eq!(
+            explain(&refused, Some(&oauth)),
+            "The server refused the login."
+        );
         assert!(explain(&refused, None).starts_with("The server needs credentials"));
     }
 

@@ -21,27 +21,46 @@ impl Render for AddServerForm {
         let opened = self.state.read(cx).screen == Screen::AddServer;
         // How connecting with the saved settings is going, under the fields:
         // the form stays until it succeeds.
-        let status = self.editing.as_ref().and_then(|(ix, _)| {
-            self.state
-                .read(cx)
-                .servers
-                .get(*ix)
-                .map(|s| s.status.clone())
-        });
+        let (status, refused) = self
+            .editing
+            .as_ref()
+            .and_then(|(ix, _)| self.state.read(cx).servers.get(*ix))
+            .map_or((None, false), |s| (Some(s.status.clone()), s.unauthorized));
         let connecting = status == Some(Status::Connecting);
+        // Saving the settings of a server in session ends that session and
+        // starts another: the button says so rather than offering a connect.
+        let live = matches!(status, Some(Status::Connected | Status::Connecting));
         let failed = match status {
             Some(Status::Error(text)) => Some(text),
             _ => None,
         };
+        // Turned away for want of credentials, the server needs them set
+        // here; a refused OAuth login is fixed by logging in again instead,
+        // and that is the one button the failure adds.
+        let unauthorized = failed.is_some() && refused;
+        let reauthorize = unauthorized && matches!(self.editing, Some((_, AuthRef::OAuth { .. })));
         let (title, subtitle) = match (editing, opened) {
             (true, true) if failed.is_some() => (
                 "Edit server",
                 "The connection failed. Change the settings and connect again.",
             ),
-            (true, true) => (
-                "Edit server",
-                "Saved, then connected with the new settings.",
+            (true, false) if reauthorize => (
+                "Authorization required",
+                "Authorize to sign in again, or change the settings first.",
             ),
+            (true, false) if unauthorized => (
+                "Authorization required",
+                "Set the credentials and connect again.",
+            ),
+            (true, false) if failed.is_some() => (
+                "Connection failed",
+                "Change the settings and connect again.",
+            ),
+            (true, true) if live => (
+                "Edit server",
+                "Saving ends the session and connects with the new settings.",
+            ),
+            (true, true) => ("Edit server", "Saving connects with the new settings."),
             (true, false) => (
                 "Disconnected",
                 "Connect with these settings, or change them first.",
@@ -51,7 +70,11 @@ impl Render for AddServerForm {
                 "Saved to the sidebar. Connection is attempted immediately.",
             ),
         };
-        let action = "Connect";
+        let action = if editing && opened && live {
+            "Save & reconnect"
+        } else {
+            "Connect"
+        };
         let mono_family = cx.theme().mono_font_family.clone();
         let mono_input = |input: Input| input.font_family(mono_family.clone()).text_size(px(12.));
         let header = h_flex()
@@ -199,8 +222,23 @@ impl Render for AddServerForm {
                     h_flex()
                         .gap(px(10.))
                         .pt(px(6.))
+                        .when(reauthorize, |row| {
+                            let state = self.state.clone();
+                            let ix = self.editing.as_ref().map(|(ix, _)| *ix);
+                            row.child(
+                                accent_button(cx, "Authorize", 26.)
+                                    .id("authorize")
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(ix) = ix {
+                                            state.update(cx, |s, cx| s.authorize(ix, cx));
+                                        }
+                                    })
+                                    .test_support(),
+                            )
+                        })
                         .child(
                             accent_button(cx, action, 26.)
+                                .when(reauthorize, |el| el.bg(t.sunk).text_color(t.fg))
                                 .id("connect")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit(cx);

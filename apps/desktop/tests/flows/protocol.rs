@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use coco_mcp::calls::ResponseStatus;
-use coco_mcp::state::{AppState, Mode, Screen, Status};
+use coco_mcp::state::{AppState, Mode, Status};
 use coco_mcp::views::Workspace;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
@@ -395,8 +395,10 @@ pub fn keepalive_flow() {
         "the silent server is noticed",
         |s| matches!(&s.servers[0].status, Status::Error(e) if e.contains("stopped answering")),
     );
-    live.ui(|window, _| {
-        assert!(window.try_find("connect-server").is_some(), "Retry offered");
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("connect-error").is_some(), "the failure");
+        assert!(window.try_find("connect").is_some(), "Connect offered");
     });
 }
 
@@ -460,9 +462,9 @@ pub fn withdrawn_request_flow() {
     assert_eq!(live.text(), "withdrawn");
 }
 
-/// A server that turns a connect away for want of authorization says so,
-/// and Authorize gets credentials: the edit form for a server without OAuth;
-/// for one with it, the browser flow again, stored credentials dropped.
+/// A server that turns a connect away for want of authorization is shown as
+/// its settings, where credentials are set; one with OAuth also offers
+/// Authorize, which runs the browser flow again, stored credentials dropped.
 pub fn authorize_flow() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -509,23 +511,31 @@ pub fn authorize_flow() {
             "its challenge is kept"
         );
     });
-    live.ui(|window, _| assert!(window.try_find("authorize").is_some()));
-    snap(&mut live.cx, live.handle, "42-authorize");
-    live.ui(|window, cx| window.click("authorize", cx));
-    live.cx.update(|cx| {
-        assert_eq!(
-            live.state.read(cx).screen,
-            Screen::AddServer,
-            "credentials are set in the edit form"
-        );
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("connect").is_some(), "the settings");
+        assert!(window.try_find("connect-error").is_some(), "the failure");
+        assert!(window.try_find("authorize").is_none(), "no OAuth to redo");
     });
+    snap(&mut live.cx, live.handle, "42-authorize");
 
+    // An OAuth server that turned the login away: its settings, and
+    // Authorize beside Connect, which runs the browser flow.
     live.cx.update(|cx| {
         live.state.update(cx, |s, cx| {
-            s.cancel_add_server(cx);
-            s.connect(1, cx);
+            s.selected_server = Some(1);
+            s.servers[1].unauthorized = true;
+            s.servers[1].status = Status::Error("The server refused the login.".into());
+            cx.notify();
         })
     });
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("connect-error").is_some(), "the failure");
+        assert!(window.try_find("authorize").is_some(), "the login to redo");
+    });
+    snap(&mut live.cx, live.handle, "42-authorize-oauth");
+    live.ui(|window, cx| window.click("authorize", cx));
     live.wait("the OAuth server connects", |s| {
         s.servers[1].status == Status::Connected
     });

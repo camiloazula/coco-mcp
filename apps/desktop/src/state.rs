@@ -803,9 +803,6 @@ pub struct AppState {
     pub confirm: Option<Confirm>,
     /// Server index the add/edit form is editing (`None` = adding).
     pub editing: Option<usize>,
-    /// The edit form opened for a refused token focuses the token field
-    /// rather than the name; taken by the form when it opens.
-    pub focus_token: bool,
     /// The server the form saved and is connecting. The form stays open on
     /// it, showing how the connect goes under the fields, and closes once
     /// the connection is made; a failure leaves the settings there to
@@ -981,7 +978,6 @@ impl AppState {
             pending: Vec::new(),
             confirm: None,
             editing: None,
-            focus_token: false,
             form_awaits: None,
             keepalive: SessionOptions::default().keepalive,
             oauth_open: None,
@@ -1138,6 +1134,14 @@ impl AppState {
                 .is_some_and(|s| s.history_load != HistoryLoad::Read)
     }
 
+    /// Whether a row of the middle list opens anything. History is read from
+    /// the database; the other lists are what the server declared, and
+    /// without a session the pane shows its settings instead, so their rows
+    /// are the last connection's, shown but not opened.
+    pub fn list_opens(&self) -> bool {
+        self.mode == Mode::History || self.server().is_some_and(|s| s.status == Status::Connected)
+    }
+
     /// Every row of the middle list, before the filter.
     fn all_items(&self) -> Vec<Item> {
         if self.mode == Mode::History {
@@ -1289,7 +1293,10 @@ impl AppState {
         self.server()?.history.iter().find(|c| c.id == id)
     }
 
-    /// Status bar text, in the design's format.
+    /// Status bar text: what the rest of the window does not say already.
+    /// The counts are the sidebar's, and a failure the pane writes under
+    /// the server's settings is not written twice; History, which is shown
+    /// instead of the settings, leaves the reason to the status bar.
     pub fn status_text(&self) -> String {
         let Some(server) = self.server() else {
             return "No server".into();
@@ -1298,16 +1305,11 @@ impl AppState {
         match &server.status {
             Status::Off => format!("{name} · Disconnected"),
             Status::Connecting => format!("{name} · Connecting…"),
-            Status::Error(e) => format!("{name} · Error · {e}"),
+            Status::Error(e) if self.mode == Mode::History => format!("{name} · Error · {e}"),
+            Status::Error(_) => format!("{name} · Error"),
             Status::Connected => {
                 let mut parts = vec![name.clone(), "Connected".to_string()];
                 if let Some(snap) = &server.snapshot {
-                    parts.push(plural(snap.tools.len(), "tool"));
-                    parts.push(plural(
-                        snap.resources.len() + snap.resource_templates.len(),
-                        "resource",
-                    ));
-                    parts.push(plural(snap.prompts.len(), "prompt"));
                     parts.extend(
                         snap.list_failures
                             .iter()
@@ -1375,6 +1377,9 @@ impl AppState {
     /// the form that edits the server rather than a section; moving onto it
     /// with the keyboard ([`Self::select_item`]) only shows it.
     pub fn open_item(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if !self.list_opens() {
+            return;
+        }
         self.select_item(ix, cx);
         if self.mode == Mode::Server && self.selected_name().as_deref() == Some(SETTINGS_SECTION) {
             self.show_edit_selected(cx);
@@ -1395,10 +1400,11 @@ impl AppState {
     }
 
     /// Move the list selection by `delta`, clamped. Nothing moves while the
-    /// History on screen is read: its rows are not drawn yet.
+    /// History on screen is read, its rows not drawn yet, nor in a list whose
+    /// rows open nothing ([`Self::list_opens`]).
     pub fn move_item(&mut self, delta: isize, cx: &mut Context<Self>) {
         let len = self.items().len();
-        if len == 0 || self.history_reading() {
+        if len == 0 || self.history_reading() || !self.list_opens() {
             return;
         }
         let next = match self.selected_item {
@@ -2438,47 +2444,36 @@ impl AppState {
         self.changed(cx);
     }
 
-    /// Get credentials for server `ix`, which turned the last connect away.
-    /// An OAuth server's stored credentials are dropped, since the server
-    /// refused them, and the browser flow runs again, starting from the
-    /// challenge the server sent. A server with a bearer token, or with no
-    /// authorization configured, opens the edit form, where it is set.
+    /// Log in again to server `ix`, whose OAuth credentials it refused: the
+    /// stored ones are dropped and the browser flow runs again, starting
+    /// from the challenge the server sent. A server without OAuth has
+    /// nothing to log in to; its credentials are set in its settings.
     pub fn authorize(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(entry) = self.servers.get(ix) else {
             return;
         };
-        if let ServerSpec::Http {
+        let ServerSpec::Http {
             auth: mcp_core::AuthRef::OAuth { keyring_id },
             ..
         } = &entry.record.spec
-        {
-            let secrets = self.secrets.clone();
-            let key = keyring_id.clone();
-            let id = entry.record.id.clone();
-            self.in_background(
-                // Nothing may be stored yet, which is not a failure.
-                move || {
-                    let _ = mcp_auth::forget(&*secrets, &key);
-                },
-                move |state, _, cx| {
-                    if let Some(ix) = state.servers.iter().position(|s| s.record.id == id) {
-                        state.connect(ix, cx);
-                    }
-                },
-                cx,
-            );
-        } else {
-            // A refused bearer token is fixed in the settings, on the token.
-            self.selected_server = Some(ix);
-            self.focus_token = matches!(
-                entry.record.spec,
-                ServerSpec::Http {
-                    auth: mcp_core::AuthRef::Bearer { .. },
-                    ..
+        else {
+            return;
+        };
+        let secrets = self.secrets.clone();
+        let key = keyring_id.clone();
+        let id = entry.record.id.clone();
+        self.in_background(
+            // Nothing may be stored yet, which is not a failure.
+            move || {
+                let _ = mcp_auth::forget(&*secrets, &key);
+            },
+            move |state, _, cx| {
+                if let Some(ix) = state.servers.iter().position(|s| s.record.id == id) {
+                    state.connect(ix, cx);
                 }
-            );
-            self.show_edit_selected(cx);
-        }
+            },
+            cx,
+        );
     }
 
     /// The OAuth options a connect of server `ix` authorizes with. The
@@ -2834,8 +2829,11 @@ impl AppState {
             let entry = &mut self.servers[pos];
             if let Some((state, detail)) = event.change {
                 match state {
+                    // A disconnect of our own bumps the generation first, so
+                    // one that arrives here is the server's doing: a failure,
+                    // said as one, not the calm of a server switched off.
                     ConnectionState::Disconnected if entry.status == Status::Connected => {
-                        entry.status = Status::Off;
+                        entry.status = Status::Error("The server ended the session.".into());
                         entry.session = None;
                     }
                     ConnectionState::Failed => {
@@ -3128,14 +3126,6 @@ fn search_text(call: &CallRecord) -> String {
         push(&result.to_string());
     }
     text.to_lowercase()
-}
-
-fn plural(n: usize, word: &str) -> String {
-    if n == 1 {
-        format!("1 {word}")
-    } else {
-        format!("{n} {word}s")
-    }
 }
 
 pub(crate) fn demo_record(name: &str, spec: ServerSpec) -> ServerRecord {
@@ -3488,9 +3478,19 @@ mod tests {
         let state = demo();
         assert_eq!(
             state.status_text(),
-            "weather · Connected · 3 tools · 2 resources · 1 prompt · Last call 142 ms"
+            "weather · Connected · Last call 142 ms"
         );
         assert_eq!(AppState::new(None, None).status_text(), "No server");
+        // A failure the pane writes under the settings is not repeated;
+        // History, shown instead of the settings, still gets the reason.
+        let mut state = demo();
+        state.servers[0].status = Status::Error("The server ended the session.".into());
+        assert_eq!(state.status_text(), "weather · Error");
+        state.mode = Mode::History;
+        assert_eq!(
+            state.status_text(),
+            "weather · Error · The server ended the session."
+        );
     }
 
     #[test]
@@ -3504,8 +3504,7 @@ mod tests {
         state.servers[0].set_snapshot(Some(snapshot));
         assert_eq!(
             state.status_text(),
-            "weather · Connected · 3 tools · 2 resources · 1 prompt · \
-             resources/templates/list failed · Last call 142 ms"
+            "weather · Connected · resources/templates/list failed · Last call 142 ms"
         );
         let failures = state.list_failures(Mode::Resources);
         assert_eq!(failures.len(), 1);

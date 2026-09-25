@@ -340,12 +340,6 @@ impl AddServerForm {
         self.name.update(cx, |input, cx| input.focus(window, cx));
     }
 
-    /// Focus the token field: the form was opened to replace a token the
-    /// server refused.
-    pub fn focus_token(&self, window: &mut Window, cx: &mut Context<Self>) {
-        self.token.update(cx, |input, cx| input.focus(window, cx));
-    }
-
     fn field(
         &self,
         cx: &Context<Self>,
