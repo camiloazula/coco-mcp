@@ -214,7 +214,15 @@ impl Render for Workspace {
                 let index = action.index;
                 this.state.update(cx, |s, cx| s.select_server(index, cx));
             }))
-            .on_action(cx.listener(|this, _: &EditServer, _, cx| {
+            .on_action(cx.listener(|this, _: &EditServer, window, cx| {
+                // Where the pane already shows the server's settings, go to
+                // them rather than open a second copy over them.
+                if this.state.read(cx).settings_pane().is_some()
+                    && let Some(form) = this.server_form()
+                {
+                    form.update(cx, |f, cx| f.focus(window, cx));
+                    return;
+                }
                 this.state.update(cx, |s, cx| s.show_edit_selected(cx));
             }))
             .on_action(cx.listener(|this, _: &DeleteServer, _, cx| {

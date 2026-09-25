@@ -116,6 +116,19 @@ pub fn crash_mid_session_flow() {
         );
     });
     snap(&mut live.cx, live.handle, "50-server-exited");
+    // With the settings as the pane, ⌘E (the menu, the palette) goes to
+    // them rather than opening a second copy.
+    live.ui(|window, cx| window.press("cmd-e", cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("name").focused(),
+            Some(true),
+            "the keyboard is in the form"
+        );
+    });
+    live.cx.update(|cx| {
+        assert_eq!(live.state.read(cx).screen, Screen::Detail, "no second form");
+    });
     // The pane's Connect, with the settings as saved, just connects: the
     // tool selected before the crash is selected again, nothing is saved.
     let tool = live.cx.update(|cx| live.state.read(cx).selected_name());
