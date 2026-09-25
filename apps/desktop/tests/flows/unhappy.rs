@@ -359,6 +359,11 @@ pub fn unreachable_server_flow() {
         "{text}"
     );
     assert!(!text.contains('['), "no type paths: {text}");
+    // The cause, not the layers that only say where it happened.
+    assert_eq!(
+        text,
+        "Could not reach the server at http://127.0.0.1:9/mcp: connection refused."
+    );
     snap(&mut live.cx, live.handle, "68-unreachable");
 }
 

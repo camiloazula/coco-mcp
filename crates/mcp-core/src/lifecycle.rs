@@ -99,6 +99,7 @@ pub(crate) fn describe(error: &ClientInitializeError, mode: ProtocolMode) -> Str
             describe(discover, ProtocolMode::Auto),
             describe(fallback, ProtocolMode::Legacy)
         ),
+        ClientInitializeError::TransportError { error, .. } => crate::error::transport_cause(error),
         other => other.to_string(),
     }
 }
