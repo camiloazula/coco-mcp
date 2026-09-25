@@ -19,7 +19,8 @@ use crate::views::content::Draw;
 use crate::views::json::{Fit, Folds, json_tree_rc};
 use crate::views::response::Shown;
 use crate::views::{
-    Workspace, accent_button, detail_header, kbd, mono, muted, response, split, tree_section,
+    Workspace, accent_button, detail_header, disabled_control, kbd, mono, muted, response, split,
+    tree_section,
 };
 
 /// JSON-RPC method of a call kind.
@@ -79,16 +80,30 @@ pub fn render(
         mono(cx, 11., facts).text_color(t.muted),
     );
 
+    // The form is the tool's or prompt's, drawn only with a session: without
+    // one the pane shows the server's settings, so it says so instead.
     let open_in_form = matches!(record.kind, CallKind::Tool | CallKind::Prompt).then(|| {
-        div()
-            .id("open-call")
-            .text_size(px(12.))
-            .text_color(t.muted)
-            .hover(|s| s.text_color(t.fg))
-            .cursor_pointer()
-            .on_click(cx.listener(|this, _, window, cx| this.open_call_in_form(window, cx)))
-            .child("Open in form")
+        if connected {
+            div()
+                .id("open-call")
+                .text_size(px(12.))
+                .text_color(t.muted)
+                .hover(|s| s.text_color(t.fg))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| this.open_call_in_form(window, cx)))
+                .child("Open in form")
+                .test_support()
+                .into_any_element()
+        } else {
+            disabled_control(
+                cx,
+                "open-call",
+                "Open in form",
+                "Connect to open it in the form",
+            )
             .test_support()
+            .into_any_element()
+        }
     });
     let toolbar = h_flex()
         .h(px(36.))

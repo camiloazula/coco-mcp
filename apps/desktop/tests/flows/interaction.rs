@@ -335,6 +335,11 @@ pub fn replay_needs_session_flow() {
     live.cx.update(|cx| {
         assert!(!live.state.read(cx).response_pending(), "nothing sent");
     });
+    // Open in form needs the session too: the form is not drawn without one.
+    live.ui(|window, cx| window.click("open-call", cx));
+    live.cx.update(|cx| {
+        assert_eq!(live.state.read(cx).mode, Mode::History, "History stays");
+    });
     snap(&mut live.cx, live.handle, "48-replay-needs-session");
 }
 
