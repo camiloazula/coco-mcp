@@ -23,7 +23,7 @@ use crate::actions::{
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
     WORKSPACE, ZoomLog,
 };
-use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
+use crate::state::{AppState, Changed, Gone, Mode, Screen};
 use crate::theme::{self, tokens};
 use crate::views::copy::Export;
 use crate::views::kept::Decoded;
@@ -236,14 +236,11 @@ impl Workspace {
     /// cancelling back to the pane, each start from the saved settings
     /// again. History stays readable without a session, so it is not
     /// replaced.
-    pub(crate) fn wanted_form(state: &AppState) -> Option<(Option<usize>, bool)> {
+    fn wanted_form(state: &AppState) -> Option<(Option<usize>, bool)> {
         if state.screen == Screen::AddServer {
             return Some((state.editing, true));
         }
-        let ix = state.selected_server?;
-        let entry = state.servers.get(ix)?;
-        (state.mode != Mode::History && matches!(entry.status, Status::Off | Status::Error(_)))
-            .then_some((Some(ix), false))
+        state.settings_pane().map(|ix| (Some(ix), false))
     }
 
     /// The filter placeholder follows the mode; needs the window, so it runs in render.

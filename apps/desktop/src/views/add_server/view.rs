@@ -20,25 +20,38 @@ impl Render for AddServerForm {
         // is off, it is the pane, and there is nothing to go back to.
         let opened = self.state.read(cx).screen == Screen::AddServer;
         // How connecting with the saved settings is going, under the fields:
-        // the form stays until it succeeds.
-        let (status, refused) = self
+        // the form stays until it succeeds. The auth is the saved spec's, not
+        // the one the form opened with: a save that changed it is what the
+        // last connect tried.
+        let (status, refused, oauth) = self
             .editing
             .as_ref()
             .and_then(|(ix, _)| self.state.read(cx).servers.get(*ix))
-            .map_or((None, false), |s| (Some(s.status.clone()), s.unauthorized));
+            .map_or((None, false, false), |s| {
+                let oauth = matches!(
+                    s.record.spec,
+                    ServerSpec::Http {
+                        auth: AuthRef::OAuth { .. },
+                        ..
+                    }
+                );
+                (Some(s.status.clone()), s.unauthorized, oauth)
+            });
         let connecting = status == Some(Status::Connecting);
-        // Saving the settings of a server in session ends that session and
-        // starts another: the button says so rather than offering a connect.
-        let live = matches!(status, Some(Status::Connected | Status::Connecting));
         let failed = match status {
             Some(Status::Error(text)) => Some(text),
             _ => None,
         };
+        // Saving the settings of a server in session ends that session and
+        // starts another: the button says so rather than offering a connect.
+        // Taken when the form opened, so it holds through the connect, until
+        // a failure leaves no session to end.
+        let live = self.reconnects && failed.is_none();
         // Turned away for want of credentials, the server needs them set
         // here; a refused OAuth login is fixed by logging in again instead,
         // and that is the one button the failure adds.
         let unauthorized = failed.is_some() && refused;
-        let reauthorize = unauthorized && matches!(self.editing, Some((_, AuthRef::OAuth { .. })));
+        let reauthorize = unauthorized && oauth;
         let (title, subtitle) = match (editing, opened) {
             (true, true) if failed.is_some() => (
                 "Edit server",

@@ -100,12 +100,34 @@ pub fn crash_mid_session_flow() {
         window.render_frame(cx);
         assert!(window.try_find("connect-error").is_some(), "why");
         assert!(window.try_find("connect").is_some(), "a way back");
+        // The settings are the pane: no pencil opens them again.
+        assert!(window.try_find("edit-server").is_none());
+        // The tools are the last connection's: said so, and not opened.
+        assert!(window.try_find("list-stale").is_some());
+    });
+    let before = live.cx.update(|cx| live.state.read(cx).selected_item);
+    live.ui(|window, cx| window.click(("item", 0usize), cx));
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| s.move_item(1, cx));
+        assert_eq!(
+            live.state.read(cx).selected_item,
+            before,
+            "neither a click nor a key selects a row"
+        );
     });
     snap(&mut live.cx, live.handle, "50-server-exited");
     live.cx
         .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
     live.wait("it connects again", |s| {
         s.servers[0].status == Status::Connected
+    });
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("list-stale").is_none(),
+            "the rows open again"
+        );
+        assert!(window.try_find("edit-server").is_some());
     });
     live.call("echo", json!({"text": "back"}));
     assert_eq!(live.text(), "back");

@@ -15,23 +15,38 @@ pub(super) fn centered_note(cx: &Context<Workspace>, text: impl Into<SharedStrin
 }
 
 /// A saved server that is not connected, when its settings form is not
-/// there: a button that does what `⌘R`, Enter on the row and the palette
-/// also do. Same layout as the empty state so the two read as one family.
-pub(super) fn connect_state(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+/// there: the failure, if its connect failed, and a button that does what
+/// `⌘R`, Enter on the row and the palette also do. Same layout as the empty
+/// state so the two read as one family.
+pub(super) fn connect_state(
+    ws: &Workspace,
+    failure: Option<String>,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
     let t = *tokens(cx);
     let entity = ws.state.clone();
+    let title = if failure.is_some() {
+        "Connection failed"
+    } else {
+        "Disconnected"
+    };
     v_flex()
         .flex_1()
         .items_center()
         .justify_center()
         .gap(px(8.))
         .text_color(t.muted)
-        .child(
+        .child(div().text_size(px(15.)).text_color(t.fg).child(title))
+        .children(failure.map(|text| {
             div()
-                .text_size(px(15.))
-                .text_color(t.fg)
-                .child("Disconnected"),
-        )
+                .id("connect-error")
+                .text_size(px(13.))
+                .text_center()
+                .max_w(px(480.))
+                .text_color(t.err)
+                .child(text)
+                .test_support()
+        }))
         .child(
             h_flex()
                 .gap(px(16.))

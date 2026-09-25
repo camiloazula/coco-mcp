@@ -322,6 +322,18 @@ pub struct ServerEntry {
 }
 
 impl ServerEntry {
+    /// The last connect failed with `e`. `unauthorized` says whether this
+    /// one was turned away for want of authorization, so a later failure of
+    /// another kind is not taken for a refusal; the challenge of the last
+    /// refusal is kept either way for the next authorization.
+    pub fn connect_failed(&mut self, e: &mcp_core::Error) {
+        self.unauthorized = matches!(e, mcp_core::Error::AuthRequired { .. });
+        if let mcp_core::Error::AuthRequired { challenge } = e {
+            self.auth_challenge = challenge.clone();
+        }
+        self.status = Status::Error(explain(e, Some(&self.record.spec)));
+    }
+
     /// What this server can do now: its feature table, from the era of the
     /// version its last session agreed on and the capabilities it declared.
     pub fn features(&self) -> Features {
@@ -1134,10 +1146,33 @@ impl AppState {
                 .is_some_and(|s| s.history_load != HistoryLoad::Read)
     }
 
+    /// The selected server when the detail pane is its settings form in
+    /// place of a row's detail: off, or its connect failed, outside History,
+    /// which stays readable without a session, and outside the add screen.
+    /// The one rule the pane, the list, the sidebar pencil and the status bar
+    /// all follow.
+    pub fn settings_pane(&self) -> Option<usize> {
+        if self.screen == Screen::AddServer || self.mode == Mode::History {
+            return None;
+        }
+        let ix = self.selected_server?;
+        matches!(self.servers.get(ix)?.status, Status::Off | Status::Error(_)).then_some(ix)
+    }
+
+    /// Whether the selected server's settings, and the failure under them,
+    /// are on screen: as the pane, or as the form opened to edit it.
+    fn settings_on_screen(&self) -> bool {
+        self.settings_pane().is_some()
+            || (self.screen == Screen::AddServer
+                && self.editing.is_some()
+                && self.editing == self.selected_server)
+    }
+
     /// Whether a row of the middle list opens anything. History is read from
     /// the database; the other lists are what the server declared, and
-    /// without a session the pane shows its settings instead, so their rows
-    /// are the last connection's, shown but not opened.
+    /// without a session the pane shows its settings, or that it connects,
+    /// instead, so their rows are the last connection's, shown but not
+    /// opened.
     pub fn list_opens(&self) -> bool {
         self.mode == Mode::History || self.server().is_some_and(|s| s.status == Status::Connected)
     }
@@ -1294,9 +1329,9 @@ impl AppState {
     }
 
     /// Status bar text: what the rest of the window does not say already.
-    /// The counts are the sidebar's, and a failure the pane writes under
-    /// the server's settings is not written twice; History, which is shown
-    /// instead of the settings, leaves the reason to the status bar.
+    /// The counts are the sidebar's, and a failure written under the
+    /// server's settings is not written twice; anywhere else (History, the
+    /// add screen) the reason is the status bar's to give.
     pub fn status_text(&self) -> String {
         let Some(server) = self.server() else {
             return "No server".into();
@@ -1305,8 +1340,8 @@ impl AppState {
         match &server.status {
             Status::Off => format!("{name} · Disconnected"),
             Status::Connecting => format!("{name} · Connecting…"),
-            Status::Error(e) if self.mode == Mode::History => format!("{name} · Error · {e}"),
-            Status::Error(_) => format!("{name} · Error"),
+            Status::Error(_) if self.settings_on_screen() => format!("{name} · Error"),
+            Status::Error(e) => format!("{name} · Error · {e}"),
             Status::Connected => {
                 let mut parts = vec![name.clone(), "Connected".to_string()];
                 if let Some(snap) = &server.snapshot {
@@ -2406,13 +2441,7 @@ impl AppState {
                         };
                         after = Some((entry.log_level.clone(), unread, entry.record.name.clone()));
                     }
-                    Some(Err(e)) => {
-                        if let mcp_core::Error::AuthRequired { challenge } = &e {
-                            entry.unauthorized = true;
-                            entry.auth_challenge = challenge.clone();
-                        }
-                        entry.status = Status::Error(explain(&e, Some(&entry.record.spec)));
-                    }
+                    Some(Err(e)) => entry.connect_failed(&e),
                     None => entry.status = Status::Error("connect task failed".into()),
                 }
                 // Connected, the form that saved the server has done its
@@ -3491,6 +3520,53 @@ mod tests {
             state.status_text(),
             "weather · Error · The server ended the session."
         );
+        // Nor does the add screen, which is not the selected server's form;
+        // the form editing it is.
+        state.mode = Mode::Tools;
+        state.screen = Screen::AddServer;
+        assert_eq!(state.settings_pane(), None);
+        assert_eq!(
+            state.status_text(),
+            "weather · Error · The server ended the session."
+        );
+        state.editing = Some(0);
+        assert_eq!(state.status_text(), "weather · Error");
+    }
+
+    #[test]
+    fn a_refusal_is_forgotten_by_the_next_failure_of_another_kind() {
+        let mut state = demo();
+        let entry = &mut state.servers[0];
+        entry.connect_failed(&mcp_core::Error::AuthRequired {
+            challenge: Some("Bearer realm=\"x\"".into()),
+        });
+        assert!(entry.unauthorized);
+        entry.connect_failed(&mcp_core::Error::Transport("connection refused".into()));
+        assert!(!entry.unauthorized, "not a refusal");
+        assert!(matches!(entry.status, Status::Error(_)));
+        assert_eq!(
+            entry.auth_challenge.as_deref(),
+            Some("Bearer realm=\"x\""),
+            "the next authorization still starts from the challenge"
+        );
+    }
+
+    #[test]
+    fn the_settings_pane_is_the_selected_server_off_or_failed_outside_history() {
+        let mut state = demo();
+        assert_eq!(state.settings_pane(), None, "connected");
+        assert!(state.list_opens());
+        state.servers[0].status = Status::Connecting;
+        assert_eq!(state.settings_pane(), None, "connecting");
+        assert!(!state.list_opens(), "nothing to open yet");
+        for status in [Status::Off, Status::Error("gone".into())] {
+            state.servers[0].status = status;
+            assert_eq!(state.settings_pane(), Some(0));
+            assert!(!state.list_opens());
+        }
+        state.mode = Mode::History;
+        assert_eq!(state.settings_pane(), None, "History stays readable");
+        assert!(state.list_opens());
     }
 
     #[test]

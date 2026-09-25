@@ -38,9 +38,10 @@ pub fn render(
     let clearable = state.mode == Mode::History && !reading && state.items_total() > 0;
     // Above the rows rather than among them: every row is sized from the first.
     let notice = list_notice(&state.list_failures(state.mode), cx);
-    // Without a session the rows are the last connection's: shown, not opened.
-    let opens = state.list_opens();
-    let stale = (!opens && count > 0).then(|| {
+    // Without a session the rows are the last connection's: shown, not
+    // opened. The note goes with the settings pane, whose Connect it names;
+    // while connecting, the rows are only waited on.
+    let stale = (state.settings_pane().is_some() && count > 0).then(|| {
         muted(cx, 11., "From the last connection. Connect to open one.")
             .id("list-stale")
             .px(px(12.))

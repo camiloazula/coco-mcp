@@ -70,7 +70,13 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
         Status::Off | Status::Error(_) => {
             return match ws.server_form() {
                 Some(form) => form.into_any_element(),
-                None => connect_state(ws, cx),
+                None => {
+                    let failure = match status {
+                        Status::Error(text) => Some(text),
+                        _ => None,
+                    };
+                    connect_state(ws, failure, cx)
+                }
             };
         }
         Status::Connected => {}

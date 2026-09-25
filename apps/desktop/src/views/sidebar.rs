@@ -30,7 +30,7 @@ pub fn render(
 
     let has_selection = selected_server.is_some() && !is_form;
     // A server the pane already shows as its settings has nothing to open.
-    let editable = has_selection && Workspace::wanted_form(state).is_none();
+    let editable = has_selection && state.settings_pane().is_none();
     // Header actions: add, edit, delete. Each is a Lucide icon with a hover
     // caption; delete needs a selected server, edit one whose settings are
     // not on screen already.
