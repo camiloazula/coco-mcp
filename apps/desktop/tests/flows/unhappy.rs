@@ -401,6 +401,33 @@ pub fn unreachable_server_flow() {
         "Could not reach the server at http://127.0.0.1:9/mcp: connection refused."
     );
     snap(&mut live.cx, live.handle, "68-unreachable");
+
+    // Connecting again from outside the form (as ⌘R or the plug do) keeps
+    // the pane's form, and what was typed in it, through the connect.
+    live.ui(|window, cx| {
+        window.click("name", cx);
+        window.press("cmd-a", cx);
+        window.input("still typing", cx);
+    });
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("name").value(),
+            Some("still typing"),
+            "kept while connecting"
+        );
+    });
+    live.wait("the connect fails again", |s| {
+        matches!(s.servers[0].status, Status::Error(_))
+    });
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("name").value(),
+            Some("still typing"),
+            "kept after it failed"
+        );
+    });
 }
 
 /// A server saved from the form is connected with the form kept open: a

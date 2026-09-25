@@ -63,7 +63,14 @@ pub fn render(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspac
             .unwrap_or_else(|| centered_note(cx, "Select a call to see it"));
     }
     match status {
-        Status::Connecting => return centered_note(cx, "Connecting…"),
+        // A pane that showed the settings keeps them while connecting, with
+        // the connect under the fields; otherwise a note says it.
+        Status::Connecting => {
+            return match ws.server_form() {
+                Some(form) => form.into_any_element(),
+                None => centered_note(cx, "Connecting…"),
+            };
+        }
         // Off or failed, the server is shown as its settings, ready to
         // connect, with the failure under the fields; the form is built by
         // the workspace before the pane is drawn.
