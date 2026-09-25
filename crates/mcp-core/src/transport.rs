@@ -170,6 +170,31 @@ fn stderr_line(bytes: &[u8], dropped: usize) -> String {
     text
 }
 
+/// An HTTP client builder for requests to `url`. A server on this machine
+/// is never reached through a proxy: one set for the network outside
+/// (`HTTP_PROXY`, `ALL_PROXY`) cannot reach it, and would answer for it.
+pub fn http_client_builder(url: &str) -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder();
+    if is_loopback(url) {
+        builder.no_proxy()
+    } else {
+        builder
+    }
+}
+
+/// Whether `url` names this machine: `localhost`, or a loopback address.
+fn is_loopback(url: &str) -> bool {
+    match url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host().map(|h| h.to_owned()))
+    {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 /// Build a streamable-HTTP transport for `url`.
 pub fn build_http(
     url: &str,
@@ -196,7 +221,7 @@ pub fn build_http(
     if let Some(token) = &options.bearer_token {
         config = config.auth_header(token.clone());
     }
-    let client = reqwest::Client::builder()
+    let client = http_client_builder(url)
         .build()
         .map_err(|e| Error::Transport(format!("http client: {e}")))?;
     Ok(HttpTransport::Plain(
@@ -422,6 +447,25 @@ mod tests {
     use super::*;
     use crate::event::EventCategory;
     use serde_json::json;
+
+    #[test]
+    fn a_server_on_this_machine_is_known_by_its_address() {
+        for url in [
+            "http://127.0.0.1:9/mcp",
+            "http://localhost:3000/mcp",
+            "http://LOCALHOST/mcp",
+            "http://[::1]:8080/mcp",
+        ] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in [
+            "https://example.com/mcp",
+            "http://10.0.0.2/mcp",
+            "not a url",
+        ] {
+            assert!(!is_loopback(url), "{url}");
+        }
+    }
 
     #[test]
     fn request_then_response_yields_elapsed_and_method() {

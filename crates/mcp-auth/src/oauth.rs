@@ -76,7 +76,7 @@ pub async fn authorized_client(
     keyring_id: &str,
     options: &OAuthOptions,
 ) -> Result<AuthClient<reqwest::Client>> {
-    let http = reqwest::Client::builder().build()?;
+    let http = mcp_core::transport::http_client_builder(url).build()?;
     let mut manager = AuthorizationManager::new(url).await?;
     manager.set_credential_store(KeyringCredentialStore::new(secrets, keyring_id));
     if manager.initialize_from_store().await? {

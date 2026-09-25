@@ -395,8 +395,7 @@ pub fn keepalive_flow() {
         "the silent server is noticed",
         |s| matches!(&s.servers[0].status, Status::Error(e) if e.contains("stopped answering")),
     );
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(window.try_find("connect-error").is_some(), "the failure");
         assert!(window.try_find("connect").is_some(), "Connect offered");
     });
@@ -511,8 +510,7 @@ pub fn authorize_flow() {
             "its challenge is kept"
         );
     });
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(window.try_find("connect").is_some(), "the settings");
         assert!(window.try_find("connect-error").is_some(), "the failure");
         assert!(window.try_find("authorize").is_none(), "no OAuth to redo");
@@ -524,13 +522,11 @@ pub fn authorize_flow() {
     live.cx.update(|cx| {
         live.state.update(cx, |s, cx| {
             s.selected_server = Some(1);
-            s.servers[1].unauthorized = true;
-            s.servers[1].status = Status::Error("The server refused the login.".into());
+            s.servers[1].connect_failed(&mcp_core::Error::AuthRequired { challenge: None });
             cx.notify();
         })
     });
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(window.try_find("connect-error").is_some(), "the failure");
         assert!(window.try_find("authorize").is_some(), "the login to redo");
     });
