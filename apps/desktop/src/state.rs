@@ -2865,8 +2865,14 @@ impl AppState {
                         entry.status = Status::Error("The server ended the session.".into());
                         entry.session = None;
                     }
-                    ConnectionState::Failed => {
-                        entry.status = Status::Error(detail.unwrap_or_default());
+                    // A connect that fails says why through its own result,
+                    // in the pane's words; its state change, which comes
+                    // on another channel and in no set order with it, must
+                    // not overwrite that with the transport's text. Only a
+                    // session that was up fails here.
+                    ConnectionState::Failed if entry.status == Status::Connected => {
+                        entry.status =
+                            Status::Error(crate::explain::detail(&detail.unwrap_or_default()));
                         entry.session = None;
                     }
                     _ => {}
@@ -3531,6 +3537,28 @@ mod tests {
         );
         state.editing = Some(0);
         assert_eq!(state.status_text(), "weather · Error");
+    }
+
+    #[test]
+    fn a_connect_failure_is_explained_by_its_result_not_its_state_change() {
+        let mut state = demo();
+        let id = state.servers[0].record.id.clone();
+        let sink = EventSink::new(8);
+        let failed = |sink: &EventSink| {
+            vec![incoming(sink.emit(EventKind::StateChange {
+                state: ConnectionState::Failed,
+                detail: Some("Send message error Transport [a::B<c::D>] error: refused".into()),
+            }))]
+        };
+        // Connecting, the result says why; the event that races it only logs.
+        state.servers[0].status = Status::Connecting;
+        state.apply_events(&id, 0, failed(&sink));
+        assert_eq!(state.servers[0].status, Status::Connecting);
+        assert_eq!(state.servers[0].log.last().unwrap().method, "failed");
+        // A session that was up fails here, in the pane's words.
+        state.servers[0].status = Status::Connected;
+        state.apply_events(&id, 0, failed(&sink));
+        assert_eq!(state.servers[0].status, Status::Error("refused.".into()));
     }
 
     #[test]
@@ -4347,7 +4375,7 @@ mod tests {
         assert!(state.apply_events(&id, 0, batch).changed);
         assert_eq!(
             state.servers[0].status,
-            Status::Error("exit status 1".into())
+            Status::Error("exit status 1.".into())
         );
         let methods: Vec<&str> = state.servers[0].log[50..]
             .iter()

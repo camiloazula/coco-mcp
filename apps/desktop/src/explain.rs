@@ -57,6 +57,12 @@ pub fn explain(error: &Error, spec: Option<&ServerSpec>) -> String {
     }
 }
 
+/// A transport's own account of a session that failed, as a sentence:
+/// what [`explain`] keeps of a transport error's detail.
+pub fn detail(text: &str) -> String {
+    sentence(tidy(text))
+}
+
 /// `text` ending in one full stop.
 fn sentence(text: String) -> String {
     format!("{}.", text.trim().trim_end_matches('.'))
