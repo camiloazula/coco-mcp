@@ -322,6 +322,18 @@ pub struct ServerEntry {
 }
 
 impl ServerEntry {
+    /// The last connect failed with `e`. `unauthorized` says whether this
+    /// one was turned away for want of authorization, so a later failure of
+    /// another kind is not taken for a refusal; the challenge of the last
+    /// refusal is kept either way for the next authorization.
+    pub fn connect_failed(&mut self, e: &mcp_core::Error) {
+        self.unauthorized = matches!(e, mcp_core::Error::AuthRequired { .. });
+        if let mcp_core::Error::AuthRequired { challenge } = e {
+            self.auth_challenge = challenge.clone();
+        }
+        self.status = Status::Error(explain(e, Some(&self.record.spec)));
+    }
+
     /// What this server can do now: its feature table, from the era of the
     /// version its last session agreed on and the capabilities it declared.
     pub fn features(&self) -> Features {
@@ -803,9 +815,6 @@ pub struct AppState {
     pub confirm: Option<Confirm>,
     /// Server index the add/edit form is editing (`None` = adding).
     pub editing: Option<usize>,
-    /// The edit form opened for a refused token focuses the token field
-    /// rather than the name; taken by the form when it opens.
-    pub focus_token: bool,
     /// The server the form saved and is connecting. The form stays open on
     /// it, showing how the connect goes under the fields, and closes once
     /// the connection is made; a failure leaves the settings there to
@@ -981,7 +990,6 @@ impl AppState {
             pending: Vec::new(),
             confirm: None,
             editing: None,
-            focus_token: false,
             form_awaits: None,
             keepalive: SessionOptions::default().keepalive,
             oauth_open: None,
@@ -1138,6 +1146,37 @@ impl AppState {
                 .is_some_and(|s| s.history_load != HistoryLoad::Read)
     }
 
+    /// The selected server when the detail pane is its settings form in
+    /// place of a row's detail: off, or its connect failed, outside History,
+    /// which stays readable without a session, and outside the add screen.
+    /// The one rule the pane, the list, the sidebar pencil and the status bar
+    /// all follow.
+    pub fn settings_pane(&self) -> Option<usize> {
+        if self.screen == Screen::AddServer || self.mode == Mode::History {
+            return None;
+        }
+        let ix = self.selected_server?;
+        matches!(self.servers.get(ix)?.status, Status::Off | Status::Error(_)).then_some(ix)
+    }
+
+    /// Whether the selected server's settings, and the failure under them,
+    /// are on screen: as the pane, or as the form opened to edit it.
+    fn settings_on_screen(&self) -> bool {
+        self.settings_pane().is_some()
+            || (self.screen == Screen::AddServer
+                && self.editing.is_some()
+                && self.editing == self.selected_server)
+    }
+
+    /// Whether a row of the middle list opens anything. History is read from
+    /// the database; the other lists are what the server declared, and
+    /// without a session the pane shows its settings, or that it connects,
+    /// instead, so their rows are the last connection's, shown but not
+    /// opened.
+    pub fn list_opens(&self) -> bool {
+        self.mode == Mode::History || self.server().is_some_and(|s| s.status == Status::Connected)
+    }
+
     /// Every row of the middle list, before the filter.
     fn all_items(&self) -> Vec<Item> {
         if self.mode == Mode::History {
@@ -1289,7 +1328,10 @@ impl AppState {
         self.server()?.history.iter().find(|c| c.id == id)
     }
 
-    /// Status bar text, in the design's format.
+    /// Status bar text: what the rest of the window does not say already.
+    /// The counts are the sidebar's, and a failure written under the
+    /// server's settings is not written twice; anywhere else (History, the
+    /// add screen) the reason is the status bar's to give.
     pub fn status_text(&self) -> String {
         let Some(server) = self.server() else {
             return "No server".into();
@@ -1298,16 +1340,11 @@ impl AppState {
         match &server.status {
             Status::Off => format!("{name} · Disconnected"),
             Status::Connecting => format!("{name} · Connecting…"),
+            Status::Error(_) if self.settings_on_screen() => format!("{name} · Error"),
             Status::Error(e) => format!("{name} · Error · {e}"),
             Status::Connected => {
                 let mut parts = vec![name.clone(), "Connected".to_string()];
                 if let Some(snap) = &server.snapshot {
-                    parts.push(plural(snap.tools.len(), "tool"));
-                    parts.push(plural(
-                        snap.resources.len() + snap.resource_templates.len(),
-                        "resource",
-                    ));
-                    parts.push(plural(snap.prompts.len(), "prompt"));
                     parts.extend(
                         snap.list_failures
                             .iter()
@@ -1375,6 +1412,9 @@ impl AppState {
     /// the form that edits the server rather than a section; moving onto it
     /// with the keyboard ([`Self::select_item`]) only shows it.
     pub fn open_item(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if !self.list_opens() {
+            return;
+        }
         self.select_item(ix, cx);
         if self.mode == Mode::Server && self.selected_name().as_deref() == Some(SETTINGS_SECTION) {
             self.show_edit_selected(cx);
@@ -1395,10 +1435,11 @@ impl AppState {
     }
 
     /// Move the list selection by `delta`, clamped. Nothing moves while the
-    /// History on screen is read: its rows are not drawn yet.
+    /// History on screen is read, its rows not drawn yet, nor in a list whose
+    /// rows open nothing ([`Self::list_opens`]).
     pub fn move_item(&mut self, delta: isize, cx: &mut Context<Self>) {
         let len = self.items().len();
-        if len == 0 || self.history_reading() {
+        if len == 0 || self.history_reading() || !self.list_opens() {
             return;
         }
         let next = match self.selected_item {
@@ -2400,13 +2441,7 @@ impl AppState {
                         };
                         after = Some((entry.log_level.clone(), unread, entry.record.name.clone()));
                     }
-                    Some(Err(e)) => {
-                        if let mcp_core::Error::AuthRequired { challenge } = &e {
-                            entry.unauthorized = true;
-                            entry.auth_challenge = challenge.clone();
-                        }
-                        entry.status = Status::Error(explain(&e, Some(&entry.record.spec)));
-                    }
+                    Some(Err(e)) => entry.connect_failed(&e),
                     None => entry.status = Status::Error("connect task failed".into()),
                 }
                 // Connected, the form that saved the server has done its
@@ -2438,47 +2473,36 @@ impl AppState {
         self.changed(cx);
     }
 
-    /// Get credentials for server `ix`, which turned the last connect away.
-    /// An OAuth server's stored credentials are dropped, since the server
-    /// refused them, and the browser flow runs again, starting from the
-    /// challenge the server sent. A server with a bearer token, or with no
-    /// authorization configured, opens the edit form, where it is set.
+    /// Log in again to server `ix`, whose OAuth credentials it refused: the
+    /// stored ones are dropped and the browser flow runs again, starting
+    /// from the challenge the server sent. A server without OAuth has
+    /// nothing to log in to; its credentials are set in its settings.
     pub fn authorize(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(entry) = self.servers.get(ix) else {
             return;
         };
-        if let ServerSpec::Http {
+        let ServerSpec::Http {
             auth: mcp_core::AuthRef::OAuth { keyring_id },
             ..
         } = &entry.record.spec
-        {
-            let secrets = self.secrets.clone();
-            let key = keyring_id.clone();
-            let id = entry.record.id.clone();
-            self.in_background(
-                // Nothing may be stored yet, which is not a failure.
-                move || {
-                    let _ = mcp_auth::forget(&*secrets, &key);
-                },
-                move |state, _, cx| {
-                    if let Some(ix) = state.servers.iter().position(|s| s.record.id == id) {
-                        state.connect(ix, cx);
-                    }
-                },
-                cx,
-            );
-        } else {
-            // A refused bearer token is fixed in the settings, on the token.
-            self.selected_server = Some(ix);
-            self.focus_token = matches!(
-                entry.record.spec,
-                ServerSpec::Http {
-                    auth: mcp_core::AuthRef::Bearer { .. },
-                    ..
+        else {
+            return;
+        };
+        let secrets = self.secrets.clone();
+        let key = keyring_id.clone();
+        let id = entry.record.id.clone();
+        self.in_background(
+            // Nothing may be stored yet, which is not a failure.
+            move || {
+                let _ = mcp_auth::forget(&*secrets, &key);
+            },
+            move |state, _, cx| {
+                if let Some(ix) = state.servers.iter().position(|s| s.record.id == id) {
+                    state.connect(ix, cx);
                 }
-            );
-            self.show_edit_selected(cx);
-        }
+            },
+            cx,
+        );
     }
 
     /// The OAuth options a connect of server `ix` authorizes with. The
@@ -2834,12 +2858,21 @@ impl AppState {
             let entry = &mut self.servers[pos];
             if let Some((state, detail)) = event.change {
                 match state {
+                    // A disconnect of our own bumps the generation first, so
+                    // one that arrives here is the server's doing: a failure,
+                    // said as one, not the calm of a server switched off.
                     ConnectionState::Disconnected if entry.status == Status::Connected => {
-                        entry.status = Status::Off;
+                        entry.status = Status::Error("The server ended the session.".into());
                         entry.session = None;
                     }
-                    ConnectionState::Failed => {
-                        entry.status = Status::Error(detail.unwrap_or_default());
+                    // A connect that fails says why through its own result,
+                    // in the pane's words; its state change, which comes
+                    // on another channel and in no set order with it, must
+                    // not overwrite that with the transport's text. Only a
+                    // session that was up fails here.
+                    ConnectionState::Failed if entry.status == Status::Connected => {
+                        entry.status =
+                            Status::Error(crate::explain::detail(&detail.unwrap_or_default()));
                         entry.session = None;
                     }
                     _ => {}
@@ -3128,14 +3161,6 @@ fn search_text(call: &CallRecord) -> String {
         push(&result.to_string());
     }
     text.to_lowercase()
-}
-
-fn plural(n: usize, word: &str) -> String {
-    if n == 1 {
-        format!("1 {word}")
-    } else {
-        format!("{n} {word}s")
-    }
 }
 
 pub(crate) fn demo_record(name: &str, spec: ServerSpec) -> ServerRecord {
@@ -3488,9 +3513,88 @@ mod tests {
         let state = demo();
         assert_eq!(
             state.status_text(),
-            "weather · Connected · 3 tools · 2 resources · 1 prompt · Last call 142 ms"
+            "weather · Connected · Last call 142 ms"
         );
         assert_eq!(AppState::new(None, None).status_text(), "No server");
+        // A failure the pane writes under the settings is not repeated;
+        // History, shown instead of the settings, still gets the reason.
+        let mut state = demo();
+        state.servers[0].status = Status::Error("The server ended the session.".into());
+        assert_eq!(state.status_text(), "weather · Error");
+        state.mode = Mode::History;
+        assert_eq!(
+            state.status_text(),
+            "weather · Error · The server ended the session."
+        );
+        // Nor does the add screen, which is not the selected server's form;
+        // the form editing it is.
+        state.mode = Mode::Tools;
+        state.screen = Screen::AddServer;
+        assert_eq!(state.settings_pane(), None);
+        assert_eq!(
+            state.status_text(),
+            "weather · Error · The server ended the session."
+        );
+        state.editing = Some(0);
+        assert_eq!(state.status_text(), "weather · Error");
+    }
+
+    #[test]
+    fn a_connect_failure_is_explained_by_its_result_not_its_state_change() {
+        let mut state = demo();
+        let id = state.servers[0].record.id.clone();
+        let sink = EventSink::new(8);
+        let failed = |sink: &EventSink| {
+            vec![incoming(sink.emit(EventKind::StateChange {
+                state: ConnectionState::Failed,
+                detail: Some("Send message error Transport [a::B<c::D>] error: refused".into()),
+            }))]
+        };
+        // Connecting, the result says why; the event that races it only logs.
+        state.servers[0].status = Status::Connecting;
+        state.apply_events(&id, 0, failed(&sink));
+        assert_eq!(state.servers[0].status, Status::Connecting);
+        assert_eq!(state.servers[0].log.last().unwrap().method, "failed");
+        // A session that was up fails here, in the pane's words.
+        state.servers[0].status = Status::Connected;
+        state.apply_events(&id, 0, failed(&sink));
+        assert_eq!(state.servers[0].status, Status::Error("refused.".into()));
+    }
+
+    #[test]
+    fn a_refusal_is_forgotten_by_the_next_failure_of_another_kind() {
+        let mut state = demo();
+        let entry = &mut state.servers[0];
+        entry.connect_failed(&mcp_core::Error::AuthRequired {
+            challenge: Some("Bearer realm=\"x\"".into()),
+        });
+        assert!(entry.unauthorized);
+        entry.connect_failed(&mcp_core::Error::Transport("connection refused".into()));
+        assert!(!entry.unauthorized, "not a refusal");
+        assert!(matches!(entry.status, Status::Error(_)));
+        assert_eq!(
+            entry.auth_challenge.as_deref(),
+            Some("Bearer realm=\"x\""),
+            "the next authorization still starts from the challenge"
+        );
+    }
+
+    #[test]
+    fn the_settings_pane_is_the_selected_server_off_or_failed_outside_history() {
+        let mut state = demo();
+        assert_eq!(state.settings_pane(), None, "connected");
+        assert!(state.list_opens());
+        state.servers[0].status = Status::Connecting;
+        assert_eq!(state.settings_pane(), None, "connecting");
+        assert!(!state.list_opens(), "nothing to open yet");
+        for status in [Status::Off, Status::Error("gone".into())] {
+            state.servers[0].status = status;
+            assert_eq!(state.settings_pane(), Some(0));
+            assert!(!state.list_opens());
+        }
+        state.mode = Mode::History;
+        assert_eq!(state.settings_pane(), None, "History stays readable");
+        assert!(state.list_opens());
     }
 
     #[test]
@@ -3504,8 +3608,7 @@ mod tests {
         state.servers[0].set_snapshot(Some(snapshot));
         assert_eq!(
             state.status_text(),
-            "weather · Connected · 3 tools · 2 resources · 1 prompt · \
-             resources/templates/list failed · Last call 142 ms"
+            "weather · Connected · resources/templates/list failed · Last call 142 ms"
         );
         let failures = state.list_failures(Mode::Resources);
         assert_eq!(failures.len(), 1);
@@ -4272,7 +4375,7 @@ mod tests {
         assert!(state.apply_events(&id, 0, batch).changed);
         assert_eq!(
             state.servers[0].status,
-            Status::Error("exit status 1".into())
+            Status::Error("exit status 1.".into())
         );
         let methods: Vec<&str> = state.servers[0].log[50..]
             .iter()

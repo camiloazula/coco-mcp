@@ -205,11 +205,15 @@ an optional working directory and optional `KEY=value` environment lines.
 The line is split the way a shell splits
 it, so an argument with a space in it is quoted (`"my notes"`), but it never
 runs through a shell: nothing is expanded. An HTTP server is a URL plus
-optional headers and an auth mode. The pencil next to it (`⌘E`), or Settings
-at the end of the Server view's list, opens the same form prefilled with the
-selected server's settings; Connect saves them and reconnects. A server that
-is not connected shows that form as its pane, so it can be connected as it is
-or changed first. The bin deletes the selected server after a confirmation.
+optional headers and an auth mode. A server that is not connected shows that
+form as its pane, so it can be connected as it is or changed first; a connect
+that failed, or a session the server ended, leaves the reason under the
+fields, and a server that refused an OAuth login also offers Authorize. For
+a connected server, the pencil next to the `+` (`⌘E`), or Settings at the end
+of the Server view's list, opens the same form prefilled; Save & reconnect
+saves the settings and starts a new session. The lists of a server that is
+not connected are the ones its last connection declared, shown faint until it
+connects again. The bin deletes the selected server after a confirmation.
 Each icon shows its action on hover. The plug at the end of a server's row
 connects it, or disconnects it when it is connected; a double-click on the
 row does the same.

@@ -66,8 +66,8 @@ pub fn failed_call_flow() {
     live.ui(|window, _| assert!(window.try_find("call-error").is_none()));
 }
 
-/// A server process that exits mid-session leaves its log, says the session
-/// ended, and connects again.
+/// A server process that exits mid-session leaves its log, says the server
+/// ended the session, and connects again.
 pub fn crash_mid_session_flow() {
     let mut live = live(&["--schema", "v1"], None);
     live.call("stderr", json!({"lines": ["about to exit"]}));
@@ -88,16 +88,46 @@ pub fn crash_mid_session_flow() {
         let s = live.state.read(cx);
         assert!(said(s), "the log outlives the process");
         assert!(!s.response_pending());
+        assert_eq!(
+            s.servers[0].status,
+            Status::Error("The server ended the session.".into()),
+            "a crash is not a disconnect"
+        );
     });
-    // Off, the server is shown as its settings, with Connect as the way back.
-    live.ui(|window, _| {
+    // The server is shown as its settings, the failure under the fields and
+    // Connect as the way back.
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("connect-error").is_some(), "why");
         assert!(window.try_find("connect").is_some(), "a way back");
+        // The settings are the pane: no pencil opens them again.
+        assert!(window.try_find("edit-server").is_none());
+        // The tools are the last connection's: said so, and not opened.
+        assert!(window.try_find("list-stale").is_some());
+    });
+    let before = live.cx.update(|cx| live.state.read(cx).selected_item);
+    live.ui(|window, cx| window.click(("item", 0usize), cx));
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| s.move_item(1, cx));
+        assert_eq!(
+            live.state.read(cx).selected_item,
+            before,
+            "neither a click nor a key selects a row"
+        );
     });
     snap(&mut live.cx, live.handle, "50-server-exited");
     live.cx
         .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
     live.wait("it connects again", |s| {
         s.servers[0].status == Status::Connected
+    });
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("list-stale").is_none(),
+            "the rows open again"
+        );
+        assert!(window.try_find("edit-server").is_some());
     });
     live.call("echo", json!({"text": "back"}));
     assert_eq!(live.text(), "back");
@@ -262,7 +292,7 @@ fn failure(live: &mut Live) -> String {
 }
 
 /// A bearer token the server refuses is named as the problem, in a
-/// sentence, and the pane's button opens the settings on the token.
+/// sentence, under the fields of the settings the pane shows.
 pub fn refused_token_flow() {
     let (_server, mut live) = bearer_live("s3cret", "expired");
     live.cx
@@ -275,23 +305,13 @@ pub fn refused_token_flow() {
         text,
         "The server refused the token. Update it in the server settings."
     );
-    live.ui(|window, _| {
-        assert!(window.try_find("authorize").is_some(), "a way to the token");
+    live.ui(|window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("token").is_some(), "the token to update");
+        assert!(window.try_find("connect-error").is_some(), "the failure");
+        assert!(window.try_find("authorize").is_none());
     });
     snap(&mut live.cx, live.handle, "68-token-refused");
-    live.ui(|window, cx| window.click("authorize", cx));
-    live.cx.update(|cx| {
-        let s = live.state.read(cx);
-        assert_eq!(s.screen, Screen::AddServer);
-        assert_eq!(s.editing, Some(0));
-    });
-    live.ui(|window, _| {
-        assert_eq!(
-            window.find("token").focused(),
-            Some(true),
-            "the token field takes the keyboard"
-        );
-    });
 }
 
 /// A token the server stops accepting mid-session fails the next call in
@@ -339,6 +359,11 @@ pub fn unreachable_server_flow() {
         "{text}"
     );
     assert!(!text.contains('['), "no type paths: {text}");
+    // The cause, not the layers that only say where it happened.
+    assert_eq!(
+        text,
+        "Could not reach the server at http://127.0.0.1:9/mcp: connection refused."
+    );
     snap(&mut live.cx, live.handle, "68-unreachable");
 }
 

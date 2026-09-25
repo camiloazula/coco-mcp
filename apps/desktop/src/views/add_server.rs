@@ -89,6 +89,9 @@ pub struct AddServerForm {
     /// Server being edited and the auth its spec had, so an existing
     /// keyring entry is kept rather than replaced.
     editing: Option<(usize, AuthRef)>,
+    /// The edited server was in session when the form opened, so saving
+    /// ends that session and starts another.
+    reconnects: bool,
     /// An edited server's values as stored: saved again unchanged while
     /// their field's text is. The program and arguments, working directory
     /// and environment of a stdio server; the headers of an HTTP one.
@@ -129,9 +132,13 @@ impl AddServerForm {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let existing = {
+        let (existing, reconnects) = {
             let s = state.read(cx);
-            editing.and_then(|ix| s.servers.get(ix).map(|e| (ix, e.record.clone())))
+            let entry = editing.and_then(|ix| s.servers.get(ix).map(|e| (ix, e)));
+            (
+                entry.map(|(ix, e)| (ix, e.record.clone())),
+                entry.is_some_and(|(_, e)| e.status == Status::Connected),
+            )
         };
         let (secrets, bridge) = {
             let s = state.read(cx);
@@ -298,6 +305,7 @@ impl AddServerForm {
             saving: false,
             token_pending: token_read.is_some(),
             editing,
+            reconnects,
             command_kept,
             cwd_kept,
             env_kept,
@@ -338,12 +346,6 @@ impl AddServerForm {
     /// Focus the first field.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.name.update(cx, |input, cx| input.focus(window, cx));
-    }
-
-    /// Focus the token field: the form was opened to replace a token the
-    /// server refused.
-    pub fn focus_token(&self, window: &mut Window, cx: &mut Context<Self>) {
-        self.token.update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn field(

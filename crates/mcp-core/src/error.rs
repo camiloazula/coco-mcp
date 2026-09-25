@@ -84,7 +84,7 @@ impl From<rmcp::ServiceError> for Error {
             // refused or has expired since the handshake.
             rmcp::ServiceError::TransportSend(e) => match auth_challenge(&e) {
                 Some(challenge) => Self::AuthRequired { challenge },
-                None => Self::Transport(e.to_string()),
+                None => Self::Transport(transport_cause(&e)),
             },
             other => Self::Transport(other.to_string()),
         }
@@ -105,6 +105,46 @@ fn auth_challenge(error: &(dyn std::error::Error + 'static)) -> Option<Option<St
         current = e.source();
     }
     None
+}
+
+/// What went wrong under a transport's failure, in its own words: the
+/// innermost cause, such as `connection refused`, where the layers above it
+/// only say where it happened (`error sending request for url (…)`). The
+/// HTTP transport does not chain its client's error as a cause, so the walk
+/// steps into it by hand.
+pub(crate) fn transport_cause(error: &(dyn std::error::Error + 'static)) -> String {
+    use rmcp::transport::streamable_http_client::StreamableHttpError;
+    let mut deepest = error;
+    loop {
+        let next = deepest.source().or_else(|| {
+            match deepest.downcast_ref::<StreamableHttpError<reqwest::Error>>()? {
+                StreamableHttpError::Client(client) => Some(client as _),
+                _ => None,
+            }
+        });
+        match next {
+            Some(e) => deepest = e,
+            None => break,
+        }
+    }
+    plain(&deepest.to_string())
+}
+
+/// An operating system's error text as a clause: `Connection refused (os
+/// error 61)` reads as `connection refused`. An acronym keeps its case.
+fn plain(text: &str) -> String {
+    let text = match text.rfind(" (os error ") {
+        Some(at) if text.ends_with(')') => &text[..at],
+        _ => text,
+    };
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first
+            .to_lowercase()
+            .chain(text[first.len_utf8()..].chars())
+            .collect(),
+        _ => text.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -141,6 +181,59 @@ mod tests {
         );
         let other = std::io::Error::other("connection refused");
         assert_eq!(auth_challenge(&other), None);
+    }
+
+    #[test]
+    fn a_transport_failure_is_told_by_its_innermost_cause() {
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let wrapped = Sending(Box::new(refused));
+        assert_eq!(transport_cause(&wrapped), "connection refused");
+        assert_eq!(
+            plain("Connection refused (os error 61)"),
+            "connection refused"
+        );
+        assert_eq!(plain("HTTP 404"), "HTTP 404", "an acronym keeps its case");
+        assert_eq!(
+            plain("unexpected end of stream"),
+            "unexpected end of stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_http_client_error_is_stepped_into() {
+        use rmcp::transport::streamable_http_client::StreamableHttpError;
+        // Port 9 (discard) has nothing listening: the connect is refused.
+        let Err(client) = reqwest::Client::new()
+            .post("http://127.0.0.1:9/mcp")
+            .send()
+            .await
+        else {
+            panic!("nothing listens on port 9");
+        };
+        let top = client.to_string();
+        let error: StreamableHttpError<reqwest::Error> = StreamableHttpError::Client(client);
+        let cause = transport_cause(&error);
+        assert!(
+            !cause.contains("error sending request"),
+            "{cause} from {top}"
+        );
+        assert!(cause.contains("refused"), "{cause}");
+    }
+
+    /// A failure whose cause is chained the ordinary way.
+    #[derive(Debug)]
+    struct Sending(Box<dyn std::error::Error + Send + Sync>);
+
+    impl std::fmt::Display for Sending {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "error sending request: {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Sending {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&*self.0)
+        }
     }
 
     #[test]

@@ -29,8 +29,11 @@ pub fn render(
     let is_form = state.screen == crate::state::Screen::AddServer;
 
     let has_selection = selected_server.is_some() && !is_form;
+    // A server the pane already shows as its settings has nothing to open.
+    let editable = has_selection && state.settings_pane().is_none();
     // Header actions: add, edit, delete. Each is a Lucide icon with a hover
-    // caption; edit and delete need a selected server.
+    // caption; delete needs a selected server, edit one whose settings are
+    // not on screen already.
     let action = |id: &'static str,
                   icon: gpui_kit::assets::IconName,
                   caption: &'static str,
@@ -68,7 +71,7 @@ pub fn render(
                     }))
                     .test_support(),
                 )
-                .when(has_selection, |el| {
+                .when(editable, |el| {
                     el.child(
                         action(
                             "edit-server",
@@ -81,7 +84,9 @@ pub fn render(
                         }))
                         .test_support(),
                     )
-                    .child(
+                })
+                .when(has_selection, |el| {
+                    el.child(
                         action(
                             "delete-server",
                             gpui_kit::assets::IconName::Trash,

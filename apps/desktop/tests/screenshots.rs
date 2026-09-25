@@ -1064,7 +1064,8 @@ mod macos {
             .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
         })
         .unwrap();
@@ -1220,7 +1221,8 @@ mod macos {
         // Saved before the read lands: refused, and nothing is written.
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             assert!(
                 window.find("token").value().unwrap_or_default().is_empty(),
@@ -1248,7 +1250,8 @@ mod macos {
         cx.update(|cx| state.update(cx, |s, cx| s.cancel_add_server(cx)));
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             window.click("token", cx);
             window.input("typed", cx);
@@ -1753,7 +1756,8 @@ mod macos {
             .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             assert!(
                 window.try_find("cwd").is_some(),
@@ -1776,7 +1780,8 @@ mod macos {
         );
 
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             window.click("command", cx);
             window.press("cmd-a", cx);
@@ -1851,7 +1856,8 @@ mod macos {
             window.render_frame(cx);
             window.click(("server", 0usize), cx);
             window.render_frame(cx);
-            window.click("edit-server", cx);
+            // Off, the pane is its settings already; the menu opens the form.
+            state.update(cx, |s, cx| s.show_edit_selected(cx));
         })
         .unwrap();
         cx.run_until_parked();
@@ -1982,7 +1988,7 @@ mod macos {
 
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("connect-server", cx);
+            window.click("connect", cx);
             window.render_frame(cx);
         })
         .unwrap();

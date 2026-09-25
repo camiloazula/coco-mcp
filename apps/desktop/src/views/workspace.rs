@@ -23,7 +23,7 @@ use crate::actions::{
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
     WORKSPACE, ZoomLog,
 };
-use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
+use crate::state::{AppState, Changed, Gone, Mode, Screen};
 use crate::theme::{self, tokens};
 use crate::views::copy::Export;
 use crate::views::kept::Decoded;
@@ -231,17 +231,16 @@ impl Workspace {
 
     /// The server form the detail pane shows, if any: the add screen's, for
     /// the server it edits (`None` adds one), or the selected server's own
-    /// settings when it is off, ready to connect. The flag says which, so
-    /// opening the pane's form with the pencil, and cancelling back to the
-    /// pane, each start from the saved settings again. History stays
-    /// readable without a session, so it is not replaced.
+    /// settings when it is off or its connect failed, ready to connect. The
+    /// flag says which, so opening the pane's form with the pencil, and
+    /// cancelling back to the pane, each start from the saved settings
+    /// again. History stays readable without a session, so it is not
+    /// replaced.
     fn wanted_form(state: &AppState) -> Option<(Option<usize>, bool)> {
         if state.screen == Screen::AddServer {
             return Some((state.editing, true));
         }
-        let ix = state.selected_server?;
-        let entry = state.servers.get(ix)?;
-        (state.mode != Mode::History && entry.status == Status::Off).then_some((Some(ix), false))
+        state.settings_pane().map(|ix| (Some(ix), false))
     }
 
     /// The filter placeholder follows the mode; needs the window, so it runs in render.

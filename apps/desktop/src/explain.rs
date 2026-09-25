@@ -40,7 +40,7 @@ pub fn explain(error: &Error, spec: Option<&ServerSpec>) -> String {
             Some(ServerSpec::Http {
                 auth: AuthRef::OAuth { .. },
                 ..
-            }) => "The server needs authorization. Authorize to sign in again.",
+            }) => "The server refused the login.",
             _ => {
                 "The server needs credentials. Add a token or authorization in the server settings."
             }
@@ -55,6 +55,12 @@ pub fn explain(error: &Error, spec: Option<&ServerSpec>) -> String {
         }
         Error::Json(e) => sentence(format!("The answer could not be read: {e}")),
     }
+}
+
+/// A transport's own account of a session that failed, as a sentence:
+/// what [`explain`] keeps of a transport error's detail.
+pub fn detail(text: &str) -> String {
+    sentence(tidy(text))
 }
 
 /// `text` ending in one full stop.
@@ -119,7 +125,10 @@ mod tests {
         let oauth = http(AuthRef::OAuth {
             keyring_id: "k".into(),
         });
-        assert!(explain(&refused, Some(&oauth)).starts_with("The server needs authorization"));
+        assert_eq!(
+            explain(&refused, Some(&oauth)),
+            "The server refused the login."
+        );
         assert!(explain(&refused, None).starts_with("The server needs credentials"));
     }
 

@@ -14,22 +14,22 @@ pub(super) fn centered_note(cx: &Context<Workspace>, text: impl Into<SharedStrin
         .into_any_element()
 }
 
-/// A saved server that is not connected: the reason, if any, and a button
-/// that does what `⌘R`, Enter on the row and the palette also do. Same
-/// layout as the empty state so the two read as one family. A server that
-/// turned the connect away for want of authorization also gets Authorize,
-/// which is then the primary action.
+/// A saved server that is not connected, when its settings form is not
+/// there: the failure, if its connect failed, and a button that does what
+/// `⌘R`, Enter on the row and the palette also do. Same layout as the empty
+/// state so the two read as one family.
 pub(super) fn connect_state(
     ws: &Workspace,
+    failure: Option<String>,
     cx: &mut Context<Workspace>,
-    title: &'static str,
-    detail: Option<String>,
-    action: &'static str,
-    authorize: Option<&'static str>,
 ) -> AnyElement {
     let t = *tokens(cx);
     let entity = ws.state.clone();
-    let authorizer = ws.state.clone();
+    let title = if failure.is_some() {
+        "Connection failed"
+    } else {
+        "Disconnected"
+    };
     v_flex()
         .flex_1()
         .items_center()
@@ -37,36 +37,23 @@ pub(super) fn connect_state(
         .gap(px(8.))
         .text_color(t.muted)
         .child(div().text_size(px(15.)).text_color(t.fg).child(title))
-        .children(detail.map(|d| {
+        .children(failure.map(|text| {
             div()
+                .id("connect-error")
                 .text_size(px(13.))
                 .text_center()
                 .max_w(px(480.))
                 .text_color(t.err)
-                .child(d)
+                .child(text)
+                .test_support()
         }))
         .child(
             h_flex()
                 .gap(px(16.))
                 .mt(px(12.))
                 .items_center()
-                .when_some(authorize, |el, label| {
-                    el.child(
-                        accent_button(cx, label, 26.)
-                            .id("authorize")
-                            .on_click(move |_, _, cx| {
-                                authorizer.update(cx, |s, cx| {
-                                    if let Some(ix) = s.selected_server {
-                                        s.authorize(ix, cx);
-                                    }
-                                });
-                            })
-                            .test_support(),
-                    )
-                })
                 .child(
-                    accent_button(cx, action, 26.)
-                        .when(authorize.is_some(), |el| el.bg(t.sunk).text_color(t.fg))
+                    accent_button(cx, "Connect", 26.)
                         .id("connect-server")
                         .on_click(move |_, _, cx| {
                             entity.update(cx, |s, cx| {

@@ -431,9 +431,10 @@ artifacts, publishing nothing.
   onto the row, and `error` and above are error rows.
 - A connect the server turns away for want of authorization keeps its
   `WWW-Authenticate` challenge (`ServerEntry::auth_challenge`), and the next
-  OAuth attempt starts from it (`AppState::oauth_options`). Authorize drops
-  the stored OAuth credentials and runs the flow again; a server without
-  OAuth opens the edit form instead.
+  OAuth attempt starts from it (`AppState::oauth_options`). The server is
+  shown as its settings with the failure under the fields, where a token is
+  changed; for an OAuth server the form adds Authorize, which drops the
+  stored OAuth credentials and runs the flow again.
 - The roots offered to a server are a setting (`roots.{server id}`) read on
   connect. The roots dialog starts from them and answering keeps them; saving
   them in the Server view (⌘5) also sends `notifications/roots/list_changed`
