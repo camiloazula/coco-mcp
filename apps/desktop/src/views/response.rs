@@ -299,6 +299,7 @@ mod tests {
             elapsed: Duration::from_millis(4),
             issues: Vec::new(),
             answer: 1,
+            refused: None,
         };
         assert_eq!(meta(&Shown::live(&response)), "tools/call · OK");
     }
@@ -314,6 +315,7 @@ mod tests {
             elapsed: Duration::ZERO,
             issues: Vec::new(),
             answer: 1,
+            refused: None,
         };
         assert_eq!(meta(&Shown::live(&response)), "tools/call · Cancelled");
         let shown = Shown::live(&response).waiting(None);
