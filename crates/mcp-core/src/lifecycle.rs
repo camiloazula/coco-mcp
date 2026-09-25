@@ -99,9 +99,41 @@ pub(crate) fn describe(error: &ClientInitializeError, mode: ProtocolMode) -> Str
             describe(discover, ProtocolMode::Auto),
             describe(fallback, ProtocolMode::Legacy)
         ),
-        ClientInitializeError::TransportError { error, .. } => crate::error::transport_cause(error),
+        ClientInitializeError::TransportError { error, context } => {
+            let cause = crate::error::transport_cause(error);
+            if first_send(context) {
+                return cause;
+            }
+            // The step names what failed after the server answered, which
+            // the cause alone (`broken pipe`) does not.
+            let step = match context.strip_prefix("send ") {
+                Some(what) => format!("sending the {what}"),
+                None => context.to_string(),
+            };
+            let answered = match context.as_ref() {
+                "send initialized notification" => " the initialize request",
+                _ => "",
+            };
+            format!("the server answered{answered}, then {step} failed: {cause}")
+        }
         other => other.to_string(),
     }
+}
+
+/// Whether a start that failed with `error` got an answer from the server.
+/// A transport that failed to carry the first request met a server that
+/// could not be reached; one that failed later met a server that answered.
+pub(crate) fn reached(error: &ClientInitializeError) -> bool {
+    match error {
+        ClientInitializeError::TransportError { context, .. } => !first_send(context),
+        _ => true,
+    }
+}
+
+/// Whether `context`, where `rmcp` says a transport failed during a start,
+/// is the sending of the start's first request, before any answer.
+fn first_send(context: &str) -> bool {
+    matches!(context, "send initialize request" | "send discover request")
 }
 
 fn describe_rpc(data: &ErrorData, mode: ProtocolMode) -> String {
@@ -250,6 +282,50 @@ mod tests {
             "the server supports protocol 2025-06-18, 2025-11-25, not 2026-07-28"
         );
         assert!(!falls_back(&rpc(ErrorCode::METHOD_NOT_FOUND, None)));
+    }
+
+    fn transport(kind: std::io::ErrorKind, context: &'static str) -> ClientInitializeError {
+        ClientInitializeError::TransportError {
+            error: rmcp::transport::DynamicTransportError::from_parts(
+                "test",
+                std::any::TypeId::of::<()>(),
+                Box::new(std::io::Error::from(kind)),
+            ),
+            context: context.into(),
+        }
+    }
+
+    #[test]
+    fn a_server_never_reached_is_told_by_the_cause() {
+        for context in ["send initialize request", "send discover request"] {
+            let error = transport(std::io::ErrorKind::ConnectionRefused, context);
+            assert!(!reached(&error), "{context}");
+            assert_eq!(
+                describe(&error, ProtocolMode::Auto),
+                "connection refused",
+                "{context}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_server_that_answered_keeps_the_step_that_failed() {
+        let error = transport(
+            std::io::ErrorKind::BrokenPipe,
+            "send initialized notification",
+        );
+        assert!(reached(&error));
+        assert_eq!(
+            describe(&error, ProtocolMode::Legacy),
+            "the server answered the initialize request, then sending the initialized notification failed: broken pipe"
+        );
+        let later = transport(std::io::ErrorKind::BrokenPipe, "send something else");
+        assert!(reached(&later));
+        assert_eq!(
+            describe(&later, ProtocolMode::Legacy),
+            "the server answered, then sending the something else failed: broken pipe"
+        );
+        assert!(reached(&rpc(ErrorCode::METHOD_NOT_FOUND, None)));
     }
 
     #[test]
