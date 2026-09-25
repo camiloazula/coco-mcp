@@ -1731,6 +1731,11 @@ impl AppState {
             .servers
             .iter()
             .position(|s| s.record.id == saved.record.id)?;
+        // New settings may name another server: the challenge the old one
+        // sent would steer the next sign-in to that server's metadata.
+        if self.servers[ix].record.spec != saved.record.spec {
+            self.servers[ix].auth_challenge = None;
+        }
         self.servers[ix].record = saved.record;
         Some(ix)
     }
@@ -3584,6 +3589,29 @@ mod tests {
         state.servers[0].status = Status::Connected;
         state.apply_events(&id, 0, failed(&sink));
         assert_eq!(state.servers[0].status, Status::Error("refused.".into()));
+    }
+
+    #[test]
+    fn new_settings_forget_the_old_servers_challenge() {
+        let mut state = demo();
+        state.servers[0].auth_challenge = Some("Bearer resource_metadata=\"a\"".into());
+        let same = state.servers[0].record.clone();
+        state.apply_edit(crate::persistence::SavedServer {
+            record: same.clone(),
+            lost: Vec::new(),
+        });
+        assert!(state.servers[0].auth_challenge.is_some(), "the same server");
+        let mut moved = same;
+        moved.spec = ServerSpec::Http {
+            url: "http://127.0.0.1:9/elsewhere".into(),
+            headers: Default::default(),
+            auth: mcp_core::AuthRef::None,
+        };
+        state.apply_edit(crate::persistence::SavedServer {
+            record: moved,
+            lost: Vec::new(),
+        });
+        assert_eq!(state.servers[0].auth_challenge, None, "another server");
     }
 
     #[test]
