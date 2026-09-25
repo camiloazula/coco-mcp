@@ -435,9 +435,12 @@ impl Session {
             Err(failed) => {
                 let NotStarted { error, stderr } = *failed;
                 let detail = lifecycle::describe(&error, mode);
-                let auth = error
-                    .is_authorization_required()
-                    .then(|| error.auth_challenge().map(str::to_owned));
+                // A `401`, a `403` for a scope the token lacks, or a login
+                // the client does not have yet.
+                let auth = match error.auth_challenge() {
+                    Some(header) => Some(crate::error::challenge(header)),
+                    None => error.is_authorization_required().then_some(None),
+                };
                 state.send_replace(ConnectionState::Failed);
                 sink.emit(EventKind::StateChange {
                     state: ConnectionState::Failed,

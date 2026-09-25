@@ -92,19 +92,27 @@ impl From<rmcp::ServiceError> for Error {
 }
 
 /// The `WWW-Authenticate` challenge behind a transport error the server
-/// answered with `401`/`403`, wherever it sits in the error's chain of
-/// causes; `None` for any other failure.
+/// answered with `401`, or with `403` for a scope the token lacks, wherever
+/// it sits in the error's chain of causes; `None` for any other failure.
 fn auth_challenge(error: &(dyn std::error::Error + 'static)) -> Option<Option<String>> {
-    use rmcp::transport::streamable_http_client::AuthRequiredError;
+    use rmcp::transport::streamable_http_client::{AuthRequiredError, InsufficientScopeError};
     let mut current = Some(error);
     while let Some(e) = current {
         if let Some(auth) = e.downcast_ref::<AuthRequiredError>() {
-            let header = auth.www_authenticate_header.trim();
-            return Some((!header.is_empty()).then(|| header.to_owned()));
+            return Some(challenge(&auth.www_authenticate_header));
+        }
+        if let Some(scope) = e.downcast_ref::<InsufficientScopeError>() {
+            return Some(challenge(&scope.www_authenticate_header));
         }
         current = e.source();
     }
     None
+}
+
+/// A `WWW-Authenticate` header as a challenge: an empty one is none.
+pub(crate) fn challenge(header: &str) -> Option<String> {
+    let header = header.trim();
+    (!header.is_empty()).then(|| header.to_owned())
 }
 
 /// What went wrong under a transport's failure, in its own words: the
@@ -181,6 +189,24 @@ mod tests {
         );
         let other = std::io::Error::other("connection refused");
         assert_eq!(auth_challenge(&other), None);
+    }
+
+    #[test]
+    fn a_scope_refusal_mid_session_is_a_refusal() {
+        use rmcp::transport::streamable_http_client::InsufficientScopeError;
+        let header = r#"Bearer error="insufficient_scope", scope="mcp:write""#;
+        let refused = rmcp::transport::DynamicTransportError::from_parts(
+            "test",
+            std::any::TypeId::of::<()>(),
+            Box::new(InsufficientScopeError::new(
+                header.into(),
+                Some("mcp:write".into()),
+            )),
+        );
+        match Error::from(rmcp::ServiceError::TransportSend(refused)) {
+            Error::AuthRequired { challenge } => assert_eq!(challenge.as_deref(), Some(header)),
+            other => panic!("not a refusal: {other}"),
+        }
     }
 
     #[test]

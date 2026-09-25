@@ -1,6 +1,7 @@
 //! End-to-end auth against the mock server's HTTP mode: bearer headers,
 //! the full OAuth flow with a test opener standing in for the browser,
-//! credential reuse, and token refresh.
+//! credential reuse, and token refresh; and a server that refuses a
+//! token's scope.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -203,4 +204,63 @@ async fn short_lived_tokens_are_refreshed_transparently() {
         server.stats.refreshes.load(Ordering::Relaxed) >= 1,
         "token was refreshed"
     );
+}
+
+/// An HTTP endpoint that answers every request with `403` and the
+/// challenge of a token without the scope it wants.
+async fn scope_refusing_server(challenge: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                // Read the whole request, so the answer is not a reset.
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let Ok(n) = stream.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            let (name, value) = l.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                let answer = format!(
+                    "HTTP/1.1 403 Forbidden\r\nWWW-Authenticate: {challenge}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(answer.as_bytes()).await;
+            });
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn a_token_without_the_scope_is_refused_with_the_challenge() {
+    let challenge = r#"Bearer error="insufficient_scope", scope="mcp:write""#;
+    let url = scope_refusing_server(challenge).await;
+    let err = Session::connect(http_spec(&url, AuthRef::None), SessionOptions::default())
+        .await
+        .unwrap_err();
+    match err {
+        mcp_core::Error::AuthRequired { challenge: Some(c) } => assert_eq!(c, challenge),
+        other => panic!("not a refusal with its challenge: {other}"),
+    }
 }
