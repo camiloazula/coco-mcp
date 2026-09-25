@@ -86,9 +86,10 @@ pub struct AddServerForm {
     /// The edited server's stored bearer token is still being read from the
     /// keyring.
     token_pending: bool,
-    /// Server being edited and the auth its spec had, so an existing
-    /// keyring entry is kept rather than replaced.
-    editing: Option<(usize, AuthRef)>,
+    /// The id of the server being edited; `None` adds one. Looked up when
+    /// the form acts ([`Self::edited`]), so a server deleted, or moved in
+    /// the list, is never mistaken for the one that took its place.
+    editing: Option<String>,
     /// The edited server was in session when the form opened, so saving
     /// ends that session and starts another.
     reconnects: bool,
@@ -124,20 +125,22 @@ impl std::fmt::Debug for AddServerForm {
 impl AddServerForm {
     /// Build the form with the design's placeholders, prefilled when the
     /// state says a server is being edited.
-    /// `editing` is the server whose settings the form starts from and
-    /// saves over; `None` adds a new one.
+    /// `editing` is the id of the server whose settings the form starts
+    /// from and saves over; `None` adds a new one.
     pub fn new(
         state: Entity<AppState>,
-        editing: Option<usize>,
+        editing: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let (existing, reconnects) = {
             let s = state.read(cx);
-            let entry = editing.and_then(|ix| s.servers.get(ix).map(|e| (ix, e)));
+            let entry = editing
+                .as_ref()
+                .and_then(|id| s.servers.iter().find(|e| &e.record.id == id));
             (
-                entry.map(|(ix, e)| (ix, e.record.clone())),
-                entry.is_some_and(|(_, e)| e.status == Status::Connected),
+                entry.map(|e| e.record.clone()),
+                entry.is_some_and(|e| e.status == Status::Connected),
             )
         };
         let (secrets, bridge) = {
@@ -158,7 +161,7 @@ impl AddServerForm {
         let mut auth = AuthKind::None;
         let mut protocol = ProtocolMode::default();
         let mut editing = None;
-        if let Some((ix, record)) = existing {
+        if let Some(record) = existing {
             name_v = record.name.clone();
             protocol = record.protocol;
             match &record.spec {
@@ -198,11 +201,7 @@ impl AddServerForm {
                     };
                 }
             }
-            let auth_ref = match &record.spec {
-                ServerSpec::Http { auth, .. } => auth.clone(),
-                ServerSpec::Stdio { .. } => AuthRef::None,
-            };
-            editing = Some((ix, auth_ref));
+            editing = Some(record.id.clone());
         }
         let command = cx.new(|cx| {
             InputState::new(window, cx)
@@ -341,6 +340,17 @@ impl AddServerForm {
     /// Whether the form edits an existing server.
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    /// Where the edited server is in the list now; `None` when adding, or
+    /// when the server was deleted while the form was open.
+    fn edited(&self, cx: &App) -> Option<usize> {
+        let id = self.editing.as_ref()?;
+        self.state
+            .read(cx)
+            .servers
+            .iter()
+            .position(|s| &s.record.id == id)
     }
 
     /// Focus the first field.

@@ -24,9 +24,8 @@ impl Render for AddServerForm {
         // the one the form opened with: a save that changed it is what the
         // last connect tried.
         let (status, refused, oauth) = self
-            .editing
-            .as_ref()
-            .and_then(|(ix, _)| self.state.read(cx).servers.get(*ix))
+            .edited(cx)
+            .and_then(|ix| self.state.read(cx).servers.get(ix))
             .map_or((None, false, false), |s| {
                 let oauth = matches!(
                     s.record.spec,
@@ -237,14 +236,20 @@ impl Render for AddServerForm {
                         .pt(px(6.))
                         .when(reauthorize, |row| {
                             let state = self.state.clone();
-                            let ix = self.editing.as_ref().map(|(ix, _)| *ix);
+                            let id = self.editing.clone();
                             row.child(
                                 accent_button(cx, "Authorize", 26.)
                                     .id("authorize")
                                     .on_click(move |_, _, cx| {
-                                        if let Some(ix) = ix {
-                                            state.update(cx, |s, cx| s.authorize(ix, cx));
-                                        }
+                                        state.update(cx, |s, cx| {
+                                            let ix = s
+                                                .servers
+                                                .iter()
+                                                .position(|e| Some(&e.record.id) == id.as_ref());
+                                            if let Some(ix) = ix {
+                                                s.authorize(ix, cx);
+                                            }
+                                        });
                                     })
                                     .test_support(),
                             )

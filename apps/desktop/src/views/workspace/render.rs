@@ -83,7 +83,7 @@ impl Render for Workspace {
             self.add_form = None;
             self.add_form_target = None;
         }
-        if let Some((editing, opened)) = wanted
+        if let Some((editing, opened)) = wanted.clone()
             && self.add_form.is_none()
         {
             let form = cx.new(|cx| AddServerForm::new(self.state.clone(), editing, window, cx));
