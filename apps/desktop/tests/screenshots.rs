@@ -1727,6 +1727,7 @@ mod macos {
     /// form made; and after a delete, the server that takes the deleted
     /// one's place in the list gets its own settings, not the deleted one's.
     fn pane_form_follows_its_server_flow() {
+        use coco_mcp::state::Mode;
         use mcp_core::AuthRef;
         let store = mcp_store::Store::open_in_memory().unwrap();
         let http = |url: &str, auth| ServerSpec::Http {
@@ -1757,6 +1758,27 @@ mod macos {
             state.update(cx, |s, cx| s.select_server(0, cx));
             window.render_frame(cx);
             assert_eq!(window.find("name").value(), Some("alpha"));
+        })
+        .unwrap();
+
+        // Never connected, the Server view lists only its own Settings row:
+        // no "last connection" note, and the row goes to the settings.
+        cx.update_window(handle.into(), |_, window, cx| {
+            state.update(cx, |s, cx| s.set_mode(Mode::Server, cx));
+            window.render_frame(cx);
+            assert!(
+                window.try_find("list-stale").is_none(),
+                "nothing was declared"
+            );
+            window.click(("item", 0usize), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("name").focused(), Some(true), "the settings");
+            assert_eq!(state.read(cx).screen, Screen::Detail);
+            state.update(cx, |s, cx| s.set_mode(Mode::Tools, cx));
         })
         .unwrap();
 

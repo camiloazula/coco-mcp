@@ -15,8 +15,8 @@ use gpui_kit::{
     div, px, uniform_list,
 };
 
-use crate::actions::{ITEM_LIST, MoveDown, MoveUp, Open};
-use crate::state::{AppState, Item, Mode};
+use crate::actions::{EditServer, ITEM_LIST, MoveDown, MoveUp, Open};
+use crate::state::{AppState, Item, Mode, SETTINGS_SECTION};
 use crate::theme::tokens;
 use crate::views::list_failures::list_notice;
 use crate::views::{Workspace, mono, muted};
@@ -41,7 +41,18 @@ pub fn render(
     // Without a session the rows are the last connection's: shown, not
     // opened. The note goes with the settings pane, whose Connect it names;
     // while connecting, the rows are only waited on.
-    let stale = (state.settings_pane().is_some() && count > 0).then(|| {
+    // The Server view's Settings row is the app's own, not something a
+    // connection declared, and is left out of that.
+    let declared = if state.mode == Mode::Server {
+        state
+            .items()
+            .iter()
+            .filter(|i| i.name != SETTINGS_SECTION)
+            .count()
+    } else {
+        count
+    };
+    let stale = (state.settings_pane().is_some() && declared > 0).then(|| {
         muted(cx, 11., "From the last connection. Connect to open one.")
             .id("list-stale")
             .px(px(12.))
@@ -101,10 +112,20 @@ pub fn render(
             let items = state.items();
             let opens = state.list_opens();
             let selected = state.selected_item.filter(|_| opens);
+            let server_view = state.mode == Mode::Server;
             range
                 .filter_map(|ix| {
                     let item = items.get(ix)?;
-                    Some(item_row(ix, item, selected, opens, &this.state, cx))
+                    let settings = server_view && item.name == SETTINGS_SECTION;
+                    Some(item_row(
+                        ix,
+                        item,
+                        selected,
+                        opens,
+                        settings,
+                        &this.state,
+                        cx,
+                    ))
                 })
                 .collect::<Vec<_>>()
         }),
@@ -196,12 +217,15 @@ pub(crate) fn reveal_selection(ws: &Workspace, cx: &App) {
 }
 
 /// One 28px row, with the accent bar when selected. A row that `opens`
-/// nothing is drawn faint and takes no click.
+/// nothing is drawn faint and takes no click, except the Server view's
+/// `settings` row, which is the app's own: without a session it goes to the
+/// settings the pane shows, as Edit Server does.
 fn item_row(
     ix: usize,
     item: &Item,
     selected: Option<usize>,
     opens: bool,
+    settings: bool,
     entity: &Entity<AppState>,
     cx: &App,
 ) -> AnyElement {
@@ -232,7 +256,12 @@ fn item_row(
                 entity.update(cx, |state, cx| state.open_item(ix, cx));
             })
         })
-        .when(!opens, |el| el.opacity(0.5).cursor_default())
+        .when(!opens && settings, |el| {
+            el.hover(|s| s.bg(t.hover)).on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(EditServer), cx);
+            })
+        })
+        .when(!opens && !settings, |el| el.opacity(0.5).cursor_default())
         .child(
             div()
                 .absolute()
