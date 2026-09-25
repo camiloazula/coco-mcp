@@ -1159,15 +1159,6 @@ impl AppState {
         matches!(self.servers.get(ix)?.status, Status::Off | Status::Error(_)).then_some(ix)
     }
 
-    /// Whether the selected server's settings, and the failure under them,
-    /// are on screen: as the pane, or as the form opened to edit it.
-    fn settings_on_screen(&self) -> bool {
-        self.settings_pane().is_some()
-            || (self.screen == Screen::AddServer
-                && self.editing.is_some()
-                && self.editing == self.selected_server)
-    }
-
     /// Whether a row of the middle list opens anything. History is read from
     /// the database; the other lists are what the server declared, and
     /// without a session the pane shows its settings, or that it connects,
@@ -1329,10 +1320,11 @@ impl AppState {
     }
 
     /// Status bar text: what the rest of the window does not say already.
-    /// The counts are the sidebar's, and a failure written under the
-    /// server's settings is not written twice; anywhere else (History, the
-    /// add screen) the reason is the status bar's to give.
-    pub fn status_text(&self) -> String {
+    /// The counts are the sidebar's. `failure_shown` says the selected
+    /// server's failure is on screen, under its settings: then it is not
+    /// written twice. Only the view knows (the form may be showing its own
+    /// error instead, or the zoomed log cover it), so it tells.
+    pub fn status_text(&self, failure_shown: bool) -> String {
         let Some(server) = self.server() else {
             return "No server".into();
         };
@@ -1340,7 +1332,7 @@ impl AppState {
         match &server.status {
             Status::Off => format!("{name} · Disconnected"),
             Status::Connecting => format!("{name} · Connecting…"),
-            Status::Error(_) if self.settings_on_screen() => format!("{name} · Error"),
+            Status::Error(_) if failure_shown => format!("{name} · Error"),
             Status::Error(e) => format!("{name} · Error · {e}"),
             Status::Connected => {
                 let mut parts = vec![name.clone(), "Connected".to_string()];
@@ -3513,31 +3505,19 @@ mod tests {
     fn status_text_matches_the_design_format() {
         let state = demo();
         assert_eq!(
-            state.status_text(),
+            state.status_text(false),
             "weather · Connected · Last call 142 ms"
         );
-        assert_eq!(AppState::new(None, None).status_text(), "No server");
-        // A failure the pane writes under the settings is not repeated;
-        // History, shown instead of the settings, still gets the reason.
+        assert_eq!(AppState::new(None, None).status_text(false), "No server");
+        // A failure shown under the settings is not repeated; otherwise the
+        // line gives the reason.
         let mut state = demo();
         state.servers[0].status = Status::Error("The server ended the session.".into());
-        assert_eq!(state.status_text(), "weather · Error");
-        state.mode = Mode::History;
+        assert_eq!(state.status_text(true), "weather · Error");
         assert_eq!(
-            state.status_text(),
+            state.status_text(false),
             "weather · Error · The server ended the session."
         );
-        // Nor does the add screen, which is not the selected server's form;
-        // the form editing it is.
-        state.mode = Mode::Tools;
-        state.screen = Screen::AddServer;
-        assert_eq!(state.settings_pane(), None);
-        assert_eq!(
-            state.status_text(),
-            "weather · Error · The server ended the session."
-        );
-        state.editing = Some(0);
-        assert_eq!(state.status_text(), "weather · Error");
     }
 
     #[test]
@@ -3608,7 +3588,7 @@ mod tests {
         });
         state.servers[0].set_snapshot(Some(snapshot));
         assert_eq!(
-            state.status_text(),
+            state.status_text(false),
             "weather · Connected · resources/templates/list failed · Last call 142 ms"
         );
         let failures = state.list_failures(Mode::Resources);
