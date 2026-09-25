@@ -103,8 +103,7 @@ pub fn crash_mid_session_flow() {
     });
     // The server is shown as its settings, the failure under the fields and
     // Connect as the way back.
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(window.try_find("connect-error").is_some(), "why");
         assert!(window.try_find("connect").is_some(), "a way back");
         // The settings are the pane: no pencil opens them again.
@@ -184,8 +183,7 @@ pub fn crash_mid_session_flow() {
         assert_eq!(s.selected_name(), tool, "the selection outlives the crash");
         assert_eq!(s.screen, Screen::Detail, "no edit form was opened");
     });
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(
             window.try_find("list-stale").is_none(),
             "the rows open again"
@@ -397,8 +395,7 @@ pub fn refused_token_flow() {
         text,
         "The server refused the token. Update it in the server settings."
     );
-    live.ui(|window, cx| {
-        window.render_frame(cx);
+    live.ui(|window, _| {
         assert!(window.try_find("token").is_some(), "the token to update");
         assert!(window.try_find("connect-error").is_some(), "the failure");
         assert!(window.try_find("authorize").is_none());
