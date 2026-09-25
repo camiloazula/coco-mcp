@@ -102,17 +102,13 @@ impl From<rmcp::ServiceError> for Error {
 /// it sits in the error's chain of causes; `None` for any other failure.
 fn auth_challenge(error: &(dyn std::error::Error + 'static)) -> Option<Option<String>> {
     use rmcp::transport::streamable_http_client::{AuthRequiredError, InsufficientScopeError};
-    let mut current = Some(error);
-    while let Some(e) = current {
+    causes(error).find_map(|e| {
         if let Some(auth) = e.downcast_ref::<AuthRequiredError>() {
             return Some(challenge(&auth.www_authenticate_header));
         }
-        if let Some(scope) = e.downcast_ref::<InsufficientScopeError>() {
-            return Some(challenge(&scope.www_authenticate_header));
-        }
-        current = e.source();
-    }
-    None
+        let scope = e.downcast_ref::<InsufficientScopeError>()?;
+        Some(challenge(&scope.www_authenticate_header))
+    })
 }
 
 /// A `WWW-Authenticate` header as a challenge: an empty one is none.
@@ -123,25 +119,25 @@ pub(crate) fn challenge(header: &str) -> Option<String> {
 
 /// What went wrong under a transport's failure, in its own words: the
 /// innermost cause, such as `connection refused`, where the layers above it
-/// only say where it happened (`error sending request for url (…)`). The
-/// HTTP transport does not chain its client's error as a cause, so the walk
-/// steps into it by hand.
+/// only say where it happened (`error sending request for url (…)`).
 pub(crate) fn transport_cause(error: &(dyn std::error::Error + 'static)) -> String {
+    plain(&causes(error).last().unwrap_or(error).to_string())
+}
+
+/// `error` and its causes, outermost first. The HTTP transport does not
+/// chain its client's error as a cause, so the walk steps into it by hand.
+fn causes<'a>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> impl Iterator<Item = &'a (dyn std::error::Error + 'static)> {
     use rmcp::transport::streamable_http_client::StreamableHttpError;
-    let mut deepest = error;
-    loop {
-        let next = deepest.source().or_else(|| {
-            match deepest.downcast_ref::<StreamableHttpError<reqwest::Error>>()? {
+    std::iter::successors(Some(error), |e| {
+        e.source().or_else(
+            || match e.downcast_ref::<StreamableHttpError<reqwest::Error>>()? {
                 StreamableHttpError::Client(client) => Some(client as _),
                 _ => None,
-            }
-        });
-        match next {
-            Some(e) => deepest = e,
-            None => break,
-        }
-    }
-    plain(&deepest.to_string())
+            },
+        )
+    })
 }
 
 /// An operating system's error text as a clause: `Connection refused (os
@@ -166,51 +162,46 @@ fn plain(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::transport::streamable_http_client::AuthRequiredError;
+    use rmcp::transport::DynamicTransportError;
+    use rmcp::transport::streamable_http_client::{
+        AuthRequiredError, InsufficientScopeError, StreamableHttpError,
+    };
 
-    /// A transport's failure with the refusal further down its chain of
-    /// causes, as `rmcp` wraps it.
-    #[derive(Debug)]
-    struct Wrapped(AuthRequiredError);
-
-    impl std::fmt::Display for Wrapped {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "send failed: {}", self.0)
-        }
+    /// A transport's failure as `rmcp` hands it over, with `error` as its
+    /// cause.
+    fn transport(error: impl std::error::Error + Send + Sync + 'static) -> DynamicTransportError {
+        DynamicTransportError::from_parts("test", std::any::TypeId::of::<()>(), Box::new(error))
     }
 
-    impl std::error::Error for Wrapped {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            Some(&self.0)
-        }
+    /// The HTTP transport's refusal of a request, as it reports a `401`.
+    fn unauthorized(header: &str) -> DynamicTransportError {
+        transport(StreamableHttpError::<reqwest::Error>::AuthRequired(
+            AuthRequiredError::new(header.into()),
+        ))
     }
 
     #[test]
     fn a_refusal_is_found_down_the_chain() {
-        let refused = Wrapped(AuthRequiredError::new("Bearer".into()));
-        assert_eq!(auth_challenge(&refused), Some(Some("Bearer".to_owned())));
-        let bare = Wrapped(AuthRequiredError::new("  ".into()));
         assert_eq!(
-            auth_challenge(&bare),
+            auth_challenge(&unauthorized("Bearer")),
+            Some(Some("Bearer".to_owned()))
+        );
+        assert_eq!(
+            auth_challenge(&unauthorized("  ")),
             Some(None),
             "an empty header is no challenge"
         );
-        let other = std::io::Error::other("connection refused");
+        let other = transport(std::io::Error::other("connection refused"));
         assert_eq!(auth_challenge(&other), None);
     }
 
     #[test]
     fn a_scope_refusal_mid_session_is_a_refusal() {
-        use rmcp::transport::streamable_http_client::InsufficientScopeError;
         let header = r#"Bearer error="insufficient_scope", scope="mcp:write""#;
-        let refused = rmcp::transport::DynamicTransportError::from_parts(
-            "test",
-            std::any::TypeId::of::<()>(),
-            Box::new(InsufficientScopeError::new(
-                header.into(),
-                Some("mcp:write".into()),
-            )),
-        );
+        let refused = transport(InsufficientScopeError::new(
+            header.into(),
+            Some("mcp:write".into()),
+        ));
         match Error::from(rmcp::ServiceError::TransportSend(refused)) {
             Error::AuthRequired { challenge } => assert_eq!(challenge.as_deref(), Some(header)),
             other => panic!("not a refusal: {other}"),
@@ -219,9 +210,12 @@ mod tests {
 
     #[test]
     fn a_transport_failure_is_told_by_its_innermost_cause() {
-        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
-        let wrapped = Sending(Box::new(refused));
-        assert_eq!(transport_cause(&wrapped), "connection refused");
+        let refused = transport(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+        assert_eq!(transport_cause(&refused), "connection refused");
+        assert!(matches!(
+            Error::from(rmcp::ServiceError::TransportSend(refused)),
+            Error::Transport(cause) if cause == "connection refused"
+        ));
         assert_eq!(
             plain("Connection refused (os error 61)"),
             "connection refused"
@@ -249,39 +243,35 @@ mod tests {
 
     #[tokio::test]
     async fn an_http_client_error_is_stepped_into() {
-        use rmcp::transport::streamable_http_client::StreamableHttpError;
-        // Port 9 (discard) has nothing listening: the connect is refused.
-        let Err(client) = reqwest::Client::new()
-            .post("http://127.0.0.1:9/mcp")
+        use std::time::Duration;
+        // A port bound and released, so nothing listens on it: the connect
+        // is refused. No proxy stands in between, and a timeout ends the
+        // test should anything answer after all.
+        let port = {
+            let bound = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            bound.local_addr().unwrap().port()
+        };
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let Err(client) = client
+            .post(format!("http://127.0.0.1:{port}/mcp"))
             .send()
             .await
         else {
-            panic!("nothing listens on port 9");
+            panic!("nothing listens on port {port}");
         };
         let top = client.to_string();
-        let error: StreamableHttpError<reqwest::Error> = StreamableHttpError::Client(client);
+        let error = transport(StreamableHttpError::Client(client));
         let cause = transport_cause(&error);
         assert!(
             !cause.contains("error sending request"),
             "{cause} from {top}"
         );
         assert!(cause.contains("refused"), "{cause}");
-    }
-
-    /// A failure whose cause is chained the ordinary way.
-    #[derive(Debug)]
-    struct Sending(Box<dyn std::error::Error + Send + Sync>);
-
-    impl std::fmt::Display for Sending {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "error sending request: {}", self.0)
-        }
-    }
-
-    impl std::error::Error for Sending {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            Some(&*self.0)
-        }
     }
 
     #[test]
