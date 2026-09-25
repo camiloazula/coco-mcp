@@ -107,6 +107,13 @@ pub fn crash_mid_session_flow() {
     });
     let before = live.cx.update(|cx| live.state.read(cx).selected_item);
     live.ui(|window, cx| window.click(("item", 0usize), cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("status-text").label(),
+            Some("Connect the server to open it"),
+            "a faint row says why"
+        );
+    });
     live.cx.update(|cx| {
         live.state.update(cx, |s, cx| s.move_item(1, cx));
         assert_eq!(
