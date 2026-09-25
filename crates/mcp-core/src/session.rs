@@ -488,8 +488,24 @@ impl Session {
             let sink = sink.clone();
             let state = state.clone();
             tokio::spawn(async move {
+                // Only a session we cancelled ends quietly; one the server
+                // or its transport ended is a failure, and says so.
                 let (next, detail) = match service.waiting().await {
-                    Ok(reason) => (ConnectionState::Disconnected, format!("{reason:?}")),
+                    Ok(rmcp::service::QuitReason::Cancelled) => (
+                        ConnectionState::Disconnected,
+                        "closed by the client".to_owned(),
+                    ),
+                    Ok(rmcp::service::QuitReason::Closed) => (
+                        ConnectionState::Failed,
+                        "the server ended the session".to_owned(),
+                    ),
+                    Ok(rmcp::service::QuitReason::JoinError(e)) => {
+                        (ConnectionState::Failed, format!("the session stopped: {e}"))
+                    }
+                    Ok(other) => (
+                        ConnectionState::Failed,
+                        format!("the session ended: {other:?}"),
+                    ),
                     Err(e) => (ConnectionState::Failed, e.to_string()),
                 };
                 // A keepalive that gave up has already said why the session

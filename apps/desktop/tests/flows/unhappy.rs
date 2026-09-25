@@ -93,6 +93,13 @@ pub fn crash_mid_session_flow() {
             Status::Error("The server ended the session.".into()),
             "a crash is not a disconnect"
         );
+        assert!(
+            s.servers[0]
+                .log()
+                .iter()
+                .any(|row| row.method == "failed" && row.is_error),
+            "the log says it failed, as the pane does"
+        );
     });
     // The server is shown as its settings, the failure under the fields and
     // Connect as the way back.
