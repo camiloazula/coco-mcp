@@ -3849,6 +3849,7 @@ mod macos {
         crate::interaction::markdown_result_flow();
         crate::unhappy::failed_call_flow();
         crate::unhappy::crash_mid_session_flow();
+        crate::unhappy::edit_form_follows_the_session_flow();
         crate::unhappy::request_outcomes_flow();
         crate::unhappy::replay_reads_and_prompts_flow();
         crate::unhappy::refused_token_flow();

@@ -43,15 +43,15 @@ impl Render for AddServerForm {
                 (Some(s.status.clone()), s.unauthorized, oauth)
             });
         let connecting = status == Some(Status::Connecting);
+        // Saving the settings of a server in session ends that session and
+        // starts another: the button says so rather than offering a connect.
+        // Read from the server as it is now, which can change under the
+        // form (the row's plug, a connect finishing).
+        let live = status == Some(Status::Connected);
         let failed = match status {
             Some(Status::Error(text)) => Some(text),
             _ => None,
         };
-        // Saving the settings of a server in session ends that session and
-        // starts another: the button says so rather than offering a connect.
-        // Taken when the form opened, so it holds through the connect, until
-        // a failure leaves no session to end.
-        let live = self.reconnects && failed.is_none();
         // Turned away for want of credentials, the server needs them set
         // here; a refused OAuth login is fixed by logging in again instead,
         // and that is the one button the failure adds.
@@ -245,7 +245,9 @@ impl Render for AddServerForm {
                         // changes in the fields it waits for Connect to save
                         // them, rather than dropping them.
                         .when(reauthorize, |row| {
-                            let button = accent_button(cx, "Authorize", 26.).id("authorize");
+                            let button = accent_button(cx, "Authorize", 26.)
+                                .id("authorize")
+                                .aria_label("Authorize");
                             row.child(if as_saved {
                                 button
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -271,6 +273,7 @@ impl Render for AddServerForm {
                             accent_button(cx, action, 26.)
                                 .when(reauthorize && as_saved, |el| el.bg(t.sunk).text_color(t.fg))
                                 .id("connect")
+                                .aria_label(action)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit(cx);
                                 }))

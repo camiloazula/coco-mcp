@@ -90,9 +90,6 @@ pub struct AddServerForm {
     /// the form acts ([`Self::edited`]), so a server deleted, or moved in
     /// the list, is never mistaken for the one that took its place.
     editing: Option<String>,
-    /// The edited server was in session when the form opened, so saving
-    /// ends that session and starts another.
-    reconnects: bool,
     /// The edited server's bearer token as stored, once read: the form
     /// holds the saved settings while its field still says this.
     stored_token: Option<String>,
@@ -136,15 +133,12 @@ impl AddServerForm {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (existing, reconnects) = {
+        let existing = {
             let s = state.read(cx);
-            let entry = editing
+            editing
                 .as_ref()
-                .and_then(|id| s.servers.iter().find(|e| &e.record.id == id));
-            (
-                entry.map(|e| e.record.clone()),
-                entry.is_some_and(|e| e.status == Status::Connected),
-            )
+                .and_then(|id| s.servers.iter().find(|e| &e.record.id == id))
+                .map(|e| e.record.clone())
         };
         let (secrets, bridge) = {
             let s = state.read(cx);
@@ -313,7 +307,6 @@ impl AddServerForm {
             token_pending: token_read.is_some(),
             stored_token,
             editing,
-            reconnects,
             command_kept,
             cwd_kept,
             env_kept,
