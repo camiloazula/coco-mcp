@@ -581,5 +581,31 @@ pub fn authorize_flow() {
         2,
         "the stored credentials were dropped and the flow ran again"
     );
+
+    // A sign-in that is never completed (the browser tab closed) is not a
+    // server that could not be reached: the server still wants signing in,
+    // and Authorize stays.
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| {
+            s.oauth_open = Some(Arc::new(|_: String| {}));
+            s.oauth_timeout = Some(Duration::from_millis(300));
+            s.authorize(1, cx);
+        })
+    });
+    live.wait("the sign-in gives up", |s| {
+        matches!(s.servers[1].status, Status::Error(_))
+    });
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert!(s.servers[1].unauthorized, "it still wants signing in");
+        assert!(
+            matches!(&s.servers[1].status, Status::Error(e) if e.starts_with("The sign-in did not complete: authorization timed out")),
+            "{:?}",
+            s.servers[1].status
+        );
+    });
+    live.ui(|window, _| {
+        assert!(window.try_find("authorize").is_some(), "Authorize stays");
+    });
     server.shutdown();
 }
