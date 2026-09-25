@@ -23,6 +23,7 @@ use crate::theme::tokens;
 use crate::views::server_fields::{self, Kept, join_pairs, parse_command, parse_cwd, parse_pairs};
 use crate::views::{accent_button, kbd, muted, text_tab};
 
+mod heading;
 mod submit;
 mod view;
 
