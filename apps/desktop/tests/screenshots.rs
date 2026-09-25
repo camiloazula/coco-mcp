@@ -1064,7 +1064,7 @@ mod macos {
             .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
         })
@@ -1221,7 +1221,7 @@ mod macos {
         // Saved before the read lands: refused, and nothing is written.
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             assert!(
@@ -1250,7 +1250,7 @@ mod macos {
         cx.update(|cx| state.update(cx, |s, cx| s.cancel_add_server(cx)));
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             window.click("token", cx);
@@ -1860,7 +1860,7 @@ mod macos {
             .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             assert!(
@@ -1884,7 +1884,7 @@ mod macos {
         );
 
         cx.update_window(handle.into(), |_, window, cx| {
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
             window.render_frame(cx);
             window.click("command", cx);
@@ -1960,7 +1960,7 @@ mod macos {
             window.render_frame(cx);
             window.click(("server", 0usize), cx);
             window.render_frame(cx);
-            // Off, the pane is its settings already; the menu opens the form.
+            // Off, the pane is its settings already; open the edit screen itself.
             state.update(cx, |s, cx| s.show_edit_selected(cx));
         })
         .unwrap();
