@@ -3588,7 +3588,7 @@ mod tests {
         // A session that was up fails here, in the pane's words.
         state.servers[0].status = Status::Connected;
         state.apply_events(&id, 0, failed(&sink));
-        assert_eq!(state.servers[0].status, Status::Error("refused.".into()));
+        assert_eq!(state.servers[0].status, Status::Error("Refused.".into()));
     }
 
     #[test]
@@ -4438,7 +4438,7 @@ mod tests {
         assert!(state.apply_events(&id, 0, batch).changed);
         assert_eq!(
             state.servers[0].status,
-            Status::Error("exit status 1.".into())
+            Status::Error("Exit status 1.".into())
         );
         let methods: Vec<&str> = state.servers[0].log[50..]
             .iter()

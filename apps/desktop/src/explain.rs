@@ -70,9 +70,15 @@ pub fn detail(text: &str) -> String {
     sentence(tidy(text))
 }
 
-/// `text` ending in one full stop.
+/// `text` as a sentence: a capital first, one full stop last. Transports
+/// word their failures mid-sentence ("the server stopped answering: …").
 fn sentence(text: String) -> String {
-    format!("{}.", text.trim().trim_end_matches('.'))
+    let text = text.trim().trim_end_matches('.');
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}.", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
 }
 
 /// A transport's error text without the Rust type paths in brackets and
@@ -81,15 +87,18 @@ fn sentence(text: String) -> String {
 /// required, when send initialize request`.
 fn tidy(detail: &str) -> String {
     let mut out = String::with_capacity(detail.len());
-    let mut depth = 0usize;
-    for c in detail.chars() {
-        match c {
-            '[' => depth += 1,
-            ']' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(c),
-            _ => {}
+    let mut rest = detail;
+    while let Some(open) = rest.find('[') {
+        let Some(len) = bracketed(&rest[open..]) else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        if !is_type_path(&rest[open + 1..open + len - 1]) {
+            out.push_str(&rest[open..open + len]);
         }
+        rest = &rest[open + len..];
     }
+    out.push_str(rest);
     let words: Vec<&str> = out.split_whitespace().collect();
     let text = words.join(" ");
     let mut text = text.as_str();
@@ -103,6 +112,35 @@ fn tidy(detail: &str) -> String {
         }
     }
     text.to_owned()
+}
+
+/// The length of the bracketed span `text` starts with, brackets and the
+/// brackets nested in it included; `None` when it is not closed.
+fn bracketed(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, c) in text.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A Rust type path, as rmcp names a transport
+/// (`mcp_core::transport::TracedTransport<…>`); an IPv6 address such as
+/// `::1` is only hex digits, colons and dots, and stays.
+fn is_type_path(inner: &str) -> bool {
+    inner.contains("::")
+        && !inner
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
 }
 
 #[cfg(test)]
@@ -178,6 +216,21 @@ mod tests {
         assert_eq!(
             explain(&spawn, Some(&stdio)),
             "The server process `nope` did not answer: failed to spawn `nope`: No such file or directory."
+        );
+    }
+
+    #[test]
+    fn a_session_failure_reads_as_a_sentence_and_keeps_an_ipv6_host() {
+        assert_eq!(
+            detail("the server stopped answering: no reply to ping within 30s"),
+            "The server stopped answering: no reply to ping within 30s."
+        );
+        let login = Error::Credentials(
+            "oauth: OAuth metadata discovery failed for http://[::1]:8080/.well-known/x".into(),
+        );
+        assert_eq!(
+            explain(&login, Some(&http(AuthRef::None))),
+            "The credentials could not be read: oauth: OAuth metadata discovery failed for http://[::1]:8080/.well-known/x."
         );
     }
 
