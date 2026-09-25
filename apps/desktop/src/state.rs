@@ -2900,21 +2900,22 @@ impl AppState {
             let entry = &mut self.servers[pos];
             if let Some((state, detail)) = event.change {
                 match state {
-                    // A disconnect of our own bumps the generation first, so
-                    // one that arrives here is the server's doing: a failure,
-                    // said as one, not the calm of a server switched off.
-                    ConnectionState::Disconnected if entry.status == Status::Connected => {
-                        entry.status = Status::Error("The server ended the session.".into());
-                        entry.session = None;
-                    }
-                    // A connect that fails says why through its own result,
-                    // in the pane's words; its state change, which comes
-                    // on another channel and in no set order with it, must
-                    // not overwrite that with the transport's text. Only a
-                    // session that was up fails here.
-                    ConnectionState::Failed if entry.status == Status::Connected => {
-                        entry.status =
-                            Status::Error(crate::explain::detail(&detail.unwrap_or_default()));
+                    // The end of a session that was up. mcp-core says whether
+                    // it failed (the server ended it, its transport broke, it
+                    // stopped answering) or was closed. A connect that fails
+                    // says why through its own result, in the pane's words:
+                    // its state change, on another channel and in no set
+                    // order with it, must not overwrite that, so only a
+                    // session that was up ends here.
+                    ConnectionState::Failed | ConnectionState::Disconnected
+                        if entry.status == Status::Connected =>
+                    {
+                        entry.status = match state {
+                            ConnectionState::Failed => {
+                                Status::Error(crate::explain::detail(&detail.unwrap_or_default()))
+                            }
+                            _ => Status::Off,
+                        };
                         entry.session = None;
                     }
                     _ => {}
