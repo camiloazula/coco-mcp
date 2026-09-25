@@ -157,3 +157,39 @@ async fn cancelling_a_modern_http_call_ends_it() {
         .unwrap();
     assert_eq!(echo.content[0]["text"], "still here");
 }
+
+#[tokio::test]
+async fn a_stream_that_cannot_be_opened_says_why_without_type_names() {
+    let server = http(Faults::default()).await;
+    let sink = EventSink::new(1024);
+    let mut events = sink.subscribe();
+    let session = connect(&server, ProtocolMode::Modern, Some(sink))
+        .await
+        .unwrap();
+    server.shutdown();
+    let err = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.subscribe_resource(COUNTER_URI),
+    )
+    .await
+    .expect("the subscription was answered")
+    .unwrap_err();
+    let text = err.to_string();
+    assert!(matches!(err, mcp_core::Error::Refused(_)), "{text}");
+    assert!(
+        text.starts_with("refused: the stream could not be opened: transport error: "),
+        "{text}"
+    );
+    assert!(!text.contains("mcp_core::"), "{text}");
+    let mut notes = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let EventKind::Note { text, .. } = event.kind {
+            notes.push(text);
+        }
+    }
+    assert!(
+        notes.iter().any(|n| n.starts_with("the stream")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().all(|n| !n.contains("mcp_core::")), "{notes:?}");
+}
