@@ -129,6 +129,35 @@ pub fn crash_mid_session_flow() {
     live.cx.update(|cx| {
         assert_eq!(live.state.read(cx).screen, Screen::Detail, "no second form");
     });
+    // A reconnect that fails keeps the last connection's lists.
+    let spec = live
+        .cx
+        .update(|cx| live.state.read(cx).servers[0].record.spec.clone());
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| {
+            s.servers[0].record.spec = mcp_core::ServerSpec::Stdio {
+                command: "/nonexistent/coco-mock".into(),
+                args: Vec::new(),
+                env: Default::default(),
+                cwd: None,
+            };
+            s.connect(0, cx);
+        })
+    });
+    live.wait("the reconnect fails", |s| {
+        matches!(s.servers[0].status, Status::Error(_))
+    });
+    live.ui(|window, _| {
+        assert!(
+            window.try_find("list-stale").is_some(),
+            "the lists are kept"
+        );
+    });
+    live.cx.update(|cx| {
+        assert!(live.state.read(cx).items_total() > 0);
+        live.state
+            .update(cx, |s, _| s.servers[0].record.spec = spec);
+    });
     // The pane's Connect, with the settings as saved, just connects: the
     // tool selected before the crash is selected again, nothing is saved.
     let tool = live.cx.update(|cx| live.state.read(cx).selected_name());

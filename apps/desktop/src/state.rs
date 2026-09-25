@@ -2297,7 +2297,8 @@ impl AppState {
         entry.generation += 1;
         let generation = entry.generation;
         entry.status = Status::Connecting;
-        entry.set_snapshot(None);
+        // The last connection's lists stay, shown as its, until this one
+        // succeeds and replaces them; a connect that fails leaves them.
         // A new session has no subscriptions and nothing changed yet.
         entry.changed_items.clear();
         entry.subscribed.clear();
