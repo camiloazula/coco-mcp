@@ -16,10 +16,14 @@ use gpui_kit::{
 };
 
 use crate::actions::{EditServer, ITEM_LIST, MoveDown, MoveUp, Open};
-use crate::state::{AppState, Item, Mode, SETTINGS_SECTION};
+use crate::state::{AppState, Item, Mode, SETTINGS_SECTION, Status};
 use crate::theme::tokens;
 use crate::views::list_failures::list_notice;
 use crate::views::{Workspace, mono, muted};
+
+mod row;
+
+use row::*;
 
 /// Render the list column.
 pub fn render(
@@ -113,19 +117,25 @@ pub fn render(
             let opens = state.list_opens();
             let selected = state.selected_item.filter(|_| opens);
             let server_view = state.mode == Mode::Server;
+            // What a faint row says when hovered or pressed.
+            let why = if state.server().map(|s| &s.status) == Some(&Status::Connecting) {
+                "The server is connecting"
+            } else {
+                "Connect the server to open it"
+            };
             range
                 .filter_map(|ix| {
                     let item = items.get(ix)?;
                     let settings = server_view && item.name == SETTINGS_SECTION;
-                    Some(item_row(
+                    let row = Row {
                         ix,
                         item,
                         selected,
                         opens,
                         settings,
-                        &this.state,
-                        cx,
-                    ))
+                        why,
+                    };
+                    Some(item_row(row, &this.state, cx))
                 })
                 .collect::<Vec<_>>()
         }),
@@ -214,93 +224,4 @@ pub(crate) fn reveal_selection(ws: &Workspace, cx: &App) {
     if let Some(ix) = ws.state.read(cx).selected_item {
         ws.item_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
     }
-}
-
-/// One 28px row, with the accent bar when selected. A row that `opens`
-/// nothing is drawn faint and takes no click, except the Server view's
-/// `settings` row, which is the app's own: without a session it goes to the
-/// settings the pane shows, as Edit Server does.
-fn item_row(
-    ix: usize,
-    item: &Item,
-    selected: Option<usize>,
-    opens: bool,
-    settings: bool,
-    entity: &Entity<AppState>,
-    cx: &App,
-) -> AnyElement {
-    let t = *tokens(cx);
-    let is_selected = selected == Some(ix);
-    let entity = entity.clone();
-    h_flex()
-        .id(("item", ix))
-        .relative()
-        .w_full()
-        .h(px(28.))
-        .px(px(12.))
-        .text_color(if item.failed {
-            t.err
-        } else if is_selected {
-            t.fg
-        } else {
-            t.muted
-        })
-        .font_weight(if is_selected {
-            FontWeight::MEDIUM
-        } else {
-            FontWeight::NORMAL
-        })
-        .when(is_selected, |el| el.bg(t.sel))
-        .when(opens, |el| {
-            el.hover(|s| s.bg(t.hover)).on_click(move |_, _, cx| {
-                entity.update(cx, |state, cx| state.open_item(ix, cx));
-            })
-        })
-        .when(!opens && settings, |el| {
-            el.hover(|s| s.bg(t.hover)).on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(EditServer), cx);
-            })
-        })
-        .when(!opens && !settings, |el| el.opacity(0.5).cursor_default())
-        .child(
-            div()
-                .absolute()
-                .left_0()
-                .top(px(6.))
-                .bottom(px(6.))
-                .w(px(2.))
-                .when(is_selected, |el| el.bg(t.accent)),
-        )
-        .gap(px(8.))
-        .child(
-            mono(cx, 12., item.label.clone())
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis(),
-        )
-        // A resource the session is subscribed to.
-        .when(item.watched, |el| {
-            el.child(mono(cx, 11., "Subscribed").flex_none().text_color(t.muted))
-        })
-        // An item the server added or altered since it was last selected.
-        .when(item.changed, |el| {
-            el.child(
-                div()
-                    .id(("changed", ix))
-                    .flex_none()
-                    .size(px(7.))
-                    .rounded_full()
-                    .bg(t.accent)
-                    .test_support(),
-            )
-        })
-        .children(
-            item.meta
-                .clone()
-                .map(|m| mono(cx, 11., m).flex_none().text_color(t.muted)),
-        )
-        .test_support()
-        .into_any_element()
 }
