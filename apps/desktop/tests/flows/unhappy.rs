@@ -390,6 +390,16 @@ pub fn refused_token_flow() {
         assert!(window.try_find("authorize").is_none());
     });
     snap(&mut live.cx, live.handle, "68-token-refused");
+    // The list opens nothing for a server that is not connected: Enter
+    // there moves the keyboard into the settings, at the refused token.
+    live.ui(|window, cx| window.press("enter", cx));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("token").focused(),
+            Some(true),
+            "the token to update"
+        );
+    });
 }
 
 /// A token the server stops accepting mid-session fails the next call in

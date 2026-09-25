@@ -229,6 +229,19 @@ impl Workspace {
         self.add_form.clone()
     }
 
+    /// Move the keyboard into the settings the pane shows for the selected
+    /// server, at the field to fix; `false` when the pane shows none.
+    pub(crate) fn focus_settings_pane(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(form) = self
+            .server_form()
+            .filter(|_| self.state.read(cx).settings_pane().is_some())
+        else {
+            return false;
+        };
+        form.update(cx, |f, cx| f.focus_fix(window, cx));
+        true
+    }
+
     /// The server form the detail pane shows, if any: the add screen's, for
     /// the server it edits (`None` adds one), or the selected server's own
     /// settings when it is off or its connect failed, ready to connect. The
