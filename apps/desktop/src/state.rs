@@ -1624,11 +1624,12 @@ impl AppState {
         self.changed(cx);
     }
 
-    /// Connect server `ix`, just saved from the form, with the form kept
-    /// open on it until the connection is made. Nobody is moved to a pane
-    /// with nothing to show: a failure is written under the fields, where
-    /// the settings can be changed and connected again.
-    fn await_connect(&mut self, ix: usize, cx: &mut Context<Self>) {
+    /// Connect server `ix`, just saved from the form (or saved already, as
+    /// the form holds it), with the form kept open on it until the
+    /// connection is made. Nobody is moved to a pane with nothing to show: a
+    /// failure is written under the fields, where the settings can be
+    /// changed and connected again.
+    pub fn await_connect(&mut self, ix: usize, cx: &mut Context<Self>) {
         // Selecting shows the detail pane; the form is put back over it.
         self.select_server(ix, cx);
         // Nothing to wait for without a runtime to connect on.

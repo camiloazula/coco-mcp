@@ -116,10 +116,17 @@ pub fn crash_mid_session_flow() {
         );
     });
     snap(&mut live.cx, live.handle, "50-server-exited");
-    live.cx
-        .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
+    // The pane's Connect, with the settings as saved, just connects: the
+    // tool selected before the crash is selected again, nothing is saved.
+    let tool = live.cx.update(|cx| live.state.read(cx).selected_name());
+    live.ui(|window, cx| window.click("connect", cx));
     live.wait("it connects again", |s| {
         s.servers[0].status == Status::Connected
+    });
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert_eq!(s.selected_name(), tool, "the selection outlives the crash");
+        assert_eq!(s.screen, Screen::Detail, "no edit form was opened");
     });
     live.ui(|window, cx| {
         window.render_frame(cx);

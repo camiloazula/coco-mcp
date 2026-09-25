@@ -535,6 +535,30 @@ pub fn authorize_flow() {
         assert!(window.try_find("authorize").is_some(), "the login to redo");
     });
     snap(&mut live.cx, live.handle, "42-authorize-oauth");
+    // With a change in the fields, Authorize waits for Connect to save it
+    // rather than signing in with the saved settings and dropping it.
+    live.ui(|window, cx| {
+        window.click("name", cx);
+        window.press("cmd-a", cx);
+        window.input("renamed", cx);
+    });
+    live.ui(|window, cx| window.click("authorize", cx));
+    live.cx.run_until_parked();
+    assert_eq!(
+        opened.load(Ordering::Relaxed),
+        0,
+        "no sign-in over an unsaved change"
+    );
+    live.ui(|window, cx| {
+        assert_eq!(
+            window.find("name").value(),
+            Some("renamed"),
+            "the change stays"
+        );
+        window.click("name", cx);
+        window.press("cmd-a", cx);
+        window.input("oauth", cx);
+    });
     live.ui(|window, cx| window.click("authorize", cx));
     live.wait("the OAuth server connects", |s| {
         s.servers[1].status == Status::Connected
