@@ -140,11 +140,13 @@ pub(crate) fn transport_cause(error: &(dyn std::error::Error + 'static)) -> Stri
 
 /// An operating system's error text as a clause: `Connection refused (os
 /// error 61)` reads as `connection refused`. An acronym keeps its case.
+/// Only a trailing OS error is dropped: a parenthesis after it is kept.
 fn plain(text: &str) -> String {
-    let text = match text.rfind(" (os error ") {
-        Some(at) if text.ends_with(')') => &text[..at],
-        _ => text,
-    };
+    let text = text
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once(" (os error "))
+        .filter(|(_, code)| !code.is_empty() && code.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(text, |(clause, _)| clause);
     let mut chars = text.chars();
     match (chars.next(), chars.next()) {
         (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first
@@ -217,6 +219,20 @@ mod tests {
         assert_eq!(
             plain("Connection refused (os error 61)"),
             "connection refused"
+        );
+        assert_eq!(
+            plain("Permission denied (os error 13) (path /etc/ssl)"),
+            "permission denied (os error 13) (path /etc/ssl)",
+            "an OS error in the middle stays, and so does what follows it"
+        );
+        assert_eq!(
+            plain("Is a directory (os error 21) (not a file)"),
+            "is a directory (os error 21) (not a file)"
+        );
+        assert_eq!(
+            plain("Broken (os error x)"),
+            "broken (os error x)",
+            "only a number is an OS error"
         );
         assert_eq!(plain("HTTP 404"), "HTTP 404", "an acronym keeps its case");
         assert_eq!(
