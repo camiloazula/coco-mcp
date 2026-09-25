@@ -1,5 +1,7 @@
 //! Drawing the add-server form.
 
+use gpui_kit::component::tooltip::Tooltip;
+
 use super::*;
 
 /// What choosing `mode` does, beside its name in the Protocol menu.
@@ -10,6 +12,10 @@ pub(super) fn protocol_note(mode: ProtocolMode) -> &'static str {
         ProtocolMode::Modern => "2026-07-28 only. Fails on older servers.",
     }
 }
+
+/// Why Authorize waits while the fields differ from the saved settings.
+const UNSAVED_AUTHORIZE: &str =
+    "Connect saves the changes first; Authorize signs in with the saved settings";
 
 impl Render for AddServerForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -51,6 +57,7 @@ impl Render for AddServerForm {
         // and that is the one button the failure adds.
         let unauthorized = failed.is_some() && refused;
         let reauthorize = unauthorized && oauth;
+        let as_saved = reauthorize && self.unchanged(cx);
         let (title, subtitle) = match (editing, opened) {
             (true, true) if failed.is_some() => (
                 "Edit server",
@@ -234,29 +241,35 @@ impl Render for AddServerForm {
                     h_flex()
                         .gap(px(10.))
                         .pt(px(6.))
+                        // Authorize signs in with the saved settings; with
+                        // changes in the fields it waits for Connect to save
+                        // them, rather than dropping them.
                         .when(reauthorize, |row| {
-                            let state = self.state.clone();
-                            let id = self.editing.clone();
-                            row.child(
-                                accent_button(cx, "Authorize", 26.)
-                                    .id("authorize")
-                                    .on_click(move |_, _, cx| {
-                                        state.update(cx, |s, cx| {
-                                            let ix = s
-                                                .servers
-                                                .iter()
-                                                .position(|e| Some(&e.record.id) == id.as_ref());
-                                            if let Some(ix) = ix {
-                                                s.authorize(ix, cx);
-                                            }
-                                        });
+                            let button = accent_button(cx, "Authorize", 26.).id("authorize");
+                            row.child(if as_saved {
+                                button
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(ix) = this.edited(cx) {
+                                            this.state.update(cx, |s, cx| s.authorize(ix, cx));
+                                        }
+                                    }))
+                                    .test_support()
+                            } else {
+                                button
+                                    .opacity(0.5)
+                                    .cursor_default()
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new(UNSAVED_AUTHORIZE).build(window, cx)
                                     })
-                                    .test_support(),
-                            )
+                                    .on_click(|_, _, cx| {
+                                        crate::clip::announce_nothing(UNSAVED_AUTHORIZE, cx)
+                                    })
+                                    .test_support()
+                            })
                         })
                         .child(
                             accent_button(cx, action, 26.)
-                                .when(reauthorize, |el| el.bg(t.sunk).text_color(t.fg))
+                                .when(reauthorize && as_saved, |el| el.bg(t.sunk).text_color(t.fg))
                                 .id("connect")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit(cx);

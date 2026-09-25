@@ -77,11 +77,55 @@ impl AddServerForm {
         }
     }
 
+    /// Whether the fields hold the edited server's saved settings, token
+    /// included: then connecting, or signing in again, needs no save.
+    pub(super) fn unchanged(&self, cx: &Context<Self>) -> bool {
+        let Some(ix) = self.edited(cx) else {
+            return false;
+        };
+        let Ok((name, spec, token)) = self.spec(cx) else {
+            return false;
+        };
+        let record = &self.state.read(cx).servers[ix].record;
+        name == record.name
+            && spec == record.spec
+            && self.protocol == record.protocol
+            && token == self.stored_token
+    }
+
+    /// Where the edited server is in the list now; `None` when adding, or
+    /// when the server was deleted while the form was open.
+    pub(super) fn edited(&self, cx: &App) -> Option<usize> {
+        let id = self.editing.as_ref()?;
+        self.state
+            .read(cx)
+            .servers
+            .iter()
+            .position(|s| &s.record.id == id)
+    }
+
     /// Validate and save; the model connects once the server is saved. A
     /// save the model refuses keeps the form open with the reason.
     pub fn submit(&mut self, cx: &mut Context<Self>) {
         // One save at a time: a second press would add the server twice.
         if self.saving {
+            return;
+        }
+        // Nothing to save: connect as the server is. The pane of an off or
+        // failed server just connects, keeping the selection; a form opened
+        // to edit stays on the server until it connects, as after a save.
+        if let Some(ix) = self.edited(cx)
+            && self.unchanged(cx)
+        {
+            self.error = None;
+            let opened = self.state.read(cx).screen == Screen::AddServer;
+            self.state.update(cx, |state, cx| {
+                if opened {
+                    state.await_connect(ix, cx);
+                } else {
+                    state.connect(ix, cx);
+                }
+            });
             return;
         }
         let (name, spec, token) = match self.spec(cx) {

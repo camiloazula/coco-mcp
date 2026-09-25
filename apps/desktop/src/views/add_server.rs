@@ -93,6 +93,9 @@ pub struct AddServerForm {
     /// The edited server was in session when the form opened, so saving
     /// ends that session and starts another.
     reconnects: bool,
+    /// The edited server's bearer token as stored, once read: the form
+    /// holds the saved settings while its field still says this.
+    stored_token: Option<String>,
     /// An edited server's values as stored: saved again unchanged while
     /// their field's text is. The program and arguments, working directory
     /// and environment of a stdio server; the headers of an HTTP one.
@@ -275,6 +278,11 @@ impl AddServerForm {
             },
         )
         .detach();
+        // Read in place without a bridge; otherwise when the read lands.
+        let stored_token = token_read
+            .is_none()
+            .then(|| token_v.clone())
+            .filter(|t| !t.is_empty());
         let form = Self {
             state,
             name: cx.new(|cx| {
@@ -303,6 +311,7 @@ impl AddServerForm {
             error: None,
             saving: false,
             token_pending: token_read.is_some(),
+            stored_token,
             editing,
             reconnects,
             command_kept,
@@ -330,6 +339,7 @@ impl AddServerForm {
             self.error = None;
         }
         self.token_pending = false;
+        self.stored_token = Some(token.clone()).filter(|t| !t.is_empty());
         if self.token.read(cx).value().is_empty() {
             self.token
                 .update(cx, |input, cx| input.set_value(token, window, cx));
@@ -340,17 +350,6 @@ impl AddServerForm {
     /// Whether the form edits an existing server.
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
-    }
-
-    /// Where the edited server is in the list now; `None` when adding, or
-    /// when the server was deleted while the form was open.
-    fn edited(&self, cx: &App) -> Option<usize> {
-        let id = self.editing.as_ref()?;
-        self.state
-            .read(cx)
-            .servers
-            .iter()
-            .position(|s| &s.record.id == id)
     }
 
     /// Focus the first field.
