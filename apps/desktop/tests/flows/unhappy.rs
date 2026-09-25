@@ -140,6 +140,35 @@ pub fn crash_mid_session_flow() {
     assert_eq!(live.text(), "back");
 }
 
+/// The edit form's button says what saving will do to the session as it is
+/// now: Save & reconnect while connected, Connect once the row's plug has
+/// disconnected the server under the open form, and back again.
+pub fn edit_form_follows_the_session_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.show_edit_selected(cx)));
+    live.ui(|window, _| {
+        assert_eq!(window.find("connect").label(), Some("Save & reconnect"));
+    });
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.toggle_connection(0, cx)));
+    live.ui(|window, _| {
+        assert_eq!(
+            window.find("connect").label(),
+            Some("Connect"),
+            "no session to end"
+        );
+    });
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.toggle_connection(0, cx)));
+    live.wait("connected again", |s| {
+        s.servers[0].status == Status::Connected
+    });
+    live.ui(|window, _| {
+        assert_eq!(window.find("connect").label(), Some("Save & reconnect"));
+    });
+}
+
 /// Server requests the user does not simply accept: Esc cancels, Decline
 /// declines, a second request waits for the first, roots can be sent empty,
 /// and a URL elicitation shows the URL it would open.
