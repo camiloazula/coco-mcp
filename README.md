@@ -6,6 +6,32 @@
 </p>
 <h1 align="center">Coco MCP</h1>
 <p align="center">Inspect and debug MCP servers in depth, from the command line or a native window.</p>
+<p align="center">
+  <a href="https://github.com/camiloazula/coco-mcp/releases/latest"><img src="https://img.shields.io/github/v/release/camiloazula/coco-mcp?label=release" alt="Latest release"></a>
+  <a href="https://www.npmjs.com/package/coco-mcp"><img src="https://img.shields.io/npm/v/coco-mcp?label=npm" alt="npm package"></a>
+  <a href="https://github.com/camiloazula/coco-mcp/actions/workflows/ci.yml"><img src="https://github.com/camiloazula/coco-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="#licence"><img src="https://img.shields.io/badge/licence-MIT%20or%20Apache--2.0-blue" alt="MIT or Apache-2.0"></a>
+</p>
+
+## Get it
+
+On macOS or Linux, with Homebrew:
+
+```bash
+brew install camiloazula/coco/coco-mcp
+```
+
+Anywhere with Node, without installing anything:
+
+```bash
+npx coco-mcp
+```
+
+Then `coco-mcp` opens the window and `coco-mcp --cli --help` lists the
+commands. Prebuilt archives for macOS, Linux and Windows, and building from
+source, are under [Install](#install).
+
+![A tour of the window: adding a server, calling a tool, unfolding a log message, answering an elicitation, replaying from History, reading a diff, and the command palette](docs/tour.gif)
 
 Coco MCP is a tool for inspecting and debugging
 [Model Context Protocol](https://modelcontextprotocol.io) servers: connect
@@ -14,8 +40,6 @@ the wire, and keep what you learned. It is one binary, written in Rust and
 drawn by [GPUI](https://www.gpui.rs): `coco-mcp --cli` runs a command,
 `coco-mcp --desktop` opens a native window, and both work from the same
 core.
-
-![A tour of the window: adding a server, calling a tool, unfolding a log message, answering an elicitation, replaying from History, reading a diff, and the command palette](docs/tour.gif)
 
 ## Why
 
