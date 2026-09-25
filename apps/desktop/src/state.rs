@@ -2460,6 +2460,16 @@ impl AppState {
                 }
                 let mut after = None;
                 match result {
+                    // The session may have ended while its lists were read
+                    // and stored: its end came as an event while this server
+                    // was still connecting, which leaves it to this result.
+                    Some(Ok((session, snapshot, _)))
+                        if session.state() != ConnectionState::Connected =>
+                    {
+                        entry.set_snapshot(Some(snapshot));
+                        entry.unauthorized = false;
+                        entry.status = Status::Error("The server ended the session.".into());
+                    }
                     Some(Ok((session, snapshot, stored))) => {
                         let (compared, roots) = match stored {
                             Some((compared, roots)) => (Some(compared), Some(roots)),
