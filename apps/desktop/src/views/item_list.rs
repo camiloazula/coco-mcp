@@ -143,9 +143,12 @@ pub fn render(
             reveal_selection(this, cx);
         }))
         // Enter selects the first row, or on a selected one moves the
-        // keyboard into its first field, where ⌘⏎ sends.
+        // keyboard into its first field, where ⌘⏎ sends. Rows that open
+        // nothing leave the pane its settings: Enter goes there instead.
         .on_action(cx.listener(|this, _: &Open, window, cx| {
-            if this.state.read(cx).selected_item.is_none() {
+            if !this.state.read(cx).list_opens() {
+                this.focus_settings_pane(window, cx);
+            } else if this.state.read(cx).selected_item.is_none() {
                 this.state.update(cx, |s, cx| s.move_item(1, cx));
                 reveal_selection(this, cx);
             } else {

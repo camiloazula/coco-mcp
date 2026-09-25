@@ -88,7 +88,8 @@ impl Render for Workspace {
         {
             let form = cx.new(|cx| AddServerForm::new(self.state.clone(), editing, window, cx));
             // A form opened on purpose takes the keyboard; one shown for an
-            // off server leaves it with the list, so ↑ ↓ still move.
+            // off server leaves it where it was, and Enter in the list (or
+            // ⌘E) moves it into the form.
             if opened {
                 form.update(cx, |f, cx| f.focus(window, cx));
             }
@@ -217,13 +218,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &EditServer, window, cx| {
                 // Where the pane already shows the server's settings, go to
                 // them rather than open a second copy over them.
-                if this.state.read(cx).settings_pane().is_some()
-                    && let Some(form) = this.server_form()
-                {
-                    form.update(cx, |f, cx| f.focus(window, cx));
-                    return;
+                if !this.focus_settings_pane(window, cx) {
+                    this.state.update(cx, |s, cx| s.show_edit_selected(cx));
                 }
-                this.state.update(cx, |s, cx| s.show_edit_selected(cx));
             }))
             .on_action(cx.listener(|this, _: &DeleteServer, _, cx| {
                 this.state.update(cx, |s, cx| s.request_delete_selected(cx));

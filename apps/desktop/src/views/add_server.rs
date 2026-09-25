@@ -350,6 +350,19 @@ impl AddServerForm {
         self.name.update(cx, |input, cx| input.focus(window, cx));
     }
 
+    /// Move the keyboard to the field most likely to need a change: the
+    /// token of a server that refused it, otherwise the name.
+    pub fn focus_fix(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let refused = self
+            .edited(cx)
+            .is_some_and(|ix| self.state.read(cx).servers[ix].unauthorized);
+        if refused && !self.stdio && self.auth == AuthKind::Bearer {
+            self.token.update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            self.focus(window, cx);
+        }
+    }
+
     fn field(
         &self,
         cx: &Context<Self>,
