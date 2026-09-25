@@ -1,5 +1,5 @@
 //! What the detail pane shows with nothing to detail: no server, a server
-//! that is not connected, or nothing selected.
+//! that is connecting, or nothing selected.
 
 use super::*;
 
@@ -11,61 +11,6 @@ pub(super) fn centered_note(cx: &Context<Workspace>, text: impl Into<SharedStrin
         .text_size(px(13.))
         .text_color(tokens(cx).muted)
         .child(text.into())
-        .into_any_element()
-}
-
-/// A saved server that is not connected, when its settings form is not
-/// there: the failure, if its connect failed, and a button that does what
-/// `⌘R`, Enter on the row and the palette also do. Same layout as the empty
-/// state so the two read as one family.
-pub(super) fn connect_state(
-    ws: &Workspace,
-    failure: Option<String>,
-    cx: &mut Context<Workspace>,
-) -> AnyElement {
-    let t = *tokens(cx);
-    let entity = ws.state.clone();
-    let title = if failure.is_some() {
-        "Connection failed"
-    } else {
-        "Disconnected"
-    };
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap(px(8.))
-        .text_color(t.muted)
-        .child(div().text_size(px(15.)).text_color(t.fg).child(title))
-        .children(failure.map(|text| {
-            div()
-                .id("connect-error")
-                .text_size(px(13.))
-                .text_center()
-                .max_w(px(480.))
-                .text_color(t.err)
-                .child(text)
-                .test_support()
-        }))
-        .child(
-            h_flex()
-                .gap(px(16.))
-                .mt(px(12.))
-                .items_center()
-                .child(
-                    accent_button(cx, "Connect", 26.)
-                        .id("connect-server")
-                        .on_click(move |_, _, cx| {
-                            entity.update(cx, |s, cx| {
-                                if let Some(ix) = s.selected_server {
-                                    s.connect(ix, cx);
-                                }
-                            });
-                        })
-                        .test_support(),
-                )
-                .child(kbd(cx, "⌘R")),
-        )
         .into_any_element()
 }
 

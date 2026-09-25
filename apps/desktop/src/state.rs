@@ -1469,8 +1469,11 @@ impl AppState {
     /// History on screen is read, its rows not drawn yet, nor in a list whose
     /// rows open nothing ([`Self::list_opens`]).
     pub fn move_item(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.history_reading() || !self.list_opens() {
+            return;
+        }
         let len = self.items().len();
-        if len == 0 || self.history_reading() || !self.list_opens() {
+        if len == 0 {
             return;
         }
         let next = match self.selected_item {
