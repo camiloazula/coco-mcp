@@ -18,11 +18,19 @@ pub fn render(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     let copied = crate::clip::note(cx);
     let (text, unsaved) = {
         let state = ws.state.read(cx);
+        // The selected server's failure is on screen when the form drawn in
+        // the pane writes it, and the zoomed log does not cover the pane.
+        let covered = state.drawer_open && state.drawer_zoomed;
+        let failure_shown = !covered
+            && state.selected_server.is_some()
+            && ws
+                .server_form()
+                .is_some_and(|form| form.read(cx).failure_shown(cx) == state.selected_server);
         let text = match &copied {
             // A note is worded mid-sentence where it is built; the line
             // starts it with a capital.
             Some(note) => crate::views::capitalized(note),
-            None => state.status_text(),
+            None => state.status_text(failure_shown),
         };
         (text, state.persistence.note())
     };
@@ -36,7 +44,13 @@ pub fn render(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
         .bg(t.sunk)
         .text_size(px(11.))
         .text_color(if copied.is_some() { t.fg } else { t.muted })
-        .child(text)
+        .child(
+            div()
+                .id("status-text")
+                .aria_label(text.clone())
+                .child(text)
+                .test_support(),
+        )
         .child(div().flex_1())
         // Stays up next to a copy confirmation: losing changes outranks it.
         .children(unsaved.map(|note| {

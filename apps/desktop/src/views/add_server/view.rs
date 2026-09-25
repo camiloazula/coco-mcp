@@ -17,6 +17,16 @@ pub(super) fn protocol_note(mode: ProtocolMode) -> &'static str {
 const UNSAVED_AUTHORIZE: &str =
     "Connect saves the changes first; Authorize signs in with the saved settings";
 
+impl AddServerForm {
+    /// The server whose failed connect this form writes under its fields
+    /// now; `None` while it shows its own error instead, or no failure.
+    pub fn failure_shown(&self, cx: &App) -> Option<usize> {
+        let ix = self.edited(cx)?;
+        let failed = matches!(self.state.read(cx).servers[ix].status, Status::Error(_));
+        (failed && self.error.is_none()).then_some(ix)
+    }
+}
+
 impl Render for AddServerForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = *tokens(cx);

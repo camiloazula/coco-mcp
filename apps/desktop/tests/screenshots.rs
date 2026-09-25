@@ -1510,7 +1510,7 @@ mod macos {
             assert_eq!(failures.len(), 1, "{failures:?}");
             assert_eq!(failures[0].method, "resources/list");
             assert!(s.list_failures(Mode::Tools).is_empty());
-            let status = s.status_text();
+            let status = s.status_text(false);
             assert!(status.contains("resources/list failed"), "{status}");
             assert_eq!(s.persistence, Persistence::Saved);
         });

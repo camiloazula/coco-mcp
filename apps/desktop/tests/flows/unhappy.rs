@@ -441,6 +441,59 @@ pub fn unreachable_server_flow() {
             "kept after it failed"
         );
     });
+
+    // The status bar leaves out a reason written under the fields, and
+    // gives it whenever it is not on screen: the form showing its own
+    // error, or the zoomed log covering the pane.
+    let reason = "connection refused";
+    let status = |live: &mut crate::protocol::Live| {
+        let mut text = String::new();
+        live.ui(|window, _| {
+            text = window
+                .find("status-text")
+                .label()
+                .unwrap_or_default()
+                .to_owned();
+        });
+        text
+    };
+    assert!(
+        !status(&mut live).contains(reason),
+        "said once, under the fields"
+    );
+    live.ui(|window, cx| {
+        window.click("url", cx);
+        window.press("cmd-a", cx);
+        window.press("backspace", cx);
+        window.click("connect", cx);
+    });
+    live.ui(|window, _| {
+        assert!(
+            window.try_find("connect-error").is_none(),
+            "the form's own error"
+        )
+    });
+    assert!(status(&mut live).contains(reason), "{}", status(&mut live));
+    live.ui(|window, cx| {
+        window.click("url", cx);
+        window.input("http://127.0.0.1:9/mcp", cx);
+        window.click("connect", cx);
+    });
+    live.wait("the connect fails once more", |s| {
+        matches!(s.servers[0].status, Status::Error(_))
+    });
+    assert!(!status(&mut live).contains(reason));
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| {
+            s.drawer_open = true;
+            s.drawer_zoomed = true;
+            cx.notify();
+        })
+    });
+    assert!(
+        status(&mut live).contains(reason),
+        "the zoomed log covers the pane"
+    );
 }
 
 /// A server saved from the form is connected with the form kept open: a
