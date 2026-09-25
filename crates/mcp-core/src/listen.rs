@@ -146,7 +146,7 @@ async fn run(
         let mut stream = match opened {
             Ok(stream) => stream,
             Err(e) => {
-                let text = format!("the stream could not be opened: {e}");
+                let text = format!("the stream could not be opened: {}", Error::from(e));
                 note(&sink, &text, true);
                 settle(&mut uris, &mut waiting, Some(&text));
                 if !pause(retry, &mut changes, &mut uris, &mut waiting, &cancel).await {
@@ -177,7 +177,8 @@ async fn run(
                         }
                     },
                     Err(e) => {
-                        note(&sink, &format!("the stream failed: {e}; opening it again"), true);
+                        let text = format!("the stream failed: {}; opening it again", Error::from(e));
+                        note(&sink, &text, true);
                         break Ended::Broke;
                     }
                 },
