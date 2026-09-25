@@ -80,6 +80,9 @@ pub struct Response {
     /// The stamp of the request this answers: a response run again is another
     /// answer, even when its text is the same length at the same address.
     pub answer: u64,
+    /// The server refused the credentials the request went with, and the
+    /// challenge it sent with the refusal, if any.
+    pub refused: Option<Option<String>>,
 }
 
 /// Key of a response: server id, list mode, item name.
@@ -148,6 +151,7 @@ impl Responses {
                 elapsed: Duration::ZERO,
                 issues: Vec::new(),
                 answer: self.stamp,
+                refused: None,
             },
         );
         Some((self.stamp, control))
@@ -287,6 +291,10 @@ fn output_issues(schema: &Value, raw: &Value) -> Vec<String> {
 /// The response a finished request shows; `spec` is the server asked, for
 /// the wording of a failure.
 fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) -> Response {
+    let refused = match &result {
+        Some(Err(mcp_core::Error::AuthRequired { challenge })) => Some(challenge.clone()),
+        _ => None,
+    };
     let (raw, status, elapsed) = match result {
         Some(Ok((raw, elapsed, is_error))) => (
             raw,
@@ -338,6 +346,7 @@ fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) 
         elapsed,
         issues: Vec::new(),
         answer: 0,
+        refused,
     }
 }
 
@@ -693,8 +702,14 @@ impl AppState {
                     response.status,
                     ResponseStatus::Ok | ResponseStatus::ToolError
                 );
+                let refused = response.refused.clone();
                 if !state.responses.finish(&key, stamp, response) {
                     return;
+                }
+                if let Some(challenge) = refused
+                    && let Some(entry) = state.servers.iter_mut().find(|s| s.record.id == server_id)
+                {
+                    entry.session_refused(challenge);
                 }
                 let known = state.servers.iter().any(|s| s.record.id == server_id);
                 match recorded {

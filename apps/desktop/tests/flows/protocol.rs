@@ -582,6 +582,23 @@ pub fn authorize_flow() {
         "the stored credentials were dropped and the flow ran again"
     );
 
+    // Mid-session, a login the server no longer takes ends the session: the
+    // server is shown as its settings, wanting a sign-in, with Authorize.
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.select_server(1, cx)));
+    server.revoke_tokens();
+    live.call("add", json!({"a": 1, "b": 2}));
+    live.wait("the refusal ends the session", |s| {
+        matches!(s.servers[1].status, Status::Error(_))
+    });
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert!(s.servers[1].unauthorized && s.servers[1].session.is_none());
+    });
+    live.ui(|window, _| {
+        assert!(window.try_find("authorize").is_some(), "the way forward");
+    });
+
     // A sign-in that is never completed (the browser tab closed) is not a
     // server that could not be reached: the server still wants signing in,
     // and Authorize stays.

@@ -338,6 +338,30 @@ impl ServerEntry {
         self.status = Status::Error(explain(e, Some(&self.record.spec)));
     }
 
+    /// The server refused the credentials a request of its session went
+    /// with. An OAuth login it no longer takes cannot be mended from inside
+    /// the session: the session ends, and the server is shown as its
+    /// settings, wanting a sign-in, with Authorize. Other servers keep their
+    /// session, and the response says what to change.
+    pub fn session_refused(&mut self, challenge: Option<String>) {
+        let oauth = matches!(
+            self.record.spec,
+            ServerSpec::Http {
+                auth: mcp_core::AuthRef::OAuth { .. },
+                ..
+            }
+        );
+        if !oauth || self.status != Status::Connected {
+            return;
+        }
+        // Our own ending: the session's own events are not taken for news.
+        self.generation += 1;
+        if let Some(session) = self.session.take() {
+            session.close();
+        }
+        self.connect_failed(&mcp_core::Error::AuthRequired { challenge });
+    }
+
     /// What this server can do now: its feature table, from the era of the
     /// version its last session agreed on and the capabilities it declared.
     pub fn features(&self) -> Features {
