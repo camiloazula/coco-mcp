@@ -41,6 +41,12 @@ pub enum Error {
         /// The `WWW-Authenticate` challenge, if any.
         challenge: Option<String>,
     },
+    /// The credentials to connect with could not be had: a token that is
+    /// not stored, or an OAuth sign-in that did not complete (the browser
+    /// flow timed out, was denied, or its metadata could not be read). The
+    /// server was not asked.
+    #[error("credentials unavailable: {0}")]
+    Credentials(String),
     /// Arguments were not acceptable before sending.
     #[error("invalid arguments: {0}")]
     InvalidArguments(String),

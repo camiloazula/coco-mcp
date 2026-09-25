@@ -323,11 +323,15 @@ pub struct ServerEntry {
 
 impl ServerEntry {
     /// The last connect failed with `e`. `unauthorized` says whether this
-    /// one was turned away for want of authorization, so a later failure of
-    /// another kind is not taken for a refusal; the challenge of the last
-    /// refusal is kept either way for the next authorization.
+    /// one wants credentials (the server turned it away, or the sign-in did
+    /// not complete), so a later failure of another kind is not taken for a
+    /// refusal; the challenge of the last refusal is kept either way for the
+    /// next authorization.
     pub fn connect_failed(&mut self, e: &mcp_core::Error) {
-        self.unauthorized = matches!(e, mcp_core::Error::AuthRequired { .. });
+        self.unauthorized = matches!(
+            e,
+            mcp_core::Error::AuthRequired { .. } | mcp_core::Error::Credentials(_)
+        );
         if let mcp_core::Error::AuthRequired { challenge } = e {
             self.auth_challenge = challenge.clone();
         }
@@ -825,6 +829,9 @@ pub struct AppState {
     /// How an OAuth authorization URL is opened: the system browser, unless
     /// a test drives the flow itself.
     pub oauth_open: Option<mcp_auth::Opener>,
+    /// How long a browser sign-in may take: mcp-auth's default, unless a
+    /// test shortens it.
+    pub oauth_timeout: Option<Duration>,
     /// The filtered middle list, see [`Self::items`].
     items: RefCell<ItemsCache>,
 }
@@ -993,6 +1000,7 @@ impl AppState {
             form_awaits: None,
             keepalive: SessionOptions::default().keepalive,
             oauth_open: None,
+            oauth_timeout: None,
             items: RefCell::default(),
         };
         if let Some(store) = store {
@@ -2348,9 +2356,11 @@ impl AppState {
         let snapshot_owner = id.clone();
         let connect = bridge.run(async move {
             let transport = match &spec {
+                // What fails here is getting the credentials, before the
+                // server is asked: not a server that could not be reached.
                 ServerSpec::Http { url, auth, .. } => mcp_auth::resolve(auth, url, secrets, &oauth)
                     .await
-                    .map_err(|e| mcp_core::Error::Transport(e.to_string()))?,
+                    .map_err(|e| mcp_core::Error::Credentials(e.to_string()))?,
                 ServerSpec::Stdio { .. } => Default::default(),
             };
             let options = SessionOptions {
@@ -2508,10 +2518,12 @@ impl AppState {
             .oauth_open
             .clone()
             .unwrap_or_else(mcp_auth::browser_opener);
+        let defaults = mcp_auth::OAuthOptions::default();
         mcp_auth::OAuthOptions {
             challenge: self.servers.get(ix).and_then(|s| s.auth_challenge.clone()),
             open,
-            ..mcp_auth::OAuthOptions::default()
+            timeout: self.oauth_timeout.unwrap_or(defaults.timeout),
+            ..defaults
         }
     }
 
@@ -3551,6 +3563,13 @@ mod tests {
             challenge: Some("Bearer realm=\"x\"".into()),
         });
         assert!(entry.unauthorized);
+        entry.connect_failed(&mcp_core::Error::Credentials(
+            "authorization timed out".into(),
+        ));
+        assert!(
+            entry.unauthorized,
+            "a sign-in that did not complete still wants one"
+        );
         entry.connect_failed(&mcp_core::Error::Transport("connection refused".into()));
         assert!(!entry.unauthorized, "not a refusal");
         assert!(matches!(entry.status, Status::Error(_)));

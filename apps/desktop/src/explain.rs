@@ -46,6 +46,13 @@ pub fn explain(error: &Error, spec: Option<&ServerSpec>) -> String {
             }
         }
         .to_owned(),
+        Error::Credentials(detail) => sentence(match spec {
+            Some(ServerSpec::Http {
+                auth: AuthRef::OAuth { .. },
+                ..
+            }) => format!("The sign-in did not complete: {}", tidy(detail)),
+            _ => format!("The credentials could not be read: {}", tidy(detail)),
+        }),
         Error::InvalidArguments(what) => {
             sentence(format!("The arguments were not accepted: {what}"))
         }
@@ -108,6 +115,26 @@ mod tests {
             headers: Default::default(),
             auth,
         }
+    }
+
+    #[test]
+    fn credentials_that_could_not_be_had_are_not_an_unreachable_server() {
+        let timed_out = Error::Credentials("authorization timed out after 300s".into());
+        let oauth = http(AuthRef::OAuth {
+            keyring_id: "k".into(),
+        });
+        assert_eq!(
+            explain(&timed_out, Some(&oauth)),
+            "The sign-in did not complete: authorization timed out after 300s."
+        );
+        let missing = Error::Credentials("no secret stored for `k`".into());
+        let bearer = http(AuthRef::Bearer {
+            keyring_id: "k".into(),
+        });
+        assert_eq!(
+            explain(&missing, Some(&bearer)),
+            "The credentials could not be read: no secret stored for `k`."
+        );
     }
 
     #[test]
