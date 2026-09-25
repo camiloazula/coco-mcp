@@ -76,7 +76,7 @@ impl Render for Workspace {
         let t = *tokens(cx);
         self.sync_filter_placeholder(window, cx);
         self.sync_level_select(window, cx);
-        let wanted = Self::wanted_form(self.state.read(cx));
+        let wanted = self.wanted_form(self.state.read(cx));
         // A form is built for one target: `+` while editing stays on the
         // screen, but the old form would still save over the edited server.
         if wanted != self.add_form_target {

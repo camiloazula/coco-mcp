@@ -23,7 +23,7 @@ use crate::actions::{
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
     WORKSPACE, ZoomLog,
 };
-use crate::state::{AppState, Changed, Gone, Mode, Screen};
+use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
 use crate::theme::{self, tokens};
 use crate::views::copy::Export;
 use crate::views::kept::Decoded;
@@ -195,7 +195,7 @@ impl Workspace {
             let s = self.state.read(cx);
             (
                 s.dark,
-                Self::wanted_form(s),
+                self.wanted_form(s),
                 (s.selected_server, s.selected_item),
             )
         };
@@ -237,12 +237,23 @@ impl Workspace {
     /// again. History stays readable without a session, so it is not
     /// replaced. The server is named by its id: after a delete the next
     /// server takes the same place in the list, and must get its own form.
-    fn wanted_form(state: &AppState) -> Option<(Option<String>, bool)> {
+    /// A pane's form stays while its server connects, wherever the connect
+    /// came from: it shows the connect under the fields, and keeps what was
+    /// typed and the stored token it read.
+    fn wanted_form(&self, state: &AppState) -> Option<(Option<String>, bool)> {
         let id = |ix: usize| state.servers.get(ix).map(|s| s.record.id.clone());
         if state.screen == Screen::AddServer {
             return Some((state.editing.and_then(id), true));
         }
-        state.settings_pane().map(|ix| (id(ix), false))
+        if let Some(ix) = state.settings_pane() {
+            return Some((id(ix), false));
+        }
+        let entry = state.server()?;
+        let pane = (Some(entry.record.id.clone()), false);
+        (entry.status == Status::Connecting
+            && state.mode != Mode::History
+            && self.add_form_target.as_ref() == Some(&pane))
+        .then_some(pane)
     }
 
     /// The filter placeholder follows the mode; needs the window, so it runs in render.
