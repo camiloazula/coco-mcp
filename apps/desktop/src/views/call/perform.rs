@@ -99,6 +99,12 @@ impl Workspace {
         let Some(record) = self.state.read(cx).selected_call().cloned() else {
             return;
         };
+        // Without a session the pane shows the server's settings, and the
+        // form would be filled out of sight.
+        if self.state.read(cx).server().map(|s| &s.status) != Some(&crate::state::Status::Connected)
+        {
+            return;
+        }
         let mode = match record.kind {
             CallKind::Tool => Mode::Tools,
             CallKind::Resource => Mode::Resources,
