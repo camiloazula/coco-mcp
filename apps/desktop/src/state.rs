@@ -338,6 +338,13 @@ impl ServerEntry {
         self.status = Status::Error(explain(e, Some(&self.record.spec)));
     }
 
+    /// The connect stopped before it had a result (its task failed). That
+    /// is no refusal, whatever the last connect was.
+    pub fn connect_stopped(&mut self) {
+        self.unauthorized = false;
+        self.status = Status::Error("The connect stopped before it finished.".into());
+    }
+
     /// The server refused the credentials a request of its session went
     /// with. An OAuth login it no longer takes cannot be mended from inside
     /// the session: the session ends, and the server is shown as its
@@ -2470,7 +2477,7 @@ impl AppState {
                         after = Some((entry.log_level.clone(), unread, entry.record.name.clone()));
                     }
                     Some(Err(e)) => entry.connect_failed(&e),
-                    None => entry.status = Status::Error("connect task failed".into()),
+                    None => entry.connect_stopped(),
                 }
                 // Connected, the form that saved the server has done its
                 // job; failed, it stays with the failure under its fields.
@@ -3602,6 +3609,9 @@ mod tests {
             Some("Bearer realm=\"x\""),
             "the next authorization still starts from the challenge"
         );
+        entry.connect_failed(&mcp_core::Error::AuthRequired { challenge: None });
+        entry.connect_stopped();
+        assert!(!entry.unauthorized, "a connect that stopped is no refusal");
     }
 
     #[test]
