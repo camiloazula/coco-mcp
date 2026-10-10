@@ -139,6 +139,7 @@ two modes. These rules keep it that way.
 | Command lines | `shlex` | 2.0 | MIT/Apache-2.0 | POSIX quoting for a stdio server's command line (`mcp_core::command_line`, `split_command_line`): the server form, `ServerSpec::label`, and `coco`'s `stdio:` sources and saved-server names; already in the graph through `cc`. |
 | URLs | `url` | 2 | MIT/Apache-2.0 | HTTP endpoints and OAuth in `mcp-core`; URL elicitations in the mock server. |
 | Errors | `thiserror` 2 / `anyhow` 1 | | MIT/Apache-2.0 | |
+| Versions | `semver` | 1.0 | MIT/Apache-2.0 | Release versions in the update notice; already in the graph through `rustc_version`. |
 | Time, ids, digest | `time`, `uuid` v7, `sha2`, `hex` | | MIT/Apache-2.0 | |
 | Licence audit | `cargo-deny` | any current | | `just deny` locally; `EmbarkStudios/cargo-deny-action@v2` in CI. |
 | Fonts | Inter 4.0, Geist Mono 1.5 | | OFL-1.1 | Embedded from `apps/desktop/assets/fonts/`, registered in `theme::install`. |
@@ -153,6 +154,7 @@ crates/mcp-auth          keyring SecretStore, rmcp CredentialStore, loopback, OA
 crates/mcp-diff          Snapshot -> classified diff (breaking / compatible / cosmetic)
 crates/mcp-exchange      shared formats both ways: JSON-RPC, curl, client config, JSONL, Markdown
 crates/mcp-mockserver    hermetic test server: two schemas, faults, both eras, stdio and HTTP
+crates/coco-update       update notice: latest release, update.json, install channel and command
 apps/cli                 coco-cli library: snapshot, call, read, prompt, history, diff, import/export-config
 apps/desktop             the one binary (package coco-mcp): --desktop draws the GPUI views, --cli hands over to coco-cli
 ```
@@ -383,6 +385,18 @@ artifacts, publishing nothing.
   in a stored bearer token when it arrives, keeps one typed meanwhile and
   refuses to save an empty one before then, and Copy Bearer Token copies
   once it is read.
+
+- The update notice (`crates/coco-update`, `update.rs`,
+  `views/update_notice.rs`, `apps/cli/src/update.rs`) only tells: nothing
+  downloads or replaces the binary. One request a day at most, off the GPUI
+  thread and never awaited by a CLI command, to GitHub's latest-release
+  API; its answer, a skipped version and the off switch live in
+  `update.json`, which the window and the command line share and which
+  each write reads again first. The command to show comes from
+  `COCO_INSTALL`, set by the npm shim, or the executable's path; a Homebrew
+  or npm install hears of a release only `PACKAGE_LAG` after it, once the
+  formula and the packages have followed. The headless renders set a fixed
+  `update::Update` global and never check.
 
 - Every call, read and get goes out through `send_cancellable_request`
   with a `mcp_core::RequestControl`. Cancelling it, or running past the

@@ -3,7 +3,7 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-core := "-p mcp-core -p mcp-schema-form -p mcp-store -p mcp-auth -p mcp-diff -p mcp-exchange -p mcp-mockserver -p coco-cli"
+core := "-p mcp-core -p mcp-schema-form -p mcp-store -p mcp-auth -p mcp-diff -p mcp-exchange -p mcp-mockserver -p coco-update -p coco-cli"
 app  := "-p coco-mcp"
 
 # List every recipe (what `just` alone does).

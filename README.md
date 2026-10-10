@@ -196,6 +196,28 @@ coco-mcp --cli --help      # the command line; every command follows --cli
 From a checkout, `just run` opens the window and `just coco --help` the
 command line.
 
+### Updates
+
+When a newer release is out, the window shows it in the status bar, and
+the note opens the command that upgrades your install: `brew upgrade
+coco-mcp` for Homebrew, `npm i -g coco-mcp@latest` or `npx
+coco-mcp@latest` for npm (pnpm, Yarn and Bun get their own), the
+`cargo install` line for Cargo, and the release page for an archive. "Skip this version" keeps quiet until the one
+after; the About window says whether you are up to date. The command line
+prints the same as one line on stderr after its output, only when stderr
+is a terminal and `CI` is not set. Nothing is downloaded or replaced: the
+app only tells you.
+
+To know, it asks GitHub for the latest release
+(`api.github.com/repos/camiloazula/coco-mcp/releases/latest`) at most once
+a day, in the background, sending a `User-Agent` with the version and
+nothing else. It is the only request the app makes to anything but the
+servers you configure. Turn it off with `COCO_NO_UPDATE_CHECK=1` or
+`DO_NOT_TRACK=1`, or with "Turn off update checks" in the command palette,
+which holds for the command line too; "Check for updates" (also in the app
+menu) asks at once. What it found is kept in `update.json` beside the
+database.
+
 ## The desktop mode
 
 `coco-mcp` alone, or with `--desktop`, opens the window. Press `⌘N` (or the

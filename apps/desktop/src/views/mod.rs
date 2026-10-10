@@ -30,6 +30,7 @@ mod server_view;
 mod sidebar;
 mod split;
 mod status_bar;
+mod update_notice;
 mod workspace;
 
 pub use about::About;

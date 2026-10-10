@@ -124,6 +124,7 @@ impl Render for Workspace {
         }
         let palette = palette::render(self, window, cx);
         let copy_menu = copy_menu::render(cx);
+        let update_popover = update_notice::render(cx);
         let header = log_drawer::header(self, cx);
         let middle: AnyElement = if drawer_open && drawer_zoomed {
             // The drawer alone between the title bar and the status bar; the
@@ -278,6 +279,7 @@ impl Render for Workspace {
             .children(confirm)
             .children(palette)
             .children(copy_menu)
+            .children(update_popover)
             .children(dialogs)
             .children(sheets)
             .children(notifications)

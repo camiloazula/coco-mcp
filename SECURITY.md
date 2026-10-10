@@ -24,8 +24,10 @@ by design.
 
 ## Supported versions
 
-Fixes go to the latest release only. Install with `cargo install --locked`
-and update by running the same command again.
+Fixes go to the latest release only. The app and the command line say when
+a newer one is out (README, "Updates"); that check asks GitHub's API for
+the latest release once a day with a `User-Agent` naming the version, and
+`COCO_NO_UPDATE_CHECK=1` or `DO_NOT_TRACK=1` turns it off.
 
 ## Dependencies
 

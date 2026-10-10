@@ -20,6 +20,7 @@ mcp-store.workspace = true
 mcp-diff.workspace = true
 mcp-exchange.workspace = true
 mcp-auth.workspace = true
+coco-update.workspace = true
 clap.workspace = true
 anstyle.workspace = true
 anstream.workspace = true
