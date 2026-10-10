@@ -1174,6 +1174,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "clap",
+ "coco-update",
  "mcp-auth",
  "mcp-core",
  "mcp-diff",
@@ -1191,6 +1192,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "coco-cli",
+ "coco-update",
  "directories",
  "futures",
  "gpui-kit",
@@ -1205,6 +1207,7 @@ dependencies = [
  "mcp-store",
  "open",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "time",
@@ -1214,6 +1217,20 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "coco-update"
+version = "0.4.0"
+dependencies = [
+ "directories",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
 ]
 
 [[package]]

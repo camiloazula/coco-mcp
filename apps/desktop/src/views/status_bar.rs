@@ -1,5 +1,6 @@
 //! The 24px line under everything: what the selected server is doing, whether
-//! changes are being saved, and the way into the command palette.
+//! changes are being saved, a newer release, and the way into the command
+//! palette.
 
 use gpui_kit::component::h_flex;
 use gpui_kit::{
@@ -62,6 +63,7 @@ pub fn render(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
                 .child(crate::views::capitalized(&note))
                 .test_support()
         }))
+        .children(crate::views::update_notice::note(cx))
         .child(
             h_flex()
                 .id("commands")

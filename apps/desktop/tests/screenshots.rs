@@ -3661,6 +3661,91 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
+    /// A newer release, installed through Homebrew: the note in the status
+    /// bar opens the popover with the command, the About window names the
+    /// release, and skipping it takes the note away.
+    fn update_notice_flow() {
+        use coco_mcp::update::Update;
+        use coco_update::{Channel, Release, State};
+
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let latest = format!("{}.{}.0", current.major, current.minor + 1);
+        let state = State {
+            // Long past, so the packages' two hours never depend on the
+            // clock the flow runs at.
+            checked_at: Some(1_760_100_000),
+            latest: Some(Release {
+                url: format!("https://github.com/camiloazula/coco-mcp/releases/tag/v{latest}"),
+                version: latest.clone(),
+                published_at: 1_760_097_600,
+            }),
+            ..State::default()
+        };
+        let mut cx = context();
+        cx.update(|cx| {
+            let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+            cx.set_global(Update::fixed(bridge, Channel::Homebrew, state));
+        });
+        let mut s = demo_state(true);
+        s.screen = Screen::Detail;
+        let handle = cx
+            .open_window(size(px(1200.), px(760.)), |window, cx| {
+                let state = cx.new(|_| s);
+                let workspace = cx.new(|cx| Workspace::new(state, window, cx));
+                cx.new(|cx| Root::new(workspace, window, cx))
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("update-popover").is_none(),
+                "closed at first"
+            );
+            window.click("update-note", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("update-popover").is_some(),
+                "the note opens it"
+            );
+            assert!(
+                window.try_find("update-copy").is_some(),
+                "Homebrew has a command"
+            );
+        })
+        .unwrap();
+        snap(&mut cx, handle, "71-update-available");
+
+        let about = cx
+            .update(|cx| coco_mcp::views::about::open(None, cx))
+            .expect("About window opens");
+        cx.update_window(about.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("about-update").is_some());
+        })
+        .unwrap();
+        snap(&mut cx, about, "72-about-update");
+
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("update-skip", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("update-popover").is_none(),
+                "skipping closes it"
+            );
+            assert!(
+                window.try_find("update-note").is_none(),
+                "and the note goes"
+            );
+        })
+        .unwrap();
+        let (line, _) = cx.update(|cx| cx.global::<Update>().about_line()).unwrap();
+        assert_eq!(
+            line,
+            format!("{latest} is available"),
+            "About still says so"
+        );
+    }
+
     /// TEMPORARY: frame timings over large results.
     fn timing_flow() {
         use mcp_store::{CallKind, CallRecord, CallStatus};
@@ -3894,6 +3979,7 @@ mod macos {
         capture("05-light", s, false);
         about_window(true, "24-about");
         about_window(false, "25-about-light");
+        update_notice_flow();
         assemble_tour();
     }
 

@@ -19,6 +19,7 @@ pub mod menus;
 pub mod persistence;
 pub mod state;
 pub mod theme;
+pub mod update;
 pub mod views;
 
 use gpui_kit::component::{Root, TitleBar};
@@ -79,6 +80,7 @@ fn model(bridge: Option<Bridge>, store: Result<mcp_store::Store, String>) -> App
 pub fn run() -> anyhow::Result<()> {
     let bridge = Bridge::new()?;
     let store = open_store();
+    let runtime = bridge.clone();
     gpui_kit::application()
         .with_assets(assets::AppAssets)
         .run(move |cx| {
@@ -88,6 +90,7 @@ pub fn run() -> anyhow::Result<()> {
             }
             actions::bind(cx);
             menus::install(cx);
+            update::start(runtime, cx);
             let state: Entity<AppState> = cx.new(|_| {
                 let mut state = model(Some(bridge), store);
                 state.secrets = std::sync::Arc::new(mcp_auth::KeyringStore::default());

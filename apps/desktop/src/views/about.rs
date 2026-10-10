@@ -1,5 +1,5 @@
 //! The About window: the mark, the `coco` wordmark, the build it came from,
-//! and two links. 320 × 400, not resizable, with the platform's own window
+//! whether a newer release is out, and two links. 320 × 400, not resizable, with the platform's own window
 //! controls in the 36px header.
 
 use gpui_kit::component::{TitleBar, h_flex, v_flex};
@@ -95,6 +95,33 @@ impl About {
             .into_any_element()
     }
 
+    /// Whether a newer release is out, once a check said: the release in
+    /// the accent, opening its page, or that this is the latest.
+    fn update_line(&self, cx: &App) -> Option<AnyElement> {
+        let t = *tokens(cx);
+        let update = cx.try_global::<crate::update::Update>()?;
+        let (line, url) = update.about_line()?;
+        let row = div()
+            .id("about-update")
+            .mt(px(8.))
+            .text_size(px(12.))
+            .text_color(if url.is_some() { t.accent } else { t.muted });
+        Some(match url {
+            Some(url) => row
+                .cursor_pointer()
+                .hover(|s| s.text_color(t.fg))
+                .on_click(move |_, _, _| {
+                    if let Err(e) = open::that_detached(&url) {
+                        tracing::warn!("cannot open {url}: {e}");
+                    }
+                })
+                .child(format!("{line} · What's new"))
+                .test_support()
+                .into_any_element(),
+            None => row.child(line).test_support().into_any_element(),
+        })
+    }
+
     /// An outlined full-width button that opens `url`.
     fn link(
         &self,
@@ -170,6 +197,7 @@ impl Render for About {
                             .child(mono(cx, 12., build_line()).text_color(t.muted))
                             .children(date.map(|d| mono(cx, 12., d).text_color(t.muted))),
                     )
+                    .children(self.update_line(cx))
                     .child(div().flex_1())
                     .child(
                         v_flex()

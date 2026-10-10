@@ -15,6 +15,7 @@ mod import;
 mod saved;
 mod source;
 mod style;
+mod update;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -256,13 +257,18 @@ where
             return ExitCode::from(EXIT_FAILURE);
         }
     };
-    match runtime.block_on(run(cli)) {
-        Ok(code) => ExitCode::from(code),
+    let update = update::start();
+    let code = match runtime.block_on(run(cli)) {
+        Ok(code) => code,
         Err(message) => {
             style::error(message);
-            ExitCode::from(EXIT_FAILURE)
+            EXIT_FAILURE
         }
+    };
+    if let Some(update) = update {
+        update.finish();
     }
+    ExitCode::from(code)
 }
 
 struct Ctx {
