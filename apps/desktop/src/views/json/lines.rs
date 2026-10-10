@@ -183,11 +183,18 @@ fn row(indent: u16, lead: Option<AnyElement>, runs: Vec<Run>) -> Div {
         .child(styled(runs))
 }
 
+/// `s` as a JSON string literal: quoted, with line breaks, tabs, control
+/// characters, quotes and backslashes escaped. A row is one line tall, so
+/// a string that kept its line breaks would spill over its neighbours.
+fn quoted(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_default()
+}
+
 /// The leaf `value` as text, in its colour.
 fn leaf(value: &Value, cx: &App) -> Run {
     let t = *tokens(cx);
     let (text, color) = match value {
-        Value::String(s) => (format!("\"{}\"", s.replace('"', "\\\"")), t.str),
+        Value::String(s) => (quoted(s), t.str),
         Value::Number(n) => (n.to_string(), t.num),
         Value::Bool(b) => (b.to_string(), t.num),
         Value::Null => ("null".to_string(), t.muted),
@@ -220,7 +227,7 @@ pub(super) fn line_element(
     }
     let mut runs = Vec::new();
     if let Some(Segment::Key(k)) = &line.segment {
-        runs.push(Run(SharedString::from(format!("\"{k}\"")), t.fg));
+        runs.push(Run(SharedString::from(quoted(k)), t.fg));
         runs.push(p(": "));
     }
     let key = plan.key_of(&path);
@@ -324,6 +331,16 @@ mod tests {
         );
         let root = HashSet::from(["t$".to_owned()]);
         assert_eq!(plan_len(&value, &root), 1, "a folded root is its one line");
+    }
+
+    #[test]
+    fn a_string_is_drawn_on_one_line() {
+        assert_eq!(quoted("plain"), r#""plain""#);
+        assert_eq!(
+            quoted("one\ntwo\r\n\tthree \"q\" C:\\new \u{1}"),
+            r#""one\ntwo\r\n\tthree \"q\" C:\\new \u0001""#
+        );
+        assert!(!quoted("a\u{2028}b\nc").contains(['\n', '\r']));
     }
 
     fn plan_len(value: &Value, collapsed: &HashSet<String>) -> usize {
