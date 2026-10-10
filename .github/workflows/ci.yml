@@ -1,5 +1,7 @@
-# One job, on the cheapest runner: verify the tree as `just check` does
-# locally. Nothing here builds for a platform or produces an artefact;
+# Verify the tree as `just check` does locally: everything on the cheapest
+# runner, and the app again on macOS, the one platform its headless UI flows
+# (`apps/desktop/tests/screenshots.rs`) draw on; elsewhere that target is
+# empty. Nothing here builds for a platform or produces an artefact;
 # `release.yml` does that, on version tags only.
 name: ci
 
@@ -43,3 +45,24 @@ jobs:
         with:
           command: check
           arguments: ""
+
+  flows:
+    name: flows (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      # The flows' own code is compiled on macOS only, so it is linted here.
+      - run: just clippy-app
+      - run: just test-app
+      - name: The screens the flows drew, to see what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/screenshots/
+          if-no-files-found: ignore
