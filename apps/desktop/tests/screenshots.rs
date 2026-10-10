@@ -355,16 +355,30 @@ mod macos {
     /// Index of the list row whose label is `name` in the current mode.
     /// The mock server binary the live flows spawn. A flow that needs it
     /// fails when it was not built rather than passing without running.
+    ///
+    /// The command is on screen, so the flows reach the binary through a
+    /// link at [`MOCK_LINK`]: a render must read the same in every checkout
+    /// and on every machine, whatever the path to the workspace.
     pub(crate) fn mock_binary() -> PathBuf {
-        let mock =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/mcp-mockserver");
-        assert!(
-            mock.exists(),
-            "{} is missing: run `cargo build -p mcp-mockserver` first",
-            mock.display()
-        );
-        mock
+        static LINK: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        LINK.get_or_init(|| {
+            let mock = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/debug/mcp-mockserver")
+                .canonicalize()
+                .expect("target/debug/mcp-mockserver is missing: run `cargo build -p mcp-mockserver` first");
+            let link = PathBuf::from(MOCK_LINK);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            if std::fs::read_link(&link).ok().as_ref() != Some(&mock) {
+                let _ = std::fs::remove_file(&link);
+                std::os::unix::fs::symlink(&mock, &link).unwrap();
+            }
+            link
+        })
+        .clone()
     }
+
+    /// Where [`mock_binary`] links the mock server from.
+    const MOCK_LINK: &str = "/tmp/coco-mcp-flows/mcp-mockserver";
 
     pub(crate) fn item_index(
         cx: &mut HeadlessAppContext,
@@ -3961,15 +3975,17 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
-    /// A pixel whose channels all lie within this of the reference's is the
-    /// same pixel: the GPU may round a blend differently from one machine
-    /// to the next.
-    const CHANNEL_TOLERANCE: u8 = 0;
+    /// A pixel with a channel further than this from the reference's is a
+    /// change, wherever it is: a moved block, a changed word or glyph. The
+    /// GPU on another Mac smooths glyph edges differently, by up to 40 in a
+    /// channel as measured on the CI runner.
+    const EDGE_TOLERANCE: u8 = 48;
 
-    /// The share of a screen's pixels that may differ from the reference
-    /// beyond [`CHANNEL_TOLERANCE`] before it is a change: a few glyphs'
-    /// edges, never a moved block or a changed word.
-    const PIXEL_TOLERANCE: f64 = 0.0;
+    /// The share of a screen's pixels that may differ from the reference by
+    /// [`EDGE_TOLERANCE`] or less: the smoothed glyph edges, about 0.2% of a
+    /// screen full of text at most. A colour that shifts slightly across a
+    /// whole panel goes past it.
+    const EDGE_SHARE: f64 = 0.005;
 
     /// Fail if a screen in `docs/screenshots/` is no longer drawn the way
     /// its reference shows. The renders hold the clock still
@@ -4006,19 +4022,25 @@ mod macos {
                 ));
                 continue;
             }
-            let differing = want
-                .pixels()
-                .zip(got.pixels())
-                .filter(|(a, b)| {
+            let (mut edges, mut changes) = (0_usize, 0_usize);
+            for (a, b) in want.pixels().zip(got.pixels()) {
+                let most =
                     a.0.iter()
                         .zip(b.0.iter())
-                        .any(|(x, y)| x.abs_diff(*y) > CHANNEL_TOLERANCE)
-                })
-                .count();
-            let share = differing as f64 / f64::from(want.width() * want.height());
-            if share > PIXEL_TOLERANCE {
+                        .map(|(x, y)| x.abs_diff(*y))
+                        .max();
+                match most {
+                    Some(0) | None => {}
+                    Some(d) if d <= EDGE_TOLERANCE => edges += 1,
+                    Some(_) => changes += 1,
+                }
+            }
+            let share = edges as f64 / f64::from(want.width() * want.height());
+            if changes > 0 {
+                changed.push(format!("{name}: {changes} pixels changed"));
+            } else if share > EDGE_SHARE {
                 changed.push(format!(
-                    "{name}: {differing} pixels ({:.3}%) differ",
+                    "{name}: {edges} pixels ({:.3}%) differ slightly",
                     share * 100.
                 ));
             }

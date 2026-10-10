@@ -11,6 +11,7 @@ use gpui_kit::{
 };
 
 use crate::assets;
+use crate::clock;
 use crate::theme::tokens;
 use crate::views::{mono, muted};
 
@@ -27,15 +28,15 @@ const ISSUES: &str = "https://github.com/camiloazula/coco-mcp/issues";
 
 /// `0.1.0 (a3f9c2e)`, or just the version when the build carries no commit.
 pub fn build_line() -> String {
-    match option_env!("COCO_COMMIT") {
+    match clock::commit(option_env!("COCO_COMMIT")) {
         Some(commit) => format!("{} ({commit})", env!("CARGO_PKG_VERSION")),
         None => env!("CARGO_PKG_VERSION").to_owned(),
     }
 }
 
 /// Commit date of the build, when it has one.
-pub fn build_date() -> Option<&'static str> {
-    option_env!("COCO_DATE")
+pub fn build_date() -> Option<String> {
+    clock::build_date(option_env!("COCO_DATE"))
 }
 
 /// The About window's contents.

@@ -5,7 +5,9 @@
 //! headless renders call [`hold_still`], after which every time reads as
 //! [`STILL_AT`] in UTC and every duration as [`STILL_FOR`]: a render that
 //! showed the clock would differ on every run and on every machine, and
-//! could not be compared with its reference in `docs/screenshots/`.
+//! could not be compared with its reference in `docs/screenshots/`. The
+//! commit a build is stamped with changes the same way, so it reads as
+//! [`STILL_COMMIT`] once held, dated [`STILL_AT`].
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -18,6 +20,9 @@ pub const STILL_AT: OffsetDateTime = time::macros::datetime!(2026-07-28 12:00:00
 
 /// The duration every duration reads as once held.
 pub const STILL_FOR: Duration = Duration::from_millis(42);
+
+/// The commit every build reads as once held.
+pub const STILL_COMMIT: &str = "0000000";
 
 static STILL: AtomicBool = AtomicBool::new(false);
 
@@ -50,6 +55,25 @@ pub(crate) fn offset() -> UtcOffset {
 /// `elapsed`, as it is to be shown.
 pub(crate) fn elapsed(elapsed: Duration) -> Duration {
     if still() { STILL_FOR } else { elapsed }
+}
+
+/// The short hash of the commit the build came from, as it is to be shown.
+pub(crate) fn commit(commit: Option<&'static str>) -> Option<&'static str> {
+    if still() { Some(STILL_COMMIT) } else { commit }
+}
+
+/// The build's commit date, as it is to be shown: `date` as git wrote it,
+/// or [`STILL_AT`] in the same form once held.
+pub(crate) fn build_date(date: Option<&'static str>) -> Option<String> {
+    if still() {
+        STILL_AT
+            .format(time::macros::format_description!(
+                "[month repr:short] [day padding:none], [year]"
+            ))
+            .ok()
+    } else {
+        date.map(str::to_owned)
+    }
 }
 
 /// `ms` whole milliseconds, as they are to be shown: `<1 ms` or `N ms`.
