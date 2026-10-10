@@ -313,20 +313,46 @@ pub fn tree_takes_the_wheel_flow() {
     snap(&mut live.cx, live.handle, "67-log-tree-took-the-wheel");
 }
 
-/// The response ends where the pane does, above the log bar, so the last of
-/// a long result can be scrolled to; the split used to be as tall as the
-/// whole pane and overflowed it by the height of the header and toolbar.
+/// The response ends where the pane does, above the log bar, and the last
+/// row of a long result can be scrolled to and is drawn inside it; the
+/// split used to be as tall as the whole pane and overflowed it by the
+/// height of the header and toolbar, the last rows with it.
 pub fn response_fits_the_pane_flow() {
     let mut live = live(&["--schema", "v1"], None);
     live.call("rows", json!({"count": 200}));
     assert_eq!(live.answered().0, ResponseStatus::Ok);
+    // The one JSON text block of the result is its tree, under `c0`.
+    let tree = live.cx.update(|cx| {
+        let prefix = live.workspace.read(cx).response_prefix(cx);
+        format!("{prefix}c0")
+    });
+    let row = |path: &str| gpui_kit::SharedString::from(format!("row{tree}${path}"));
     live.ui(|window, _| {
         let response = window.find("response").bounds();
-        let bar = window.find("toggle-log").bounds().origin.y;
+        let bar = window.find("log-header").bounds().origin.y;
         assert!(
             response.bottom() <= bar,
             "the response ends at {:?}, below the log bar at {bar:?}",
             response.bottom()
+        );
+        assert!(window.try_find(row("[199]")).is_none(), "out of view");
+    });
+    // On to the end of the rows in one wheel.
+    live.ui(|window, cx| {
+        let down = gpui_kit::point(px(0.), px(-100_000.));
+        window.scroll(row("[0]"), gpui_kit::ScrollDelta::Pixels(down), cx);
+    });
+    live.ui(|window, _| {
+        let last = window.find(row("[199]"));
+        let body = window.find("response-body").bounds();
+        let bar = window.find("log-header").bounds().origin.y;
+        assert!(last.visible(), "the last row is drawn once scrolled to");
+        let bounds = last.bounds();
+        assert!(
+            bounds.bottom() <= body.bottom() && bounds.bottom() <= bar,
+            "the last row ends at {:?}, past the response body at {:?} or the log bar at {bar:?}",
+            bounds.bottom(),
+            body.bottom()
         );
     });
     snap(&mut live.cx, live.handle, "70-response-fits-the-pane");

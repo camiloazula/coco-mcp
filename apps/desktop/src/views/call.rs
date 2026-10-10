@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::{AppContext as _, Context, Entity, Subscription, Window};
+use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Window};
 use mcp_core::CompletionTarget;
 use serde_json::{Map, Value};
 
@@ -238,7 +238,7 @@ impl Workspace {
 
     /// Tree prefix of the response under the current selection. Keyed by the
     /// selection rather than by call number, so folds survive a re-run.
-    pub fn response_prefix(&self, cx: &Context<Self>) -> String {
+    pub fn response_prefix(&self, cx: &App) -> String {
         match self.state.read(cx).response_key() {
             Some((server, mode, name)) => format!("resp:{server}:{mode:?}:{name}"),
             None => "resp:none".to_owned(),
