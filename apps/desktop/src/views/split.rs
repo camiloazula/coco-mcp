@@ -263,21 +263,29 @@ pub(crate) fn render(
         Pixels::MAX
     };
     let state = split.state;
-    v_resizable("detail-split")
-        .with_state(&state)
+    // The split is as tall as the pane's whole height; under the header and
+    // toolbar it would overflow by their height, past the window, and the
+    // end of the response with it. The wrapper gives it what is left.
+    div()
+        .flex_1()
+        .min_h_0()
         .child(
-            resizable_panel()
-                .size_range(PANEL_MIN..input_max)
-                // Halfway on the first frame; measured pixels, and then the
-                // drag, from the next.
-                .flex_basis(relative(0.5))
-                .child(input),
-        )
-        .child(
-            resizable_panel()
-                .size_range(PANEL_MIN..Pixels::MAX)
-                .flex_basis(relative(0.5))
-                .child(response),
+            v_resizable("detail-split")
+                .with_state(&state)
+                .child(
+                    resizable_panel()
+                        .size_range(PANEL_MIN..input_max)
+                        // Halfway on the first frame; measured pixels, and
+                        // then the drag, from the next.
+                        .flex_basis(relative(0.5))
+                        .child(input),
+                )
+                .child(
+                    resizable_panel()
+                        .size_range(PANEL_MIN..Pixels::MAX)
+                        .flex_basis(relative(0.5))
+                        .child(response),
+                ),
         )
         .into_any_element()
 }
