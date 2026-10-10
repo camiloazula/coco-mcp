@@ -3863,6 +3863,7 @@ mod macos {
         crate::interaction::titles_and_declaration_flow();
         crate::interaction::schema_blocks_flow();
         crate::interaction::tree_takes_the_wheel_flow();
+        crate::interaction::response_fits_the_pane_flow();
         crate::interaction::replay_needs_session_flow();
         crate::interaction::log_level_filter_flow();
         crate::interaction::double_click_server_flow();

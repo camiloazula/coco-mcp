@@ -313,6 +313,25 @@ pub fn tree_takes_the_wheel_flow() {
     snap(&mut live.cx, live.handle, "67-log-tree-took-the-wheel");
 }
 
+/// The response ends where the pane does, above the log bar, so the last of
+/// a long result can be scrolled to; the split used to be as tall as the
+/// whole pane and overflowed it by the height of the header and toolbar.
+pub fn response_fits_the_pane_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.call("rows", json!({"count": 200}));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
+    live.ui(|window, _| {
+        let response = window.find("response").bounds();
+        let bar = window.find("toggle-log").bounds().origin.y;
+        assert!(
+            response.bottom() <= bar,
+            "the response ends at {:?}, below the log bar at {bar:?}",
+            response.bottom()
+        );
+    });
+    snap(&mut live.cx, live.handle, "70-response-fits-the-pane");
+}
+
 /// A recorded call cannot be replayed without a session, and the row says
 /// why instead of ignoring the press.
 pub fn replay_needs_session_flow() {
