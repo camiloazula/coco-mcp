@@ -42,7 +42,17 @@ mod macos {
     use mcp_core::{Direction, EventKind, EventSink, ServerSpec};
     use serde_json::json;
 
+    /// The address of the `n`th HTTP mock the flows start: a fixed port,
+    /// since the URL is on screen and a render must read the same on every
+    /// run, and one per server, so none waits for another to let go.
+    pub(crate) fn http_addr(n: u16) -> String {
+        format!("127.0.0.1:{}", 47_800 + n)
+    }
+
     pub(crate) fn context() -> HeadlessAppContext {
+        // Every render reads the same time and timings on every run, so it
+        // can be compared with its reference in docs/screenshots/.
+        coco_mcp::clock::hold_still();
         let mut cx = HeadlessAppContext::with_platform(
             gpui_kit::platform::current_platform(true).text_system(),
             std::sync::Arc::new(coco_mcp::assets::AppAssets),
@@ -345,16 +355,30 @@ mod macos {
     /// Index of the list row whose label is `name` in the current mode.
     /// The mock server binary the live flows spawn. A flow that needs it
     /// fails when it was not built rather than passing without running.
+    ///
+    /// The command is on screen, so the flows reach the binary through a
+    /// link at [`MOCK_LINK`]: a render must read the same in every checkout
+    /// and on every machine, whatever the path to the workspace.
     pub(crate) fn mock_binary() -> PathBuf {
-        let mock =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/mcp-mockserver");
-        assert!(
-            mock.exists(),
-            "{} is missing: run `cargo build -p mcp-mockserver` first",
-            mock.display()
-        );
-        mock
+        static LINK: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        LINK.get_or_init(|| {
+            let mock = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/debug/mcp-mockserver")
+                .canonicalize()
+                .expect("target/debug/mcp-mockserver is missing: run `cargo build -p mcp-mockserver` first");
+            let link = PathBuf::from(MOCK_LINK);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            if std::fs::read_link(&link).ok().as_ref() != Some(&mock) {
+                let _ = std::fs::remove_file(&link);
+                std::os::unix::fs::symlink(&mock, &link).unwrap();
+            }
+            link
+        })
+        .clone()
     }
+
+    /// Where [`mock_binary`] links the mock server from.
+    const MOCK_LINK: &str = "/tmp/coco-mcp-flows/mcp-mockserver";
 
     pub(crate) fn item_index(
         cx: &mut HeadlessAppContext,
@@ -3548,10 +3572,15 @@ mod macos {
     /// kept in the (in-memory) secret store and the mock requires it.
     fn http_bearer_flow() {
         let bridge = coco_mcp::bridge::Bridge::new().unwrap();
-        let server = futures::executor::block_on(bridge.run(mcp_mockserver::http::serve_http(
-            mcp_mockserver::Schema::V2,
-            mcp_mockserver::http::HttpAuth::Bearer("s3cret".into()),
-        )))
+        let server = futures::executor::block_on(bridge.run(async move {
+            let addr = http_addr(0);
+            mcp_mockserver::http::serve_http_at(
+                mcp_mockserver::Schema::V2,
+                mcp_mockserver::http::HttpAuth::Bearer("s3cret".into()),
+                &addr,
+            )
+            .await
+        }))
         .unwrap()
         .unwrap();
         let mut cx = context();
@@ -3981,6 +4010,7 @@ mod macos {
         about_window(false, "25-about-light");
         update_notice_flow();
         assemble_tour();
+        compare_with_references();
     }
 
     /// The screens the README's animated tour shows, in order, with how
@@ -4029,6 +4059,88 @@ mod macos {
         }
         drop(encoder);
         eprintln!("wrote {}", path.display());
+    }
+
+    /// A pixel with a channel further than this from the reference's is a
+    /// change, wherever it is: a moved block, a changed word or glyph. The
+    /// GPU on another Mac smooths glyph edges differently, by up to 40 in a
+    /// channel as measured on the CI runner.
+    const EDGE_TOLERANCE: u8 = 48;
+
+    /// The share of a screen's pixels that may differ from the reference by
+    /// [`EDGE_TOLERANCE`] or less: the smoothed glyph edges, about 0.2% of a
+    /// screen full of text at most. A colour that shifts slightly across a
+    /// whole panel goes past it.
+    const EDGE_SHARE: f64 = 0.005;
+
+    /// Fail if a screen in `docs/screenshots/` is no longer drawn the way
+    /// its reference shows. The renders hold the clock still
+    /// (`coco_mcp::clock`), so a difference is a change to the screen; the
+    /// failure names each one, and `just accept-renders` takes the new
+    /// renders as the references once the change is meant.
+    fn compare_with_references() {
+        let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screenshots");
+        let mut references: Vec<PathBuf> = std::fs::read_dir(&docs)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "png"))
+            .collect();
+        references.sort();
+        let mut changed = Vec::new();
+        for reference in &references {
+            let name = reference
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            let render = out_dir().join(&name);
+            if !render.exists() {
+                changed.push(format!("{name}: no flow draws it any more"));
+                continue;
+            }
+            let want = image::open(reference).unwrap().to_rgba8();
+            let got = image::open(&render).unwrap().to_rgba8();
+            if want.dimensions() != got.dimensions() {
+                changed.push(format!(
+                    "{name}: {:?} instead of {:?}",
+                    got.dimensions(),
+                    want.dimensions()
+                ));
+                continue;
+            }
+            let (mut edges, mut changes) = (0_usize, 0_usize);
+            for (a, b) in want.pixels().zip(got.pixels()) {
+                let most =
+                    a.0.iter()
+                        .zip(b.0.iter())
+                        .map(|(x, y)| x.abs_diff(*y))
+                        .max();
+                match most {
+                    Some(0) | None => {}
+                    Some(d) if d <= EDGE_TOLERANCE => edges += 1,
+                    Some(_) => changes += 1,
+                }
+            }
+            let share = edges as f64 / f64::from(want.width() * want.height());
+            if changes > 0 {
+                changed.push(format!("{name}: {changes} pixels changed"));
+            } else if share > EDGE_SHARE {
+                changed.push(format!(
+                    "{name}: {edges} pixels ({:.3}%) differ slightly",
+                    share * 100.
+                ));
+            }
+        }
+        assert!(
+            changed.is_empty(),
+            "{} of {} screens are not drawn as docs/screenshots/ shows them; \
+             once the change is meant, `just accept-renders` takes the new \
+             renders in target/screenshots/ as the references:\n  {}",
+            changed.len(),
+            references.len(),
+            changed.join("\n  ")
+        );
+        eprintln!("{} screens match docs/screenshots/", references.len());
     }
 }
 

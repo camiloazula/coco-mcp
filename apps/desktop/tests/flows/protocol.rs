@@ -469,10 +469,15 @@ pub fn authorize_flow() {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     let bridge = coco_mcp::bridge::Bridge::new().unwrap();
-    let server = futures::executor::block_on(bridge.run(mcp_mockserver::http::serve_http(
-        mcp_mockserver::Schema::V1,
-        mcp_mockserver::http::HttpAuth::OAuth { expires_in: 3600 },
-    )))
+    let server = futures::executor::block_on(bridge.run(async move {
+        let addr = crate::macos::http_addr(1);
+        mcp_mockserver::http::serve_http_at(
+            mcp_mockserver::Schema::V1,
+            mcp_mockserver::http::HttpAuth::OAuth { expires_in: 3600 },
+            &addr,
+        )
+        .await
+    }))
     .unwrap()
     .unwrap();
     let opened = Arc::new(AtomicU32::new(0));

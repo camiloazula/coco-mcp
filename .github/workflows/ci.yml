@@ -59,8 +59,8 @@ jobs:
       # The flows' own code is compiled on macOS only, so it is linted here.
       - run: just clippy-app
       - run: just test-app
-      - name: The screens the flows drew, to see what failed
-        if: failure()
+      - name: The screens the flows drew
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
