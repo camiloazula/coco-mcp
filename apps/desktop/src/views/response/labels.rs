@@ -4,12 +4,12 @@ use super::*;
 
 /// The clock of a request still waiting, in tenths of a second.
 pub(super) fn running_label(elapsed: Duration) -> String {
-    format!("{:.1} s", elapsed.as_secs_f64())
+    format!("{:.1} s", crate::clock::elapsed(elapsed).as_secs_f64())
 }
 
 /// `0.4 ms` under ten milliseconds, whole milliseconds above.
 pub fn elapsed_label(elapsed: std::time::Duration) -> String {
-    let ms = elapsed.as_secs_f64() * 1000.0;
+    let ms = crate::clock::elapsed(elapsed).as_secs_f64() * 1000.0;
     if ms < 10.0 {
         format!("{ms:.1} ms")
     } else {

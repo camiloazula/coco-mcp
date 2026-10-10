@@ -64,6 +64,13 @@ mock *ARGS:
 screenshots:
     cargo test {{app}} --test screenshots -- --nocapture
 
+# Take the renders of the last `just screenshots` as the references in docs/,
+# once a change to a screen is meant: every screen docs/screenshots/ holds,
+# and the tour.
+accept-renders:
+    for f in docs/screenshots/*.png; do cp "target/screenshots/$(basename "$f")" "$f"; done
+    cp target/screenshots/tour.gif docs/tour.gif
+
 # Licence and source audit for the whole dependency graph (metadata only, no build).
 deny:
     cargo deny check licenses bans sources
