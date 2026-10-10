@@ -226,6 +226,11 @@ pub(crate) fn render(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
+    // What is left of the pane under its header and toolbar, a column that
+    // hands its height to the input, the response or the split between
+    // them. Each would otherwise be as tall as the whole pane and overflow
+    // it by the header's height, the end of a response with it.
+    let area = div().flex_1().min_h_0().flex().flex_col();
     let (
         Some(Panel {
             element: response,
@@ -234,19 +239,13 @@ pub(crate) fn render(
         Some(key),
     ) = (response, key)
     else {
-        let input = input_view(body, fills, None);
-        return div().flex_1().min_h_0().child(input).into_any_element();
+        return area.child(input_view(body, fills, None)).into_any_element();
     };
     if !open {
         // Collapsed to its header: the input has the rest of the pane, and
         // the split keeps its sizes for when the response is shown again.
-        let input = input_view(body, fills, None);
-        return div()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(input)
+        return area
+            .child(input_view(body, fills, None))
             .child(response)
             .into_any_element();
     }
@@ -263,31 +262,25 @@ pub(crate) fn render(
         Pixels::MAX
     };
     let state = split.state;
-    // The split is as tall as the pane's whole height; under the header and
-    // toolbar it would overflow by their height, past the window, and the
-    // end of the response with it. The wrapper gives it what is left.
-    div()
-        .flex_1()
-        .min_h_0()
-        .child(
-            v_resizable("detail-split")
-                .with_state(&state)
-                .child(
-                    resizable_panel()
-                        .size_range(PANEL_MIN..input_max)
-                        // Halfway on the first frame; measured pixels, and
-                        // then the drag, from the next.
-                        .flex_basis(relative(0.5))
-                        .child(input),
-                )
-                .child(
-                    resizable_panel()
-                        .size_range(PANEL_MIN..Pixels::MAX)
-                        .flex_basis(relative(0.5))
-                        .child(response),
-                ),
-        )
-        .into_any_element()
+    area.child(
+        v_resizable("detail-split")
+            .with_state(&state)
+            .child(
+                resizable_panel()
+                    .size_range(PANEL_MIN..input_max)
+                    // Halfway on the first frame; measured pixels, and then
+                    // the drag, from the next.
+                    .flex_basis(relative(0.5))
+                    .child(input),
+            )
+            .child(
+                resizable_panel()
+                    .size_range(PANEL_MIN..Pixels::MAX)
+                    .flex_basis(relative(0.5))
+                    .child(response),
+            ),
+    )
+    .into_any_element()
 }
 
 #[cfg(test)]
