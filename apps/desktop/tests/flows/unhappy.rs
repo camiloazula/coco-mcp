@@ -234,17 +234,22 @@ pub fn request_outcomes_flow() {
     live.ui(|window, cx| window.press("escape", cx));
     assert_eq!(live.text(), "cancelled");
 
-    // Two requests at once: the second waits behind the first, in whichever
-    // order they arrived.
+    // Two requests at once: the second waits behind the first. It is sent
+    // once the first has arrived, so they are always shown in this order.
     live.show(Mode::Tools);
     live.cx.update(|cx| {
         live.state.update(cx, |s, cx| {
-            s.call_tool("elicit".into(), json!({"question": "first?"}), cx);
-            s.call_tool("sample".into(), json!({"prompt": "second"}), cx);
+            s.call_tool("elicit".into(), json!({"question": "first?"}), cx)
+        })
+    });
+    live.wait("the first request arrives", |s| s.pending.len() == 1);
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| {
+            s.call_tool("sample".into(), json!({"prompt": "second"}), cx)
         })
     });
     live.wait("both requests arrive", |s| s.pending.len() == 2);
-    let sampling_first = |live: &mut Live| {
+    let sampling_shown = |live: &mut Live| {
         live.cx.update(|cx| {
             matches!(
                 live.state
@@ -255,23 +260,16 @@ pub fn request_outcomes_flow() {
             )
         })
     };
-    let first_sampling = sampling_first(&mut live);
+    assert!(
+        !sampling_shown(&mut live),
+        "the elicitation, which came first"
+    );
     snap(&mut live.cx, live.handle, "51-queued-requests");
     live.ui(|window, cx| window.click("req-decline", cx));
     live.wait("the first is answered", |s| s.pending.len() == 1);
-    assert_ne!(
-        sampling_first(&mut live),
-        first_sampling,
-        "the other is next"
-    );
+    assert!(sampling_shown(&mut live), "the sampling request is next");
     live.ui(|window, cx| window.click("req-cancel", cx));
-    let elicited = text(&finished(&mut live, "elicit").1);
-    let expected = if first_sampling {
-        "cancelled"
-    } else {
-        "declined"
-    };
-    assert_eq!(elicited, expected);
+    assert_eq!(text(&finished(&mut live, "elicit").1), "declined");
     let refused = text(&finished(&mut live, "sample").1);
     assert!(refused.starts_with("sampling error"), "{refused}");
     live.ui(|window, _| assert!(window.try_find("request-dialog").is_none()));
@@ -345,14 +343,16 @@ pub fn replay_reads_and_prompts_flow() {
     );
 }
 
-/// A window on an HTTP server that wants `expected` as its bearer token,
-/// with `held` saved as the token to send.
-fn bearer_live(expected: &str, held: &str) -> (mcp_mockserver::http::HttpServer, Live) {
+/// A window on the `n`th HTTP server ([`crate::macos::http_addr`]), which
+/// wants `expected` as its bearer token, with `held` saved as the token to
+/// send.
+fn bearer_live(n: u16, expected: &str, held: &str) -> (mcp_mockserver::http::HttpServer, Live) {
     let bridge = coco_mcp::bridge::Bridge::new().unwrap();
-    let server = futures::executor::block_on(bridge.run(mcp_mockserver::http::serve_http(
-        mcp_mockserver::Schema::V1,
-        mcp_mockserver::http::HttpAuth::Bearer(expected.into()),
-    )))
+    let auth = mcp_mockserver::http::HttpAuth::Bearer(expected.into());
+    let server = futures::executor::block_on(bridge.run(async move {
+        let addr = crate::macos::http_addr(n);
+        mcp_mockserver::http::serve_http_at(mcp_mockserver::Schema::V1, auth, &addr).await
+    }))
     .unwrap()
     .unwrap();
     let mut model = AppState::new(Some(bridge), None);
@@ -384,7 +384,7 @@ fn failure(live: &mut Live) -> String {
 /// A bearer token the server refuses is named as the problem, in a
 /// sentence, under the fields of the settings the pane shows.
 pub fn refused_token_flow() {
-    let (_server, mut live) = bearer_live("s3cret", "expired");
+    let (_server, mut live) = bearer_live(2, "s3cret", "expired");
     live.cx
         .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
     live.wait("the token is refused", |s| {
@@ -417,7 +417,7 @@ pub fn refused_token_flow() {
 /// the same words, so the pane points at the setting rather than at the
 /// transport.
 pub fn expired_token_flow() {
-    let (server, mut live) = bearer_live("s3cret", "s3cret");
+    let (server, mut live) = bearer_live(3, "s3cret", "s3cret");
     live.cx
         .update(|cx| live.state.update(cx, |s, cx| s.connect(0, cx)));
     live.wait("connected", |s| s.servers[0].status == Status::Connected);

@@ -42,7 +42,17 @@ mod macos {
     use mcp_core::{Direction, EventKind, EventSink, ServerSpec};
     use serde_json::json;
 
+    /// The address of the `n`th HTTP mock the flows start: a fixed port,
+    /// since the URL is on screen and a render must read the same on every
+    /// run, and one per server, so none waits for another to let go.
+    pub(crate) fn http_addr(n: u16) -> String {
+        format!("127.0.0.1:{}", 47_800 + n)
+    }
+
     pub(crate) fn context() -> HeadlessAppContext {
+        // Every render reads the same time and timings on every run, so it
+        // can be compared with its reference in docs/screenshots/.
+        coco_mcp::clock::hold_still();
         let mut cx = HeadlessAppContext::with_platform(
             gpui_kit::platform::current_platform(true).text_system(),
             std::sync::Arc::new(coco_mcp::assets::AppAssets),
@@ -3548,10 +3558,15 @@ mod macos {
     /// kept in the (in-memory) secret store and the mock requires it.
     fn http_bearer_flow() {
         let bridge = coco_mcp::bridge::Bridge::new().unwrap();
-        let server = futures::executor::block_on(bridge.run(mcp_mockserver::http::serve_http(
-            mcp_mockserver::Schema::V2,
-            mcp_mockserver::http::HttpAuth::Bearer("s3cret".into()),
-        )))
+        let server = futures::executor::block_on(bridge.run(async move {
+            let addr = http_addr(0);
+            mcp_mockserver::http::serve_http_at(
+                mcp_mockserver::Schema::V2,
+                mcp_mockserver::http::HttpAuth::Bearer("s3cret".into()),
+                &addr,
+            )
+            .await
+        }))
         .unwrap()
         .unwrap();
         let mut cx = context();
@@ -3895,6 +3910,7 @@ mod macos {
         about_window(true, "24-about");
         about_window(false, "25-about-light");
         assemble_tour();
+        compare_with_references();
     }
 
     /// The screens the README's animated tour shows, in order, with how
@@ -3943,6 +3959,76 @@ mod macos {
         }
         drop(encoder);
         eprintln!("wrote {}", path.display());
+    }
+
+    /// A pixel whose channels all lie within this of the reference's is the
+    /// same pixel: the GPU may round a blend differently from one machine
+    /// to the next.
+    const CHANNEL_TOLERANCE: u8 = 0;
+
+    /// The share of a screen's pixels that may differ from the reference
+    /// beyond [`CHANNEL_TOLERANCE`] before it is a change: a few glyphs'
+    /// edges, never a moved block or a changed word.
+    const PIXEL_TOLERANCE: f64 = 0.0;
+
+    /// Fail if a screen in `docs/screenshots/` is no longer drawn the way
+    /// its reference shows. The renders hold the clock still
+    /// (`coco_mcp::clock`), so a difference is a change to the screen; the
+    /// failure names each one, and `just accept-renders` takes the new
+    /// renders as the references once the change is meant.
+    fn compare_with_references() {
+        let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screenshots");
+        let mut references: Vec<PathBuf> = std::fs::read_dir(&docs)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "png"))
+            .collect();
+        references.sort();
+        let mut changed = Vec::new();
+        for reference in &references {
+            let name = reference.file_name().unwrap().to_string_lossy().into_owned();
+            let render = out_dir().join(&name);
+            if !render.exists() {
+                changed.push(format!("{name}: no flow draws it any more"));
+                continue;
+            }
+            let want = image::open(reference).unwrap().to_rgba8();
+            let got = image::open(&render).unwrap().to_rgba8();
+            if want.dimensions() != got.dimensions() {
+                changed.push(format!(
+                    "{name}: {:?} instead of {:?}",
+                    got.dimensions(),
+                    want.dimensions()
+                ));
+                continue;
+            }
+            let differing = want
+                .pixels()
+                .zip(got.pixels())
+                .filter(|(a, b)| {
+                    a.0.iter()
+                        .zip(b.0.iter())
+                        .any(|(x, y)| x.abs_diff(*y) > CHANNEL_TOLERANCE)
+                })
+                .count();
+            let share = differing as f64 / f64::from(want.width() * want.height());
+            if share > PIXEL_TOLERANCE {
+                changed.push(format!(
+                    "{name}: {differing} pixels ({:.3}%) differ",
+                    share * 100.
+                ));
+            }
+        }
+        assert!(
+            changed.is_empty(),
+            "{} of {} screens are not drawn as docs/screenshots/ shows them; \
+             once the change is meant, `just accept-renders` takes the new \
+             renders in target/screenshots/ as the references:\n  {}",
+            changed.len(),
+            references.len(),
+            changed.join("\n  ")
+        );
+        eprintln!("{} screens match docs/screenshots/", references.len());
     }
 }
 

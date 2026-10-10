@@ -33,9 +33,7 @@ pub fn method(kind: CallKind) -> &'static str {
 }
 
 pub(crate) fn when_label(at: time::OffsetDateTime) -> String {
-    let local = time::UtcOffset::current_local_offset()
-        .map(|o| at.to_offset(o))
-        .unwrap_or(at);
+    let local = crate::clock::at(at).to_offset(crate::clock::offset());
     let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     local.format(&format).unwrap_or_default()
 }
@@ -63,11 +61,7 @@ pub fn render(
         CallStatus::ToolError => "isError",
         CallStatus::Failed => "Failed",
     };
-    let elapsed = if record.elapsed_ms == 0 {
-        "<1 ms".to_owned()
-    } else {
-        format!("{} ms", record.elapsed_ms)
-    };
+    let elapsed = crate::clock::millis(record.elapsed_ms);
     let facts = format!(
         "{} · {status} · {elapsed} · {}",
         method(record.kind),

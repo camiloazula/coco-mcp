@@ -1383,11 +1383,7 @@ impl AppState {
                     );
                 }
                 if let Some(ms) = server.last_call_ms {
-                    parts.push(if ms == 0 {
-                        "Last call <1 ms".to_owned()
-                    } else {
-                        format!("Last call {ms} ms")
-                    });
+                    parts.push(format!("Last call {}", crate::clock::millis(ms)));
                 }
                 parts.join(" · ")
             }
@@ -3255,13 +3251,15 @@ fn preview(value: &Value, head: &str) -> String {
     out
 }
 
-/// `HH:MM:SS.mmm` in the local zone.
 /// A History row's time, in local time: the time of day for a call made
 /// today, with the date for an older one, so calls from different days never
 /// read as out of order.
 pub(crate) fn when_listed(at: time::OffsetDateTime, now: time::OffsetDateTime) -> String {
-    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-    listed_label(at.to_offset(offset), now.to_offset(offset))
+    let offset = crate::clock::offset();
+    listed_label(
+        crate::clock::at(at).to_offset(offset),
+        crate::clock::at(now).to_offset(offset),
+    )
 }
 
 /// [`when_listed`] for two times already in the same offset.
@@ -3282,10 +3280,9 @@ fn listed_label(at: time::OffsetDateTime, now: time::OffsetDateTime) -> String {
     formatted.unwrap_or_default()
 }
 
+/// `HH:MM:SS.mmm` in the local zone.
 pub(crate) fn time_label(at: time::OffsetDateTime) -> String {
-    let local = time::UtcOffset::current_local_offset()
-        .map(|o| at.to_offset(o))
-        .unwrap_or(at);
+    let local = crate::clock::at(at).to_offset(crate::clock::offset());
     let format = time::macros::format_description!("[hour]:[minute]:[second].[subsecond digits:3]");
     local.format(&format).unwrap_or_default()
 }
