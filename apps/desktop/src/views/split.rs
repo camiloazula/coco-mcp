@@ -3,9 +3,10 @@
 //! own, with a draggable separator between them. Neither moves the other,
 //! so a long form is read beside a long result.
 //!
-//! The separator starts where the input ends: a short form leaves the
-//! response the rest of the pane, and a long one takes half. Dragged, it
-//! stays where it was put. The split is remembered per selection, like the
+//! The split has the height left under the header and toolbar, and its
+//! separator starts where the input ends: a short form leaves the response
+//! the rest of it, and a long one takes half of it. Dragged, it stays where
+//! it was put. The split is remembered per selection, like the
 //! folds of the trees: the split that suits one tool's form is not the one
 //! that suits another's. Before the first call there is no response and
 //! the input takes the whole pane.
