@@ -84,6 +84,10 @@ gpui_kit::actions!(
         ExportConfig,
         /// Open the About window (application menu).
         About,
+        /// Ask now whether a newer release is out.
+        CheckForUpdates,
+        /// Turn the daily update check off, or back on.
+        ToggleUpdateChecks,
         /// Quit the application.
         Quit,
     ]

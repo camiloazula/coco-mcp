@@ -29,7 +29,7 @@ use crate::views::copy::Export;
 use crate::views::kept::Decoded;
 use crate::views::{
     AddServerForm, LogList, RequestUi, banner, confirm_dialog, copy_menu, detail, item_list,
-    log_drawer, palette, request_dialog, sidebar, status_bar,
+    log_drawer, palette, request_dialog, sidebar, status_bar, update_notice,
 };
 
 mod render;

@@ -1,10 +1,10 @@
 //! The native menu bar and the global action handlers behind it.
 //!
 //! Menu items dispatch GPUI actions to the active window first and then to
-//! the global listeners registered here, so `About` and `Quit` work whichever
-//! window is in front. The Edit menu maps the standard OS actions onto
-//! gpui-kit's input actions, which gives the text fields their menu-driven
-//! Cut / Copy / Paste on macOS.
+//! the global listeners registered here, so `About`, `Quit` and the update
+//! check work whichever window is in front. The Edit menu maps the standard
+//! OS actions onto gpui-kit's input actions, which gives the text fields
+//! their menu-driven Cut / Copy / Paste on macOS.
 
 use gpui_kit::component::Root;
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
@@ -13,11 +13,12 @@ use mcp_core::{AuthRef, ServerSpec};
 
 use crate::APP_NAME;
 use crate::actions::{
-    About, AddServer, CancelCall, ClearHistory, CommandPalette, CompareSnapshotFile,
-    CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
-    Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
-    ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts, ShowResources,
-    ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme, ZoomLog,
+    About, AddServer, CancelCall, CheckForUpdates, ClearHistory, CommandPalette,
+    CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
+    CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
+    ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts,
+    ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
+    ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{AppState, Status};
 use crate::views::about;
@@ -85,6 +86,8 @@ impl Global for Installed {}
 pub fn install(cx: &mut App) {
     cx.set_global(AboutWindow::default());
     cx.on_action(|_: &About, cx| open_about(cx));
+    cx.on_action(|_: &CheckForUpdates, cx| crate::update::check(true, cx));
+    cx.on_action(|_: &ToggleUpdateChecks, cx| crate::update::toggle_checks(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
     refresh(Available::default(), cx);
 }
@@ -113,6 +116,7 @@ fn menu_bar(a: Available) -> Vec<Menu> {
             APP_NAME,
             vec![
                 MenuItem::action(format!("About {APP_NAME}"), About),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(format!("Quit {APP_NAME}"), Quit),
             ],

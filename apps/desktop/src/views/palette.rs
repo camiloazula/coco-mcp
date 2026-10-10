@@ -10,11 +10,12 @@ use gpui_kit::{
 };
 
 use crate::actions::{
-    AddServer, Call, CancelCall, ClearHistory, ClearLog, CompareSnapshotFile, CopyBearerToken,
-    CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer, Disconnect,
-    EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot, ForgetCredentials,
-    ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts, ShowResources, ShowServer,
-    ShowTools, ToggleLog, ToggleResponse, ToggleTheme, ZoomLog,
+    AddServer, Call, CancelCall, CheckForUpdates, ClearHistory, ClearLog, CompareSnapshotFile,
+    CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
+    Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
+    ForgetCredentials, ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts,
+    ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
+    ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{Mode, Status};
 use crate::views::Workspace;
@@ -173,6 +174,9 @@ pub fn render(
         .checked(mode == Mode::Server),
     ];
     let pending = ws.state.read(cx).response_pending();
+    let updates_on = cx
+        .try_global::<crate::update::Update>()
+        .is_none_or(crate::update::Update::on);
     let mut action_items = vec![
         item("Call", Call, &["run", "send", "read", "get", "replay"]),
         item(
@@ -207,6 +211,20 @@ pub fn render(
             if dark { "Light theme" } else { "Dark theme" },
             ToggleTheme,
             &["theme", "dark", "light"],
+        ),
+        item(
+            "Check for updates",
+            CheckForUpdates,
+            &["update", "upgrade", "version", "release", "new"],
+        ),
+        item(
+            if updates_on {
+                "Turn off update checks"
+            } else {
+                "Turn on update checks"
+            },
+            ToggleUpdateChecks,
+            &["update", "upgrade", "version", "privacy", "network"],
         ),
     ];
     if pending {

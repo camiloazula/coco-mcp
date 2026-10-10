@@ -216,7 +216,8 @@ pub fn announce_nothing(reason: impl Into<SharedString>, cx: &mut App) {
     announce(reason, cx);
 }
 
-fn announce(note: impl Into<SharedString>, cx: &mut App) {
+/// Say `note` in the status bar for a few seconds.
+pub fn announce(note: impl Into<SharedString>, cx: &mut App) {
     if cx.try_global::<Copied>().is_none() {
         cx.set_global(Copied::default());
     }

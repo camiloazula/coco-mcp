@@ -21,6 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 coco-cli.workspace = true
+coco-update.workspace = true
 gpui-kit.workspace = true
 gpui.workspace = true
 mcp-core.workspace = true
@@ -54,6 +55,7 @@ harness = false
 gpui-kit = { workspace = true, features = ["test-support"] }
 mcp-mockserver.workspace = true
 reqwest.workspace = true
+semver.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "gif"] }
 
 [lints]
