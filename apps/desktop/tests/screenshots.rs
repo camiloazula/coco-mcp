@@ -3986,7 +3986,11 @@ mod macos {
         references.sort();
         let mut changed = Vec::new();
         for reference in &references {
-            let name = reference.file_name().unwrap().to_string_lossy().into_owned();
+            let name = reference
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
             let render = out_dir().join(&name);
             if !render.exists() {
                 changed.push(format!("{name}: no flow draws it any more"));

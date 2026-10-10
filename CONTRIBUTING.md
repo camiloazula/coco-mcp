@@ -59,8 +59,15 @@ two modes. These rules keep it that way.
   refer to, plus the reference renders of the main states; `just screenshots`
   renders every flow into `target/screenshots/` and assembles `tour.gif`,
   the README's animated tour, from the renders `TOUR` in
-  `tests/screenshots.rs` names. Copy the renders and the tour into `docs/`
-  when a screen changes. The README logo is `docs/logo-{dark,light}.svg`,
+  `tests/screenshots.rs` names. The renders hold the clock still
+  (`coco_mcp::clock::hold_still`): every time, date and duration on screen
+  is read through `apps/desktop/src/clock.rs`, so a render is the same on
+  every run; a new one goes through it too, and a flow that shows a URL or
+  an order starts its server on a fixed port and its requests one at a
+  time. The flows end by comparing each screen in `docs/screenshots/` with
+  its render and fail on any that changed; once the change is meant,
+  `just accept-renders` copies the renders and the tour into `docs/`. The
+  README logo is `docs/logo-{dark,light}.svg`,
   the mark of `icons/coco-mark.svg` with the eyes, coloured for each theme.
   Do not invent visual values.
 - The native menu bar is built in `apps/desktop/src/menus.rs`; menu items
@@ -167,6 +174,7 @@ just clippy-app   # clippy for the GPUI app (slow)
 just run          # the window
 just coco <args>  # the command-line mode
 just screenshots  # headless UI flows + PNGs (macOS)
+just accept-renders  # take the last renders as the references in docs/
 ```
 
 ## Releasing
