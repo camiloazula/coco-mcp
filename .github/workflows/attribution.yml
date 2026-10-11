@@ -1,0 +1,28 @@
+# Fail a pull request whose commits, title or body carry attribution to
+# anyone but the people who wrote it. The check is
+# `.github/scripts/check-attribution.sh`; `edited` re-runs it when the title
+# or body changes, since a squash merge builds the commit message from them.
+name: attribution
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    name: attribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      # The title and body go through the environment, never into the script.
+      - run: .github/scripts/check-attribution.sh "origin/${BASE_REF}..HEAD"
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
