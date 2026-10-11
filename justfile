@@ -14,6 +14,11 @@ default:
 # included. Run before every commit.
 check: fmt-check clippy test clippy-app test-app deny
 
+# Fail if a commit since main carries attribution to anyone but its writers
+# (what the attribution workflow runs on a pull request).
+check-attribution range="origin/main..HEAD":
+    .github/scripts/check-attribution.sh {{range}}
+
 # Format the whole workspace in place.
 fmt:
     cargo fmt --all

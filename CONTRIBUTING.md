@@ -50,6 +50,11 @@ two modes. These rules keep it that way.
   server first; `just mock` runs it directly.
 - No `unwrap()`/`expect()` outside tests (clippy denies them). No `unsafe`.
 - State the licence of any new dependency in the commit message.
+- Commits, titles and descriptions say what changed and carry no
+  attribution to a tool: no co-author trailer except for a person's GitHub
+  account, no "Generated with" line, and the author is the person who made
+  the change. The `attribution` workflow fails a pull request that breaks
+  this; `just check-attribution` runs it locally.
 - Never build with `--workspace`; select packages with `-p` (the `just`
   recipes do). The GPUI app has heavy native deps.
 - Design values live in code: `apps/desktop/src/theme.rs` (tokens, fonts)
