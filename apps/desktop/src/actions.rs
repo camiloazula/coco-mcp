@@ -66,6 +66,8 @@ gpui_kit::actions!(
         CompareSnapshotFile,
         /// Copy the whole response under the current selection (⌘⇧C).
         CopyResponse,
+        /// Copy the request and the response as the two JSON-RPC messages.
+        CopyExchange,
         /// Copy the current request as a JSON-RPC message.
         CopyRequest,
         /// Copy the current request as a `curl` command (HTTP servers).

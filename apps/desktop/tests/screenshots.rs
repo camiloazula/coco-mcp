@@ -3985,6 +3985,7 @@ mod macos {
         crate::interaction::plain_text_flow();
         crate::interaction::markdown_result_flow();
         crate::unhappy::failed_call_flow();
+        crate::unhappy::copy_exchange_flow();
         crate::unhappy::crash_mid_session_flow();
         crate::unhappy::edit_form_follows_the_session_flow();
         crate::unhappy::request_outcomes_flow();

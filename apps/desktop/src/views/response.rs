@@ -300,6 +300,8 @@ mod tests {
             issues: Vec::new(),
             answer: 1,
             refused: None,
+            params: None,
+            error: None,
         };
         assert_eq!(meta(&Shown::live(&response)), "tools/call · OK");
     }
@@ -316,6 +318,8 @@ mod tests {
             issues: Vec::new(),
             answer: 1,
             refused: None,
+            params: None,
+            error: None,
         };
         assert_eq!(meta(&Shown::live(&response)), "tools/call · Cancelled");
         let shown = Shown::live(&response).waiting(None);

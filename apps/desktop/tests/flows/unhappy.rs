@@ -66,6 +66,54 @@ pub fn failed_call_flow() {
     live.ui(|window, _| assert!(window.try_find("call-error").is_none()));
 }
 
+/// Copy Exchange gives the request that was sent and the message the server
+/// answered with, a failed read its JSON-RPC error, and neither follows the
+/// form once it has been edited.
+pub fn copy_exchange_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    let exchange = |live: &mut Live| -> (Value, Option<Value>) {
+        let (text, answered) = live
+            .cx
+            .update(|cx| live.workspace.read(cx).exchange_text(cx))
+            .expect("an exchange to copy");
+        let mut parts = text.split("\n\n");
+        let request = serde_json::from_str(parts.next().unwrap()).unwrap();
+        let response = parts.next().map(|r| serde_json::from_str(r).unwrap());
+        assert_eq!(response.is_some(), answered);
+        (request, response)
+    };
+
+    live.call("echo", json!({"text": "hello"}));
+    live.answered();
+    let (request, response) = exchange(&mut live);
+    assert_eq!(request["method"], "tools/call");
+    assert_eq!(
+        request["params"],
+        json!({"name": "echo", "arguments": {"text": "hello"}})
+    );
+    let response = response.expect("the server answered");
+    assert_eq!(response["id"], request["id"]);
+    assert_eq!(response["result"]["content"][0]["text"], "hello");
+
+    // A read the server refuses: its error, whole, in place of a result.
+    live.select(Mode::Resources, "mock://text/hello");
+    live.cx.update(|cx| {
+        live.state.update(cx, |s, cx| {
+            s.read_resource("mock://text/hello".into(), "mock://nope".into(), cx);
+        })
+    });
+    let (status, _) = live.answered();
+    assert!(matches!(status, ResponseStatus::Failed(_)), "{status:?}");
+    let (request, response) = exchange(&mut live);
+    assert_eq!(request["method"], "resources/read");
+    assert_eq!(request["params"], json!({"uri": "mock://nope"}));
+    let error = &response.expect("the server answered")["error"];
+    assert!(
+        error["code"].is_i64() && error["message"].is_string(),
+        "{error}"
+    );
+}
+
 /// A server process that exits mid-session leaves its log, says the server
 /// ended the session, and connects again.
 pub fn crash_mid_session_flow() {

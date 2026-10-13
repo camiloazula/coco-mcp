@@ -12,6 +12,17 @@ impl Workspace {
         }
     }
 
+    /// Copy the request and its answer as the two JSON-RPC messages.
+    pub fn copy_exchange(&mut self, cx: &mut Context<Self>) {
+        match self.exchange_text(cx) {
+            Some((text, true)) => crate::clip::copy(text, "request and response", cx),
+            Some((text, false)) => {
+                crate::clip::copy(text, "request (the server did not answer)", cx)
+            }
+            None => crate::clip::announce_nothing("No response yet", cx),
+        }
+    }
+
     /// Copy the current request as a JSON-RPC message.
     pub fn copy_request(&mut self, cx: &mut Context<Self>) {
         match self.request_message(cx) {

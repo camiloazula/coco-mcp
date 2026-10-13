@@ -17,7 +17,7 @@ use gpui_kit::{
 
 use crate::actions::{
     AddServer, Call, Cancel, CancelCall, ClearHistory, ClearLog, CommandPalette,
-    CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
+    CompareSnapshotFile, CopyBearerToken, CopyExchange, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, SelectServer, ShowHistory,
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,

@@ -11,8 +11,8 @@ use gpui_kit::{
 
 use crate::actions::{
     AddServer, Call, CancelCall, CheckForUpdates, ClearHistory, ClearLog, CompareSnapshotFile,
-    CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
-    Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
+    CopyBearerToken, CopyExchange, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig,
+    DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
     ForgetCredentials, ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts,
     ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
     ToggleTheme, ToggleUpdateChecks, ZoomLog,
@@ -256,6 +256,11 @@ pub fn render(
     // the palette as well as in the menu bar.
     let mut copy_items = vec![
         item("Copy response", CopyResponse, &["result", "json", "output"]),
+        item(
+            "Copy exchange",
+            CopyExchange,
+            &["request", "response", "raw", "wire", "jsonrpc", "reply"],
+        ),
         item(
             "Copy request as JSON-RPC",
             CopyRequest,

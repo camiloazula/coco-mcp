@@ -8,9 +8,9 @@
 use futures::channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context};
 use mcp_exchange::{ClientConfig, Curl, LogLine};
-use mcp_store::CallKind;
 use serde_json::{Map, Value, json};
 
+use crate::calls::{ResponseStatus, call_params};
 use crate::state::{AppState, Dir, HistoryLoad, Mode, Screen, ServerEntry};
 use crate::views::Workspace;
 use crate::views::history::method;
@@ -84,13 +84,10 @@ impl Workspace {
             Mode::Server => return None,
             Mode::History => {
                 let record = self.state.read(cx).selected_call()?.clone();
-                let params = match record.kind {
-                    CallKind::Tool | CallKind::Prompt => {
-                        json!({ "name": record.name, "arguments": record.args })
-                    }
-                    CallKind::Resource => json!({ "uri": record.name }),
-                };
-                (method(record.kind), params)
+                (
+                    method(record.kind),
+                    call_params(record.kind, &record.name, &record.args),
+                )
             }
         };
         Some(mcp_exchange::json_rpc(method, &params))
@@ -123,6 +120,48 @@ impl Workspace {
         };
         let empty = raw.as_object().is_some_and(|o| o.is_empty());
         (!empty).then(|| mcp_exchange::pretty(raw))
+    }
+
+    /// The request under the current selection and the answer to it, as the
+    /// two JSON-RPC messages that were exchanged, with whether the server
+    /// answered. The request is the one that was sent, not the form as it
+    /// stands now; a History row not sent again has its recorded call and
+    /// result. `None` while the request is still out, or when there is
+    /// nothing under the selection.
+    pub fn exchange_text(&self, cx: &App) -> Option<(String, bool)> {
+        let state = self.state.read(cx);
+        let (request, reply) = match (state.mode, state.response()) {
+            (_, Some(response)) if response.status == ResponseStatus::Pending => return None,
+            (_, Some(response)) => (response.request()?, response.message()),
+            (Mode::History, None) => {
+                let record = state.selected_call()?;
+                let request = mcp_exchange::json_rpc(
+                    method(record.kind),
+                    &call_params(record.kind, &record.name, &record.args),
+                );
+                // A result that was empty is not stored, but the call was
+                // answered.
+                let result = match (&record.status, &record.result) {
+                    (_, Some(result)) => Some(result.clone()),
+                    (mcp_store::CallStatus::Failed, None) => None,
+                    (_, None) => Some(json!({})),
+                };
+                let reply = result.map(|result| {
+                    mcp_exchange::wire_message(
+                        mcp_exchange::Frame::Response,
+                        Some(&json!(1)),
+                        method(record.kind),
+                        &result,
+                    )
+                });
+                (request, reply)
+            }
+            _ => return None,
+        };
+        Some((
+            mcp_exchange::exchange(&request, reply.as_ref()),
+            reply.is_some(),
+        ))
     }
 
     /// The client configuration for the selected server, or for all of them

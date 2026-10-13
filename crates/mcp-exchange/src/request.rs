@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use mcp_core::AuthRef;
 use serde_json::{Value, json};
 
+use crate::value::pretty;
+
 /// Environment variable a redacted `curl` command reads its token from.
 pub const CURL_TOKEN_VAR: &str = "MCP_TOKEN";
 
@@ -53,6 +55,19 @@ pub fn wire_message(frame: Frame, id: Option<&Value>, method: &str, payload: &Va
         Frame::Response => json!({ "jsonrpc": "2.0", "id": id, "result": payload }),
         Frame::Error => json!({ "jsonrpc": "2.0", "id": id, "error": payload }),
     }
+}
+
+/// A request and the answer to it as two JSON-RPC messages, request first,
+/// pretty-printed and a blank line apart: the pair a bug report needs. A call
+/// the server never answered (a transport failure, a cancelled request) has
+/// only its request.
+pub fn exchange(request: &Value, response: Option<&Value>) -> String {
+    let mut text = pretty(request);
+    if let Some(response) = response {
+        text.push_str("\n\n");
+        text.push_str(&pretty(response));
+    }
+    text
 }
 
 /// A request to render as `curl`.
@@ -119,6 +134,27 @@ mod tests {
 
     fn body() -> Value {
         json_rpc("tools/call", &json!({"name": "get_weather"}))
+    }
+
+    #[test]
+    fn an_exchange_is_the_two_messages_a_blank_line_apart() {
+        let request = json_rpc("tools/call", &json!({"name": "echo"}));
+        let result = json!({"content": [{"type": "text", "text": "hi"}]});
+        let response = wire_message(Frame::Response, Some(&json!(1)), "tools/call", &result);
+        let text = exchange(&request, Some(&response));
+        let (first, second) = text.split_once("\n\n").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(first).unwrap(), request);
+        assert_eq!(serde_json::from_str::<Value>(second).unwrap(), response);
+        assert_eq!(response["id"], request["id"], "the pair shares an id");
+
+        let error = wire_message(
+            Frame::Error,
+            Some(&json!(1)),
+            "tools/call",
+            &json!({"code": -32602, "message": "bad"}),
+        );
+        assert!(exchange(&request, Some(&error)).contains("\"error\""));
+        assert_eq!(exchange(&request, None), pretty(&request), "no answer");
     }
 
     #[test]

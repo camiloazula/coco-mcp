@@ -83,6 +83,59 @@ pub struct Response {
     /// The server refused the credentials the request went with, and the
     /// challenge it sent with the refusal, if any.
     pub refused: Option<Option<String>>,
+    /// The `params` the request was sent with, which the form may no longer
+    /// show; `None` until the request is filed.
+    pub params: Option<Value>,
+    /// The JSON-RPC error the server answered with, whole: `code`, `message`
+    /// and `data` when it sent any. `raw` keeps only the part worth a tree.
+    pub error: Option<Value>,
+}
+
+impl Response {
+    /// The JSON-RPC message the server answered with, as a standalone reply
+    /// to the request [`Self::request`] gives (both carry id 1). `None` while
+    /// pending, once cancelled, and for a failure that was not a reply, such
+    /// as a closed connection.
+    pub fn message(&self) -> Option<Value> {
+        let id = serde_json::json!(1);
+        match &self.status {
+            ResponseStatus::Ok | ResponseStatus::ToolError => Some(mcp_exchange::wire_message(
+                mcp_exchange::Frame::Response,
+                Some(&id),
+                self.method,
+                &self.raw,
+            )),
+            ResponseStatus::Failed(_) => self.error.as_ref().map(|error| {
+                mcp_exchange::wire_message(
+                    mcp_exchange::Frame::Error,
+                    Some(&id),
+                    self.method,
+                    error,
+                )
+            }),
+            ResponseStatus::Pending | ResponseStatus::Cancelled => None,
+        }
+    }
+
+    /// The request that was sent, as a standalone JSON-RPC message.
+    pub fn request(&self) -> Option<Value> {
+        let params = self.params.as_ref()?;
+        Some(mcp_exchange::json_rpc(self.method, params))
+    }
+}
+
+/// The `params` of the request for a call of `kind`: what a tool or prompt is
+/// named with and given, or the URI a resource is read from (a resource keeps
+/// its URI as its arguments, falling back to its name).
+pub(crate) fn call_params(kind: CallKind, name: &str, args: &Value) -> Value {
+    match kind {
+        CallKind::Tool | CallKind::Prompt => {
+            serde_json::json!({ "name": name, "arguments": args })
+        }
+        CallKind::Resource => {
+            serde_json::json!({ "uri": args.as_str().unwrap_or(name) })
+        }
+    }
 }
 
 /// Key of a response: server id, list mode, item name.
@@ -152,6 +205,8 @@ impl Responses {
                 issues: Vec::new(),
                 answer: self.stamp,
                 refused: None,
+                params: None,
+                error: None,
             },
         );
         Some((self.stamp, control))
@@ -295,6 +350,7 @@ fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) 
         Some(Err(mcp_core::Error::AuthRequired { challenge })) => Some(challenge.clone()),
         _ => None,
     };
+    let mut error = None;
     let (raw, status, elapsed) = match result {
         Some(Ok((raw, elapsed, is_error))) => (
             raw,
@@ -327,6 +383,18 @@ fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) 
                 }),
                 _ => Value::Object(Map::new()),
             };
+            if let mcp_core::Error::Server {
+                code,
+                message,
+                data,
+            } = &e
+            {
+                let mut object = serde_json::json!({ "code": code, "message": message });
+                if let (Some(data), Some(map)) = (data, object.as_object_mut()) {
+                    map.insert("data".into(), data.clone());
+                }
+                error = Some(object);
+            }
             (
                 raw,
                 ResponseStatus::Failed(crate::explain::explain(&e, spec)),
@@ -347,6 +415,8 @@ fn outcome(method: &'static str, result: CallResult, spec: Option<&ServerSpec>) 
         issues: Vec::new(),
         answer: 0,
         refused,
+        params: None,
+        error,
     }
 }
 
@@ -608,6 +678,7 @@ impl AppState {
             record,
             output_schema,
         } = request;
+        let params = call_params(kind, &name, &args);
         let Some((stamp, control)) = self.responses.begin(key.clone(), method) else {
             return;
         };
@@ -646,9 +717,10 @@ impl AppState {
         let unanswered = spec.clone();
         let run = bridge.run(settled(method, record, output_schema, spec, send(control)));
         cx.spawn(async move |this, cx| {
-            let (response, result) = run
+            let (mut response, result) = run
                 .await
                 .unwrap_or_else(|| (outcome(method, None, unanswered.as_ref()), None));
+            response.params = Some(params);
             let answered = this.update(cx, |state, _| {
                 if !state.responses.is_current(&key, stamp) {
                     return None;
@@ -744,6 +816,73 @@ mod tests {
             Some(Ok((raw.clone(), Duration::from_millis(1), false))),
             None,
         )
+    }
+
+    #[test]
+    fn a_response_is_the_message_the_server_answered_with() {
+        let mut ok = answer("hi");
+        ok.params = Some(call_params(
+            CallKind::Tool,
+            "echo",
+            &serde_json::json!({"text": "hi"}),
+        ));
+        let request = ok.request().unwrap();
+        assert_eq!(request["method"], "tools/call");
+        assert_eq!(request["params"]["arguments"]["text"], "hi");
+        let message = ok.message().unwrap();
+        assert_eq!(message["id"], request["id"]);
+        assert_eq!(message["result"], ok.raw);
+
+        // A tool's own error is still a result.
+        let tool_error = outcome(
+            "tools/call",
+            Some(Ok((
+                serde_json::json!({"isError": true}),
+                Duration::ZERO,
+                true,
+            ))),
+            None,
+        );
+        assert_eq!(tool_error.status, ResponseStatus::ToolError);
+        assert!(tool_error.message().unwrap().get("result").is_some());
+
+        // A JSON-RPC error keeps its code and message even with no data, which
+        // `raw` leaves out.
+        let refused = outcome(
+            "resources/read",
+            Some(Err(mcp_core::Error::Server {
+                code: -32002,
+                message: "not found".into(),
+                data: None,
+            })),
+            None,
+        );
+        assert_eq!(refused.raw, serde_json::json!({}));
+        assert_eq!(
+            refused.message().unwrap()["error"],
+            serde_json::json!({"code": -32002, "message": "not found"})
+        );
+
+        // No reply, no message: a closed connection, a cancel, a request out.
+        let closed = outcome("tools/call", Some(Err(mcp_core::Error::Closed)), None);
+        assert!(matches!(closed.status, ResponseStatus::Failed(_)));
+        assert_eq!(closed.message(), None);
+        let cancelled = outcome("tools/call", Some(Err(mcp_core::Error::Cancelled)), None);
+        assert_eq!(cancelled.message(), None);
+    }
+
+    #[test]
+    fn a_resource_is_read_from_its_uri() {
+        let uri = Value::String("mock://a".into());
+        assert_eq!(
+            call_params(CallKind::Resource, "mock://{id}", &uri),
+            serde_json::json!({"uri": "mock://a"})
+        );
+        assert_eq!(
+            call_params(CallKind::Resource, "mock://b", &Value::Null),
+            serde_json::json!({"uri": "mock://b"}),
+            "a call recorded without its arguments falls back to the name"
+        );
     }
 
     fn text(responses: &Responses) -> Option<&str> {

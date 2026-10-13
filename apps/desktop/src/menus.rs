@@ -14,7 +14,7 @@ use mcp_core::{AuthRef, ServerSpec};
 use crate::APP_NAME;
 use crate::actions::{
     About, AddServer, CancelCall, CheckForUpdates, ClearHistory, CommandPalette,
-    CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
+    CompareSnapshotFile, CopyBearerToken, CopyExchange, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts,
     ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
@@ -153,6 +153,7 @@ fn menu_bar(a: Available) -> Vec<Menu> {
                 MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),
                 MenuItem::action("Copy Response", CopyResponse).disabled(!a.response),
+                MenuItem::action("Copy Exchange", CopyExchange).disabled(!a.response),
                 MenuItem::action("Copy Request as JSON-RPC", CopyRequest).disabled(!a.server),
                 MenuItem::action("Copy Request as curl", CopyRequestCurl).disabled(!a.http),
             ],

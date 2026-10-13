@@ -25,5 +25,5 @@ pub use files::{LogLine, diff_markdown, file_name, history_jsonl, log_jsonl, sna
 /// A stdio server's command line. Implemented in `mcp-core`, whose
 /// [`mcp_core::ServerSpec::label`] prints the same quoting.
 pub use mcp_core::{command_line, split_command_line};
-pub use request::{CURL_TOKEN_VAR, Curl, Frame, curl, json_rpc, wire_message};
+pub use request::{CURL_TOKEN_VAR, Curl, Frame, curl, exchange, json_rpc, wire_message};
 pub use value::{Segment, copy_text, json_head, json_size, path_string, pretty, resolve};

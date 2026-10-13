@@ -245,6 +245,7 @@ impl Render for Workspace {
                 });
             }))
             .on_action(cx.listener(|this, _: &CopyResponse, _, cx| this.copy_response(cx)))
+            .on_action(cx.listener(|this, _: &CopyExchange, _, cx| this.copy_exchange(cx)))
             .on_action(cx.listener(|this, _: &CopyRequest, _, cx| this.copy_request(cx)))
             .on_action(cx.listener(|this, _: &CopyRequestCurl, _, cx| this.copy_request_curl(cx)))
             .on_action(cx.listener(|this, _: &CopyServerConfig, _, cx| this.copy_server_config(cx)))
