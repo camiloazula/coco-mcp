@@ -186,6 +186,10 @@ impl Render for Workspace {
                 let dark = !this.state.read(cx).dark;
                 this.state.update(cx, |s, cx| s.set_dark(dark, cx));
             }))
+            .on_action(cx.listener(|this, _: &ToggleDisplayNames, _, cx| {
+                let on = !this.state.read(cx).display_names;
+                this.state.update(cx, |s, cx| s.set_display_names(on, cx));
+            }))
             .on_action(cx.listener(|this, _: &ShowTools, _, cx| {
                 this.state.update(cx, |s, cx| s.set_mode(Mode::Tools, cx));
             }))

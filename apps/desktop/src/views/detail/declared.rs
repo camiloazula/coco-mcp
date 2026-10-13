@@ -94,10 +94,11 @@ pub(super) fn prompt_detail(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> Parts {
-    let title = prompt.title.clone().unwrap_or_else(|| prompt.name.clone());
+    let title = prompt.display_name().to_owned();
     let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
     pinned
         .extend(description(cx, prompt.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.extend(identifier(cx, &prompt.name, prompt.display_name()));
     pinned.push(toolbar(ws, cx, Tabs::Declared, "Get").into_any_element());
     let mut body: Vec<AnyElement> = Vec::new();
     if ws.selection.schema_tab {

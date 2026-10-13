@@ -231,6 +231,18 @@ fn header(cx: &Context<Workspace>, title: String, meta: &str) -> Div {
     )
 }
 
+/// The name a request uses, under a heading that shows a display name in its
+/// place, drawn as a resource's URI is; nothing when the two are the same.
+fn identifier(cx: &Context<Workspace>, id: &str, shown: &str) -> Option<AnyElement> {
+    (id != shown).then(|| {
+        div()
+            .px(px(24.))
+            .pb(px(16.))
+            .child(mono(cx, 12., id.to_owned()).text_color(tokens(cx).fg))
+            .into_any_element()
+    })
+}
+
 fn description(cx: &Context<Workspace>, text: Option<&str>) -> Option<Div> {
     text.map(|d| {
         div()

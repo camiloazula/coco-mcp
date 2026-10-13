@@ -22,9 +22,10 @@ pub(super) fn tool_detail(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> Parts {
-    let title = tool.title.clone().unwrap_or_else(|| tool.name.clone());
+    let title = tool.display_name().to_owned();
     let mut pinned: Vec<AnyElement> = vec![header(cx, title, meta).into_any_element()];
     pinned.extend(description(cx, tool.description.as_deref()).map(IntoElement::into_any_element));
+    pinned.extend(identifier(cx, &tool.name, tool.display_name()));
     pinned.push(toolbar(ws, cx, Tabs::Tool, "Call").into_any_element());
     let mut body: Vec<AnyElement> = Vec::new();
     let mut fills = false;

@@ -118,6 +118,45 @@ pub struct Prompt {
     pub extra: Map<String, Value>,
 }
 
+// Display names, in the order the spec gives for each kind: the `title`,
+// then (tools only) the older `annotations.title`, then the `name`.
+
+impl Tool {
+    /// The name to show a person.
+    pub fn display_name(&self) -> &str {
+        self.title
+            .as_deref()
+            .or_else(|| {
+                self.annotations
+                    .as_ref()
+                    .and_then(|a| a.get("title"))
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or(&self.name)
+    }
+}
+
+impl Resource {
+    /// The name to show a person.
+    pub fn display_name(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl ResourceTemplate {
+    /// The name to show a person.
+    pub fn display_name(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl Prompt {
+    /// The name to show a person.
+    pub fn display_name(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// The list requests a snapshot is taken with, by JSON-RPC method name. The
 /// session records a failure under one of these and every reader matches
 /// against the same constant, so a misspelt name cannot compile.
@@ -342,5 +381,32 @@ mod tests {
         assert!(snap.tool("echo").is_some());
         assert!(snap.prompt("greet").is_some());
         assert!(snap.resource("x").is_none());
+    }
+
+    #[test]
+    fn display_names_follow_the_spec_order() {
+        let tool = |v: Value| serde_json::from_value::<Tool>(v).unwrap();
+        let schema = json!({"type": "object"});
+        let bare = tool(json!({"name": "echo", "inputSchema": schema}));
+        assert_eq!(bare.display_name(), "echo");
+        let annotated = tool(json!({
+            "name": "echo", "inputSchema": schema, "annotations": {"title": "Echo (hint)"}
+        }));
+        assert_eq!(annotated.display_name(), "Echo (hint)");
+        let titled = tool(json!({
+            "name": "echo", "title": "Echo", "inputSchema": schema,
+            "annotations": {"title": "Echo (hint)"}
+        }));
+        assert_eq!(titled.display_name(), "Echo");
+
+        let resource: Resource =
+            serde_json::from_value(json!({"uri": "mock://a", "name": "a.txt"})).unwrap();
+        assert_eq!(resource.display_name(), "a.txt", "the name, never the URI");
+        let template: ResourceTemplate = serde_json::from_value(
+            json!({"uriTemplate": "mock://{id}", "name": "item", "title": "Item"}),
+        )
+        .unwrap();
+        assert_eq!(template.display_name(), "Item");
+        assert_eq!(sample().prompts[0].display_name(), "greet");
     }
 }

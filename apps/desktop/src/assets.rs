@@ -22,6 +22,7 @@ gpui_kit::assets::icon_assets!(
         Minimize2,
         PanelBottomClose,
         PanelBottomOpen,
+        Tag,
     ]
 );
 
@@ -103,6 +104,7 @@ mod tests {
         assert!(AppAssets.load("icons/unplug.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/copy.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/download.svg").unwrap().is_some());
+        assert!(AppAssets.load("icons/tag.svg").unwrap().is_some());
         assert!(AppAssets.load("icons/search.svg").unwrap().is_some());
         // Unknown paths are either an error or `None`, never bytes.
         assert!(!matches!(AppAssets.load("icons/nope.svg"), Ok(Some(_))));

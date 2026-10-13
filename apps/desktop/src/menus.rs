@@ -17,8 +17,8 @@ use crate::actions::{
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
     ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts,
-    ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
-    ToggleUpdateChecks, ZoomLog,
+    ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
+    ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{AppState, Status};
 use crate::views::about;
@@ -49,6 +49,7 @@ pub struct Available {
     credentials: bool,
     response: bool,
     snapshot: bool,
+    display_names: bool,
 }
 
 impl Available {
@@ -71,6 +72,7 @@ impl Available {
             credentials: spec.is_some_and(|s| crate::state::keyring_id(s).is_some()),
             response: state.response().is_some(),
             snapshot: state.snapshot().is_some(),
+            display_names: state.display_names,
         }
     }
 }
@@ -182,6 +184,8 @@ fn menu_bar(a: Available) -> Vec<Menu> {
                 MenuItem::action("Prompts", ShowPrompts),
                 MenuItem::action("History", ShowHistory),
                 MenuItem::action("Server", ShowServer),
+                MenuItem::separator(),
+                MenuItem::action("Show Display Names", ToggleDisplayNames).checked(a.display_names),
                 MenuItem::separator(),
                 MenuItem::action("Toggle Log", ToggleLog),
                 MenuItem::action("Zoom Log", ZoomLog),
