@@ -14,8 +14,8 @@ use crate::actions::{
     CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
     Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
     ForgetCredentials, ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts,
-    ShowResources, ShowServer, ShowTools, ToggleLog, ToggleResponse, ToggleTheme,
-    ToggleUpdateChecks, ZoomLog,
+    ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
+    ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{Mode, Status};
 use crate::views::Workspace;
@@ -69,7 +69,18 @@ pub fn render(
     }
     let state = ws.palette.clone()?;
     let t = *crate::theme::tokens(cx);
-    let (servers, selected, connected, mode, drawer_open, drawer_zoomed, response_open, dark, spec) = {
+    let (
+        servers,
+        selected,
+        connected,
+        mode,
+        drawer_open,
+        drawer_zoomed,
+        response_open,
+        dark,
+        display_names,
+        spec,
+    ) = {
         let s = ws.state.read(cx);
         (
             s.servers
@@ -83,6 +94,7 @@ pub fn render(
             s.drawer_zoomed,
             s.response_open,
             s.dark,
+            s.display_names,
             s.server().map(|e| e.record.spec.clone()),
         )
     };
@@ -172,6 +184,12 @@ pub fn render(
             ],
         )
         .checked(mode == Mode::Server),
+        item(
+            "Show display names",
+            ToggleDisplayNames,
+            &["names", "titles", "identifiers", "labels", "uri"],
+        )
+        .checked(display_names),
     ];
     let pending = ws.state.read(cx).response_pending();
     let updates_on = cx

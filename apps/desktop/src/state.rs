@@ -691,6 +691,7 @@ struct ItemsKey {
     rev: u64,
     mode: Mode,
     filter: String,
+    display_names: bool,
 }
 
 /// The middle list, built once per change of what it is built from rather
@@ -838,6 +839,9 @@ pub struct AppState {
     pub screen: Screen,
     /// Dark (true) or light theme.
     pub dark: bool,
+    /// Whether the Tools, Resources and Prompts lists show display names
+    /// instead of the identifiers a request names.
+    pub display_names: bool,
     /// Responses per selection.
     pub responses: Responses,
     /// Which log rows are shown.
@@ -989,6 +993,39 @@ pub const MAX_HISTORY: usize = 500;
 const MAX_SNAPSHOTS: usize = 50;
 /// Settings key of the persisted theme choice.
 const THEME_SETTING: &str = "theme.dark";
+/// Settings key of the persisted choice of display names in the lists.
+const DISPLAY_NAMES_SETTING: &str = "list.display_names";
+
+/// A remembered on/off choice of the window.
+#[derive(Debug, Clone, Copy)]
+enum Flag {
+    Theme,
+    DisplayNames,
+}
+
+impl Flag {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Theme => THEME_SETTING,
+            Self::DisplayNames => DISPLAY_NAMES_SETTING,
+        }
+    }
+
+    /// What a failed write lost, for the persistence notice.
+    fn what(self) -> &'static str {
+        match self {
+            Self::Theme => "theme",
+            Self::DisplayNames => "list names choice",
+        }
+    }
+
+    fn get(self, state: &AppState) -> bool {
+        match self {
+            Self::Theme => state.dark,
+            Self::DisplayNames => state.display_names,
+        }
+    }
+}
 
 /// Name of the Server view's Settings section, whose row opens the edit form.
 pub const SETTINGS_SECTION: &str = "settings";
@@ -1022,6 +1059,7 @@ impl AppState {
             expanded_log: BTreeSet::new(),
             screen: Screen::Detail,
             dark: true,
+            display_names: false,
             responses: Responses::default(),
             log_filter: LogFilter::All,
             log_min_level: None,
@@ -1048,7 +1086,7 @@ impl AppState {
         state
     }
 
-    /// Read the saved servers and the theme.
+    /// Read the saved servers, the theme and the choice of list names.
     ///
     /// Both are read here, on the thread that builds the model, because the
     /// first frame draws the sidebar in that theme; they are a few small
@@ -1069,6 +1107,11 @@ impl AppState {
             .note_write("theme could not be read", dark)
             .flatten()
             .unwrap_or(true);
+        let display_names = store.get_setting::<bool>(DISPLAY_NAMES_SETTING);
+        self.display_names = self
+            .note_write("list names could not be read", display_names)
+            .flatten()
+            .unwrap_or(false);
     }
 
     /// Log indices of the selected server's rows that pass the filter. The
@@ -1232,31 +1275,44 @@ impl AppState {
             }
             item
         };
-        // A row shows the display title where the server gave one; the name
-        // stays the key a selection is kept by.
-        let titled = |name: &str, title: &Option<String>| {
-            Item::named(name, title.as_deref().unwrap_or(name))
+        // A row shows the identifier a request names, or the display name
+        // when the person chose those; the identifier stays the key a
+        // selection is kept by. The filter matches every name the item has,
+        // so a search finds the same rows either way.
+        let named = |id: &str, display: &str, names: &[Option<&str>]| {
+            let mut item = Item::named(id, if self.display_names { display } else { id });
+            let mut also: Vec<String> = Vec::new();
+            for name in names.iter().flatten().filter(|n| **n != id) {
+                let name = name.to_lowercase();
+                if !also.contains(&name) {
+                    also.push(name);
+                }
+            }
+            item.text = (!also.is_empty()).then(|| Rc::from(also.join("\n")));
+            item
         };
         let items: Vec<Item> = match self.mode {
             Mode::Tools => snap
                 .tools
                 .iter()
-                .map(|t| titled(&t.name, &t.title))
+                .map(|t| named(&t.name, t.display_name(), &[Some(t.display_name())]))
                 .collect(),
             Mode::Resources => snap
                 .resources
                 .iter()
-                .map(|r| titled(&r.uri, &r.title))
-                .chain(
-                    snap.resource_templates
-                        .iter()
-                        .map(|t| titled(&t.uri_template, &t.title)),
-                )
+                .map(|r| {
+                    let names = [r.title.as_deref(), Some(r.name.as_str())];
+                    named(&r.uri, r.display_name(), &names)
+                })
+                .chain(snap.resource_templates.iter().map(|t| {
+                    let names = [t.title.as_deref(), Some(t.name.as_str())];
+                    named(&t.uri_template, t.display_name(), &names)
+                }))
                 .collect(),
             Mode::Prompts => snap
                 .prompts
                 .iter()
-                .map(|p| titled(&p.name, &p.title))
+                .map(|p| named(&p.name, p.display_name(), &[Some(p.display_name())]))
                 .collect(),
             Mode::Server | Mode::History => Vec::new(),
         };
@@ -1273,6 +1329,7 @@ impl AppState {
                 && key.rev == server.map_or(0, |s| s.rev)
                 && key.mode == self.mode
                 && key.filter == self.filter
+                && key.display_names == self.display_names
         });
         if !fresh {
             let all = self.all_items();
@@ -1293,6 +1350,7 @@ impl AppState {
                     rev: server.map_or(0, |s| s.rev),
                     mode: self.mode,
                     filter: self.filter.clone(),
+                    display_names: self.display_names,
                 }),
                 rows,
                 total,
@@ -1742,29 +1800,39 @@ impl AppState {
     /// Flip the theme flag (the view applies it) and remember the choice.
     pub fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
         self.dark = dark;
-        self.save_theme(cx);
+        self.save_flag(Flag::Theme, cx);
         self.changed(cx);
     }
 
-    fn save_theme(&mut self, cx: &mut Context<Self>) {
+    /// Show display names in the lists, or the identifiers, and remember the
+    /// choice. The selection stays on the same item: the rows and their
+    /// order do not change, only what they say.
+    pub fn set_display_names(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.display_names = on;
+        self.save_flag(Flag::DisplayNames, cx);
+        self.changed(cx);
+    }
+
+    fn save_flag(&mut self, flag: Flag, cx: &mut Context<Self>) {
         let Some(store) = self.store.clone() else {
             return;
         };
-        let dark = self.dark;
+        let value = flag.get(self);
         self.in_background(
             move || {
                 store
-                    .set_setting(THEME_SETTING, &dark)
+                    .set_setting(flag.key(), &value)
                     .map_err(|e| e.to_string())
             },
             move |state, saved, cx| {
-                let saved = saved.unwrap_or_else(|| Err("theme task failed".into()));
-                if state.note_write("theme was not saved", saved).is_none() {
+                let saved = saved.unwrap_or_else(|| Err(format!("{} task failed", flag.what())));
+                let note = format!("{} was not saved", flag.what());
+                if state.note_write(&note, saved).is_none() {
                     state.changed(cx);
-                } else if state.dark != dark {
+                } else if flag.get(state) != value {
                     // A later toggle's write may have finished first; write
                     // the current choice again so the last one wins.
-                    state.save_theme(cx);
+                    state.save_flag(flag, cx);
                 }
             },
             cx,
@@ -3707,6 +3775,72 @@ mod tests {
         state.filter.clear();
         state.selected_item = Some(1);
         assert!(state.selected_template().is_some());
+    }
+
+    #[test]
+    fn lists_show_identifiers_or_display_names() {
+        let mut state = demo();
+        let mut snapshot = state.servers[0].snapshot().unwrap().clone();
+        snapshot.tools[0].title = Some("Current weather".into());
+        snapshot.tools[1].annotations = Some(json!({"title": "Forecast"}));
+        snapshot.resources[0].title = Some("Weather stations".into());
+        state.servers[0].set_snapshot(Some(snapshot));
+        let labels = |state: &AppState| -> Vec<String> {
+            state.items().iter().map(|i| i.label.clone()).collect()
+        };
+
+        assert!(!state.display_names, "identifiers by default");
+        assert_eq!(
+            labels(&state),
+            ["get_weather", "get_forecast", "search_city"]
+        );
+        state.mode = Mode::Resources;
+        assert_eq!(
+            labels(&state),
+            ["weather://stations", "weather://city/{name}"]
+        );
+
+        state.mode = Mode::Tools;
+        state.selected_item = Some(1);
+        state.display_names = true;
+        assert_eq!(
+            labels(&state),
+            ["Current weather", "Forecast", "search_city"]
+        );
+        assert_eq!(
+            state.selected_name().as_deref(),
+            Some("get_forecast"),
+            "the selection stays on the same item"
+        );
+        state.mode = Mode::Resources;
+        assert_eq!(
+            labels(&state),
+            ["Weather stations", "city"],
+            "the name, not the URI"
+        );
+
+        // The filter finds the same rows by any of their names, either way.
+        for display_names in [false, true] {
+            state.display_names = display_names;
+            for (needle, count) in [("stations", "1/2"), ("weather st", "1/2"), ("city", "1/2")] {
+                state.filter = needle.into();
+                assert_eq!(state.list_count(), count, "{needle} ({display_names})");
+            }
+            state.mode = Mode::Tools;
+            state.filter = "forecast".into();
+            assert_eq!(state.list_count(), "1/3");
+            state.filter = "current".into();
+            assert_eq!(state.list_count(), "1/3");
+            state.mode = Mode::Resources;
+        }
+    }
+
+    #[test]
+    fn the_display_names_choice_is_read_back() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(!AppState::new(None, Some(store.clone())).display_names);
+        store.set_setting(DISPLAY_NAMES_SETTING, &true).unwrap();
+        assert!(AppState::new(None, Some(store)).display_names);
     }
 
     #[test]

@@ -11,7 +11,7 @@ use gpui_kit::test::TestWindowExt as _;
 use serde_json::json;
 
 use crate::macos::{item_index, snap, wait_for_request};
-use crate::protocol::live;
+use crate::protocol::{Live, live};
 
 /// A confirmation takes Esc and Enter, a server request takes Enter, and the
 /// window's shortcuts wait while either is open.
@@ -118,26 +118,43 @@ pub fn empty_states_flow() {
     });
 }
 
-/// A resource with a display title is listed by it, found by its URI too,
-/// and its declaration is one tab away.
+/// A resource is listed by its URI until the button after the count switches
+/// the list to display names; the filter finds it by either, and its
+/// declaration is one tab away.
 pub fn titles_and_declaration_flow() {
     let mut live = live(&["--schema", "v1"], None);
     live.ui(|window, _| assert!(window.try_find("server-rows").is_some()));
     live.show(Mode::Resources);
     let ix = item_index(&mut live.cx, &live.state, "mock://text/hello");
+    let label = |live: &mut Live| {
+        live.cx
+            .update(|cx| live.state.read(cx).items()[ix].label.clone())
+    };
+    assert_eq!(label(&mut live), "mock://text/hello", "the URI by default");
+    live.ui(|window, cx| window.click("display-names", cx));
+    assert_eq!(label(&mut live), "Hello", "the title once switched");
+    snap(&mut live.cx, live.handle, "73-display-names");
+    for needle in ["text/hello", "hello"] {
+        live.cx.update(|cx| {
+            live.state
+                .update(cx, |s, cx| s.set_filter(needle.into(), cx))
+        });
+        assert_eq!(
+            live.cx.update(|cx| live.state.read(cx).items().len()),
+            1,
+            "the filter matches {needle}"
+        );
+    }
+    live.ui(|window, cx| window.click("display-names", cx));
     live.cx.update(|cx| {
-        let items = live.state.read(cx).items();
-        assert_eq!(items[ix].label, "Hello", "the title, not the URI");
+        live.state
+            .update(cx, |s, cx| s.set_filter(String::new(), cx))
     });
+    assert_eq!(label(&mut live), "mock://text/hello", "back to the URI");
     live.cx.update(|cx| {
         live.state
             .update(cx, |s, cx| s.set_filter("text/hello".into(), cx))
     });
-    assert_eq!(
-        live.cx.update(|cx| live.state.read(cx).items().len()),
-        1,
-        "the filter matches the URI behind the title"
-    );
     live.select(Mode::Resources, "mock://text/hello");
     live.ui(|window, _| {
         assert!(window.try_find("tab-detail").is_some());

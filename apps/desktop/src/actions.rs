@@ -32,6 +32,8 @@ gpui_kit::actions!(
         CommandPalette,
         /// Switch between dark and light theme.
         ToggleTheme,
+        /// Switch the lists between identifiers and display names.
+        ToggleDisplayNames,
         /// Move selection up in the focused list.
         MoveUp,
         /// Move selection down in the focused list.

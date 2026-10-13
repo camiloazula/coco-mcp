@@ -40,6 +40,9 @@ pub fn render(
     let reading = state.history_reading();
     // The History list clears from where it is read, not only from the menu.
     let clearable = state.mode == Mode::History && !reading && state.items_total() > 0;
+    // Lists of what the server declared can name their rows either way.
+    let names_switch = matches!(state.mode, Mode::Tools | Mode::Resources | Mode::Prompts);
+    let display_names = state.display_names;
     // Above the rows rather than among them: every row is sized from the first.
     let notice = list_notice(&state.list_failures(state.mode), cx);
     // Without a session the rows are the last connection's: shown, not
@@ -89,6 +92,7 @@ pub fn render(
             ),
         )
         .child(mono(cx, 11., label))
+        .when(names_switch, |el| el.child(names_button(display_names, cx)))
         .when(clearable, |el| {
             el.child(
                 div()
@@ -193,6 +197,30 @@ pub fn render(
         .children(stale)
         .child(body)
         .into_any_element()
+}
+
+/// The switch between identifiers and display names, after the count: an
+/// icon like the Servers header's actions, in the accent colour while the
+/// rows show display names. The caption says what a click does.
+fn names_button(on: bool, cx: &Context<Workspace>) -> impl IntoElement {
+    let t = *tokens(cx);
+    let caption = if on {
+        "Show identifiers"
+    } else {
+        "Show display names"
+    };
+    div()
+        .id("display-names")
+        .p(px(2.))
+        .text_color(if on { t.accent } else { t.muted })
+        .hover(move |s| s.text_color(if on { t.accent } else { t.fg }))
+        .cursor_pointer()
+        .tooltip(move |window, cx| Tooltip::new(caption).build(window, cx))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.state.update(cx, |s, cx| s.set_display_names(!on, cx));
+        }))
+        .child(Icon::new(gpui_kit::assets::IconName::Tag).with_size(px(12.)))
+        .test_support()
 }
 
 /// Stands in for the rows while the selected server's stored calls are read.
