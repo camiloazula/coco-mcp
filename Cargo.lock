@@ -4630,6 +4630,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mcp-gateway"
+version = "0.5.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures",
+ "mcp-core",
+ "mcp-mockserver",
+ "reqwest",
+ "rmcp",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "mcp-mockserver"
 version = "0.5.1"
 dependencies = [

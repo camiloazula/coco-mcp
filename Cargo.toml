@@ -86,6 +86,7 @@ mcp-store = { path = "crates/mcp-store" }
 mcp-auth = { path = "crates/mcp-auth" }
 mcp-diff = { path = "crates/mcp-diff" }
 mcp-exchange = { path = "crates/mcp-exchange" }
+mcp-gateway = { path = "crates/mcp-gateway" }
 coco-update = { path = "crates/coco-update" }
 mcp-mockserver = { path = "crates/mcp-mockserver" }
 coco-cli = { path = "apps/cli" }
