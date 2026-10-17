@@ -89,6 +89,7 @@ pub fn install(cx: &mut App) {
     cx.set_global(AboutWindow::default());
     cx.on_action(|_: &About, cx| open_about(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::views::settings::show(cx));
+    crate::views::settings::install(cx);
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::check(true, cx));
     cx.on_action(|_: &ToggleUpdateChecks, cx| crate::update::toggle_checks(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());

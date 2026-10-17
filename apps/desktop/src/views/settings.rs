@@ -13,10 +13,13 @@ use gpui_kit::{
     size,
 };
 
+use crate::actions::{ToggleDisplayNames, ToggleTheme};
 use crate::state::AppState;
 use crate::theme::{self, tokens};
 use crate::update;
-use crate::views::muted;
+use crate::views::{muted, text_tab};
+
+mod general;
 
 /// Window size.
 const WINDOW: (f32, f32) = (560., 380.);
@@ -88,145 +91,6 @@ impl Settings {
             focus: cx.focus_handle(),
             _observe: observe,
         }
-    }
-
-    /// One option of a choice: outlined, in the accent colour while chosen.
-    /// A disabled one does nothing.
-    fn choice(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        chosen: bool,
-        enabled: bool,
-        cx: &mut Context<Self>,
-        on: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) -> AnyElement {
-        let t = *tokens(cx);
-        div()
-            .id(id)
-            .h(px(26.))
-            .px(px(12.))
-            .flex()
-            .items_center()
-            .rounded(px(4.))
-            .border_1()
-            .border_color(if chosen { t.accent } else { t.hair })
-            .bg(if chosen { t.sel } else { t.bg })
-            .text_size(px(12.))
-            .text_color(if chosen { t.accent } else { t.fg })
-            .when(!enabled, |el| el.opacity(0.5))
-            .when(enabled, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.bg(t.hover))
-                    .on_click(cx.listener(move |this, _, window, cx| on(this, window, cx)))
-            })
-            .child(label)
-            .test_support()
-            .into_any_element()
-    }
-
-    /// A labelled row: the label, the choices, and a note under them.
-    fn row(
-        &self,
-        label: &'static str,
-        choices: Vec<AnyElement>,
-        note: Option<&'static str>,
-        cx: &App,
-    ) -> AnyElement {
-        let t = *tokens(cx);
-        h_flex()
-            .py(px(10.))
-            .border_b_1()
-            .border_color(t.hair)
-            .items_start()
-            .child(
-                div()
-                    .w(px(LABEL))
-                    .flex_none()
-                    .pt(px(4.))
-                    .text_size(px(13.))
-                    .text_color(t.muted)
-                    .child(label),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(6.))
-                    .child(h_flex().gap(px(6.)).children(choices))
-                    .children(note.map(|n| muted(cx, 11., n).whitespace_normal())),
-            )
-            .into_any_element()
-    }
-
-    /// Theme, list names and update checks.
-    fn general(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (dark, names) = {
-            let s = self.state.read(cx);
-            (s.dark, s.display_names)
-        };
-        let (checks, env_off) = update::checks(cx);
-        let theme = vec![
-            self.choice("theme-dark", "Dark", dark, true, cx, |this, window, cx| {
-                this.set_dark(true, window, cx)
-            }),
-            self.choice(
-                "theme-light",
-                "Light",
-                !dark,
-                true,
-                cx,
-                |this, window, cx| this.set_dark(false, window, cx),
-            ),
-        ];
-        let list_names = vec![
-            self.choice(
-                "names-identifiers",
-                "Identifiers",
-                !names,
-                true,
-                cx,
-                |this, _, cx| {
-                    this.state
-                        .update(cx, |s, cx| s.set_display_names(false, cx))
-                },
-            ),
-            self.choice(
-                "names-display",
-                "Display names",
-                names,
-                true,
-                cx,
-                |this, _, cx| this.state.update(cx, |s, cx| s.set_display_names(true, cx)),
-            ),
-        ];
-        let updates = vec![
-            self.choice("checks-on", "On", checks, !env_off, cx, |_, _, cx| {
-                if !update::checks(cx).0 {
-                    update::toggle_checks(cx);
-                }
-            }),
-            self.choice("checks-off", "Off", !checks, !env_off, cx, |_, _, cx| {
-                if update::checks(cx).0 {
-                    update::toggle_checks(cx);
-                }
-            }),
-        ];
-        v_flex()
-            .child(self.row("Theme", theme, None, cx))
-            .child(self.row(
-                "List names",
-                list_names,
-                Some("What the Tools, Resources and Prompts lists show."),
-                cx,
-            ))
-            .child(self.row(
-                "Update checks",
-                updates,
-                env_off.then_some("Off in the environment (COCO_NO_UPDATE_CHECK or DO_NOT_TRACK)."),
-                cx,
-            ))
-            .into_any_element()
     }
 
     fn set_dark(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -358,4 +222,25 @@ pub fn show(cx: &mut App) {
     if let Some(handle) = open(&model, existing.as_ref(), cx) {
         cx.set_global(Opened(Some(handle)));
     }
+}
+
+/// Register what the window's own choices do from the View menu while a
+/// Settings window is in front: the menu only enables an action the active
+/// window or the application answers, and these are the workspace's.
+pub fn install(cx: &mut App) {
+    cx.on_action(|_: &ToggleTheme, cx| {
+        let Some(model) = cx.try_global::<Model>().map(|m| m.0.clone()) else {
+            return;
+        };
+        let dark = !model.read(cx).dark;
+        model.update(cx, |s, cx| s.set_dark(dark, cx));
+        theme::set_dark(dark, None, cx);
+    });
+    cx.on_action(|_: &ToggleDisplayNames, cx| {
+        let Some(model) = cx.try_global::<Model>().map(|m| m.0.clone()) else {
+            return;
+        };
+        let on = !model.read(cx).display_names;
+        model.update(cx, |s, cx| s.set_display_names(on, cx));
+    });
 }

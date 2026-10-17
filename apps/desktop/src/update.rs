@@ -55,6 +55,14 @@ impl Update {
         }
     }
 
+    /// The same model with the environment's say changed, for the renders
+    /// of the Settings window, which draws a choice the environment decided
+    /// differently from one the person may make.
+    pub fn with_env_off(mut self, env_off: bool) -> Self {
+        self.env_off = env_off;
+        self
+    }
+
     /// What to show in the status bar and the popover, if anything.
     pub fn notice(&self) -> Option<Notice> {
         if self.dismissed {
