@@ -181,6 +181,68 @@ pub fn gateway_flow() {
             .all(|(agent, _)| agent == "flow-agent")
     );
 
+    // The same agent through the root: every server as one, names in front.
+    let root_hello = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "root-agent", "version": "2.0"}}});
+    let root = call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "",
+        None,
+        Some(root_hello),
+    );
+    assert_eq!(root.status, 200, "{}", root.body);
+    assert!(root.body.contains("coco-mcp-gateway"), "{}", root.body);
+    let root_session = root.session.expect("a root session");
+    let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+    let tools = call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "",
+        Some(&root_session),
+        Some(list),
+    );
+    assert!(tools.body.contains("mock__echo"), "{}", tools.body);
+    let named = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "mock__echo", "arguments": {"text": "through the root"}}});
+    let echoed = call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "",
+        Some(&root_session),
+        Some(named),
+    );
+    assert!(echoed.body.contains("through the root"), "{}", echoed.body);
+    live.wait("the root agent is in the log under its name", |s| {
+        let rows = s.servers[0].log();
+        rows.iter()
+            .any(|r| r.agent.as_deref() == Some("root-agent") && r.method == "tools/call")
+    });
+    // Two connections, whatever the number of servers each reaches.
+    assert_eq!(
+        live.cx
+            .update(|cx| live.state.read(cx).gateway.agent_count()),
+        2
+    );
+    let ended = call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::DELETE,
+        "",
+        Some(&root_session),
+        None,
+    );
+    assert_eq!(ended.status, 204);
+    live.wait("the root agent is gone", |s| s.gateway.agent_count() == 1);
+
     // The agent leaves.
     let ended = call(
         &bridge,

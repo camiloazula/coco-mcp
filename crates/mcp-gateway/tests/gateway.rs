@@ -23,32 +23,50 @@ const TOKEN: &str = "coco_test_token";
 // ------------------------------------------------------------ the observer
 
 #[derive(Default)]
-struct Recorder(Mutex<Vec<String>>);
+struct Recorder(Mutex<Vec<String>>, Mutex<Vec<(String, String)>>);
 
 impl Recorder {
     fn log(&self) -> Vec<String> {
         self.0.lock().unwrap().clone()
     }
 
+    /// What was said about one server, in order.
+    fn of(&self, namespace: &str) -> Vec<String> {
+        self.1
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(n, _)| n == namespace)
+            .map(|(_, line)| line.clone())
+            .collect()
+    }
+
     fn push(&self, what: String) {
         self.0.lock().unwrap().push(what);
+    }
+
+    fn push_for(&self, namespace: &str, what: String) {
+        self.1
+            .lock()
+            .unwrap()
+            .push((namespace.to_owned(), what.clone()));
+        self.push(what);
     }
 }
 
 impl Observer for Recorder {
     fn opened(&self, namespace: &str, _: &str) {
-        self.push(format!("opened {namespace}"));
+        self.push_for(namespace, format!("opened {namespace}"));
     }
 
-    fn client(&self, _: &str, _: &str, info: ClientInfo) {
-        self.push(format!(
-            "client {} {}",
-            info.name,
-            info.version.unwrap_or_default()
-        ));
+    fn client(&self, namespace: &str, _: &str, info: ClientInfo) {
+        self.push_for(
+            namespace,
+            format!("client {} {}", info.name, info.version.unwrap_or_default()),
+        );
     }
 
-    fn frame(&self, _: &str, _: &str, traffic: Traffic<'_>) {
+    fn frame(&self, namespace: &str, _: &str, traffic: Traffic<'_>) {
         let (direction, frame) = (traffic.direction, traffic.frame);
         let arrow = if direction == Direction::Outbound {
             "->"
@@ -59,15 +77,15 @@ impl Observer for Recorder {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| format!("result {}", frame["id"]));
-        self.push(format!("{arrow} {what}"));
+        self.push_for(namespace, format!("{arrow} {what}"));
     }
 
-    fn stderr(&self, _: &str, _: &str, line: &str) {
-        self.push(format!("stderr {line}"));
+    fn stderr(&self, namespace: &str, _: &str, line: &str) {
+        self.push_for(namespace, format!("stderr {line}"));
     }
 
-    fn closed(&self, _: &str, _: &str, reason: &str) {
-        self.push(format!("closed {reason}"));
+    fn closed(&self, namespace: &str, _: &str, reason: &str) {
+        self.push_for(namespace, format!("closed {reason}"));
     }
 }
 
@@ -976,4 +994,1071 @@ async fn agents_that_arrive_together_cannot_pass_the_cap() {
     );
     assert_eq!(h.gateway.connections(), 4);
     h.gateway.stop().await;
+}
+
+// ------------------------------------------------------------------ the root
+
+/// A server with something to say about each part of the protocol, named
+/// `namespace`: tools, resources, a template, a prompt (when asked for), a
+/// page break in its tool list (when asked for), a `sampling` request in the
+/// middle of the `ask` tool, and tools that hang, die or cancel their own
+/// request.
+struct Rich {
+    namespace: &'static str,
+    prompts: bool,
+    pages: bool,
+    version: &'static str,
+    fail_lists: bool,
+}
+
+struct RichUp {
+    namespace: &'static str,
+    prompts: bool,
+    pages: bool,
+    version: &'static str,
+    fail_lists: bool,
+    /// What the server says goes out through this; dropped when it dies.
+    tx: Mutex<Option<mpsc::Sender<Value>>>,
+    asked: Arc<Mutex<Option<Value>>>,
+}
+
+#[async_trait]
+impl Connector for Rich {
+    async fn open(&self, _: StderrSink) -> Result<Opened, UpstreamError> {
+        let (tx, incoming) = mpsc::channel(64);
+        Ok(Opened {
+            upstream: Arc::new(RichUp {
+                namespace: self.namespace,
+                prompts: self.prompts,
+                pages: self.pages,
+                version: self.version,
+                fail_lists: self.fail_lists,
+                tx: Mutex::new(Some(tx)),
+                asked: Arc::default(),
+            }),
+            incoming,
+        })
+    }
+}
+
+#[async_trait]
+impl Upstream for RichUp {
+    async fn send(&self, frame: &Frame, _: &RequestContext) -> Result<(), UpstreamError> {
+        let message = &frame.value;
+        let ns = self.namespace;
+        let Some(tx) = self.tx.lock().unwrap().clone() else {
+            return Err(UpstreamError::Closed);
+        };
+        let id = message.get("id").cloned();
+        let params = message["params"].clone();
+        let Some(method) = message["method"].as_str() else {
+            // The agent answered the sampling request.
+            if message["id"] == json!(0)
+                && let Some(call) = self.asked.lock().unwrap().take()
+            {
+                let text = format!("answer:{}", message["result"]["text"]);
+                tokio::spawn(async move {
+                    let result = json!({"content": [{"type": "text", "text": text}]});
+                    let _ = tx.send(reply(&call, result)).await;
+                });
+            }
+            return Ok(());
+        };
+        let Some(id) = id else {
+            return Ok(());
+        };
+        let tool = params["name"].as_str().unwrap_or_default().to_owned();
+        let result = match method {
+            "initialize" => {
+                let mut caps =
+                    json!({"tools": {"listChanged": true}, "resources": {}, "logging": {}});
+                if self.prompts {
+                    caps["prompts"] = json!({});
+                }
+                json!({"protocolVersion": self.version, "capabilities": caps,
+                    "serverInfo": {"name": ns}})
+            }
+            "tools/list" if self.fail_lists => {
+                let error = json!({"jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32603, "message": "list is broken"}});
+                tokio::spawn(async move {
+                    let _ = tx.send(error).await;
+                });
+                return Ok(());
+            }
+            "tools/list" if self.pages && params["cursor"].is_null() => {
+                json!({"tools": [{"name": "echo"}], "nextCursor": "p2"})
+            }
+            "tools/list" if self.pages => json!({"tools": [{"name": format!("only_{ns}")}]}),
+            "tools/list" => json!({"tools": [{"name": "echo"}, {"name": format!("only_{ns}")}]}),
+            // Never answered, as a server does with a request it was told to
+            // give up on.
+            "tools/call" if tool == "hang" => return Ok(()),
+            // Gone, as a process that exited.
+            "tools/call" if tool == "die" => {
+                *self.tx.lock().unwrap() = None;
+                return Ok(());
+            }
+            "tools/call" if tool == "ask" || tool == "ask_then_cancel" => {
+                *self.asked.lock().unwrap() = Some(id.clone());
+                let ask = json!({"jsonrpc": "2.0", "id": 0, "method": "sampling/createMessage",
+                    "params": {"from": ns}});
+                let cancel = tool == "ask_then_cancel";
+                tokio::spawn(async move {
+                    let _ = tx.send(ask).await;
+                    if cancel {
+                        let _ = tx
+                            .send(
+                                json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                "params": {"requestId": 0}}),
+                            )
+                            .await;
+                    }
+                });
+                return Ok(());
+            }
+            "tools/call" => json!({"content": [
+                {"type": "text", "text": format!("{ns}:{}:{}", params["name"], params["arguments"])},
+                {"type": "resource_link", "uri": format!("linked://{ns}/x"), "name": "x"},
+            ]}),
+            "prompts/list" => json!({"prompts": [{"name": "brief"}]}),
+            "prompts/get" => json!({"messages": [{"role": "user",
+                "content": {"type": "text", "text": format!("{ns} prompt {}", params["name"])}}]}),
+            "resources/list" => json!({"resources": [
+                {"uri": "shared://both", "name": "shared"},
+                {"uri": format!("own://{ns}/doc"), "name": "own"}]}),
+            "resources/templates/list" => json!({"resourceTemplates": [
+                {"uriTemplate": format!("tpl://{ns}/{{id}}"), "name": "tpl"}]}),
+            "resources/read" => json!({"contents": [
+                {"uri": params["uri"], "text": format!("{ns} read")}]}),
+            "resources/subscribe" | "resources/unsubscribe" | "logging/setLevel" => json!({}),
+            "completion/complete" => json!({"completion": {"values": [ns]}}),
+            _ => {
+                let error = json!({"jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32601, "message": "Method not found"}});
+                tokio::spawn(async move {
+                    let _ = tx.send(error).await;
+                });
+                return Ok(());
+            }
+        };
+        tokio::spawn(async move {
+            let _ = tx.send(reply(&id, result)).await;
+        });
+        Ok(())
+    }
+
+    async fn close(&self) {}
+}
+
+/// A server that cannot be opened.
+struct Broken;
+
+#[async_trait]
+impl Connector for Broken {
+    async fn open(&self, _: StderrSink) -> Result<Opened, UpstreamError> {
+        Err(UpstreamError::Failed("it will not start".into()))
+    }
+}
+
+fn rich(namespace: &'static str, prompts: bool, pages: bool) -> Arc<Rich> {
+    Arc::new(Rich {
+        namespace,
+        prompts,
+        pages,
+        version: "2025-11-25",
+        fail_lists: false,
+    })
+}
+
+/// The root of a gateway over `a` (with prompts) and `b` (with pages).
+async fn root_of_two() -> (Harness, String) {
+    let h = start(vec![
+        ("a", rich("a", true, false)),
+        ("b", rich("b", false, true)),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let session = session_of(&response);
+    messages(response).await;
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    assert_eq!(h.post("", Some(&session), &note).await.status(), 202);
+    (h, session)
+}
+
+async fn ask(h: &Harness, session: &str, id: i64, method: &str, params: Value) -> Value {
+    let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    let got = messages(h.post("", Some(session), &message).await).await;
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0]["id"], id);
+    got[0].clone()
+}
+
+#[tokio::test]
+async fn the_root_answers_for_all_the_servers_at_once() {
+    let h = start(vec![
+        ("a", rich("a", true, false)),
+        ("b", rich("b", false, true)),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let session = session_of(&response);
+    let init = messages(response).await;
+    let result = &init[0]["result"];
+    assert_eq!(init[0]["id"], 1);
+    assert_eq!(result["serverInfo"]["name"], "coco-mcp-gateway");
+    assert_eq!(result["protocolVersion"], "2025-11-25");
+    let caps = &result["capabilities"];
+    assert_eq!(caps["tools"]["listChanged"], true);
+    assert!(caps.get("resources").is_some() && caps.get("logging").is_some());
+    assert!(caps.get("prompts").is_some(), "one of them has prompts");
+
+    // Each server was started, told who the agent is, and shaken hands with.
+    for ns in ["a", "b"] {
+        assert_eq!(
+            h.observer.of(ns),
+            [
+                format!("opened {ns}"),
+                "client test-agent 9.1".to_owned(),
+                "-> initialize".to_owned(),
+                "<- result \"coco:init\"".to_owned(),
+                "-> notifications/initialized".to_owned(),
+            ],
+            "{ns}"
+        );
+    }
+    // It is its own session, and ping is answered without asking anyone.
+    let pong = ask(&h, &session, 2, "ping", json!({})).await;
+    assert_eq!(pong["result"], json!({}));
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn the_root_speaks_initialize_and_nothing_else_first() {
+    let h = start(vec![("a", rich("a", false, false))]).await;
+    let discover = json!({"jsonrpc": "2.0", "id": 1, "method": "server/discover"});
+    let refused = h.post("", None, &discover).await;
+    assert_eq!(refused.status(), 400);
+    assert!(refused.text().await.unwrap().contains("-32601"));
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    assert_eq!(h.post("", None, &list).await.status(), 400);
+    assert_eq!(h.gateway.connections(), 0);
+    // A second initialize is refused: the handshake was done.
+    let response = h.post("", None, &initialize()).await;
+    let session = session_of(&response);
+    messages(response).await;
+    let again = ask(&h, &session, 5, "initialize", json!({})).await;
+    assert_eq!(again["error"]["code"], -32600);
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn tools_and_prompts_are_listed_with_their_server_in_front() {
+    let (h, session) = root_of_two().await;
+    let tools = ask(&h, &session, 2, "tools/list", json!({})).await;
+    let mut names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    names.sort_unstable();
+    // b's list came in two pages; both are here.
+    assert_eq!(names, ["a__echo", "a__only_a", "b__echo", "b__only_b"]);
+    let prompts = ask(&h, &session, 3, "prompts/list", json!({})).await;
+    assert_eq!(
+        prompts["result"]["prompts"][0]["name"], "a__brief",
+        "only a has any"
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_call_goes_to_the_server_its_name_says() {
+    let (h, session) = root_of_two().await;
+    let call = ask(
+        &h,
+        &session,
+        2,
+        "tools/call",
+        json!({"name": "b__echo", "arguments": {"x": 1}}),
+    )
+    .await;
+    assert_eq!(
+        call["result"]["content"][0]["text"], "b:\"echo\":{\"x\":1}",
+        "stripped for b"
+    );
+    assert!(h.observer.of("b").contains(&"-> tools/call".to_owned()));
+    assert!(!h.observer.of("a").contains(&"-> tools/call".to_owned()));
+
+    let prompt = ask(&h, &session, 3, "prompts/get", json!({"name": "a__brief"})).await;
+    assert_eq!(
+        prompt["result"]["messages"][0]["content"]["text"],
+        "a prompt \"brief\""
+    );
+    let unknown = ask(
+        &h,
+        &session,
+        4,
+        "tools/call",
+        json!({"name": "nobody__echo"}),
+    )
+    .await;
+    assert_eq!(unknown["error"]["code"], -32602);
+    let bare = ask(&h, &session, 5, "tools/call", json!({"name": "echo"})).await;
+    assert_eq!(
+        bare["error"]["code"], -32602,
+        "a name with no server in front"
+    );
+    let missing = ask(&h, &session, 6, "no/such/method", json!({})).await;
+    assert_eq!(missing["error"]["code"], -32601);
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn resources_keep_their_uris_and_are_read_from_the_server_that_serves_them() {
+    let (h, session) = root_of_two().await;
+    let list = ask(&h, &session, 2, "resources/list", json!({})).await;
+    let uris: Vec<&str> = list["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        uris,
+        ["shared://both", "own://a/doc", "own://b/doc"],
+        "listed once"
+    );
+    // The server after the first is told it lost the URI.
+    assert!(
+        h.observer
+            .of("b")
+            .iter()
+            .any(|l| l.contains("shared://both") && l.contains("serves it at the root")),
+        "{:?}",
+        h.observer.of("b")
+    );
+    let templates = ask(&h, &session, 3, "resources/templates/list", json!({})).await;
+    assert_eq!(
+        templates["result"]["resourceTemplates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let read = |uri: &'static str| json!({"uri": uri});
+    let first = ask(&h, &session, 4, "resources/read", read("shared://both")).await;
+    assert_eq!(
+        first["result"]["contents"][0]["text"], "a read",
+        "the first in order: {first}"
+    );
+    let own = ask(&h, &session, 5, "resources/read", read("own://b/doc")).await;
+    assert_eq!(own["result"]["contents"][0]["text"], "b read");
+    let by_template = ask(&h, &session, 6, "resources/read", read("tpl://b/7")).await;
+    assert_eq!(by_template["result"]["contents"][0]["text"], "b read");
+    let nowhere = ask(&h, &session, 7, "resources/read", read("nowhere://x")).await;
+    assert_eq!(nowhere["error"]["code"], -32002);
+    assert_eq!(nowhere["error"]["data"]["uri"], "nowhere://x");
+
+    // A URI a tool result linked to is served by the tool's server.
+    ask(
+        &h,
+        &session,
+        8,
+        "tools/call",
+        json!({"name": "b__echo", "arguments": {}}),
+    )
+    .await;
+    let linked = ask(&h, &session, 9, "resources/read", read("linked://b/x")).await;
+    assert_eq!(linked["result"]["contents"][0]["text"], "b read");
+    // Completion and subscription follow the same ways.
+    let completion = ask(
+        &h,
+        &session,
+        10,
+        "completion/complete",
+        json!({"ref": {"type": "ref/resource", "uri": "own://b/doc"}, "argument": {}}),
+    )
+    .await;
+    assert_eq!(completion["result"]["completion"]["values"][0], "b");
+    let prompt = ask(
+        &h,
+        &session,
+        11,
+        "completion/complete",
+        json!({"ref": {"type": "ref/prompt", "name": "a__brief"}, "argument": {}}),
+    )
+    .await;
+    assert_eq!(prompt["result"]["completion"]["values"][0], "a");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_request_a_server_makes_goes_to_the_agent_and_its_answer_back() {
+    let (h, session) = root_of_two().await;
+    let call = json!({"jsonrpc": "2.0", "id": 21, "method": "tools/call",
+        "params": {"name": "b__ask", "arguments": {}}});
+    let response = h.post("", Some(&session), &call).await;
+    assert_eq!(response.status(), 200);
+    use futures::StreamExt as _;
+    let mut stream = response.bytes_stream();
+    let mut seen = String::new();
+    // The server (b, the second) asks the agent something, under an id that
+    // says who asked and what it was.
+    let asked = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.next().await {
+            seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            if seen.contains("sampling/createMessage") {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(asked.is_ok(), "{seen}");
+    let line = seen.lines().find(|l| l.contains("sampling")).unwrap();
+    let request: Value = serde_json::from_str(line.trim_start_matches("data:").trim()).unwrap();
+    assert_eq!(request["id"], "coco-1-0", "server 1, its own id 0");
+    assert_eq!(request["params"]["from"], "b");
+
+    let answer = json!({"jsonrpc": "2.0", "id": "coco-1-0", "result": {"text": "yes"}});
+    assert_eq!(h.post("", Some(&session), &answer).await.status(), 202);
+    let finished = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.next().await {
+            seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+        }
+    })
+    .await;
+    assert!(finished.is_ok(), "{seen}");
+    assert!(
+        seen.contains("answer:\\\"yes\\\"") || seen.contains("answer:"),
+        "{seen}"
+    );
+    assert!(
+        seen.contains("\"id\":21"),
+        "the call's own answer, under the agent's id"
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_that_cannot_open_is_left_out_and_a_root_of_none_is_refused() {
+    let h = start(vec![
+        ("a", rich("a", false, false)),
+        ("broken", Arc::new(Broken)),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let session = session_of(&response);
+    messages(response).await;
+    let tools = ask(&h, &session, 2, "tools/list", json!({})).await;
+    assert_eq!(
+        tools["result"]["tools"].as_array().unwrap().len(),
+        2,
+        "only a's"
+    );
+    assert!(
+        h.observer
+            .of("broken")
+            .iter()
+            .any(|l| l.contains("could not open") && l.contains("it will not start"))
+    );
+    h.gateway.stop().await;
+
+    let none = start(vec![("broken", Arc::new(Broken))]).await;
+    let refused = none.post("", None, &initialize()).await;
+    assert_eq!(refused.status(), 502);
+    assert_eq!(none.gateway.connections(), 0);
+    none.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn changing_a_server_ends_the_root_and_a_new_one_has_the_new_servers() {
+    let (h, session) = root_of_two().await;
+    let a = h.gateway.connections();
+    assert_eq!(a, 1);
+    h.gateway
+        .set_servers(vec![
+            RelayServer {
+                namespace: "a".into(),
+                connector: rich("a", true, false),
+            },
+            RelayServer {
+                namespace: "c".into(),
+                connector: rich("c", false, false),
+            },
+        ])
+        .await;
+    let ping = json!({"jsonrpc": "2.0", "id": 9, "method": "ping"});
+    assert_eq!(h.post("", Some(&session), &ping).await.status(), 404);
+    let response = h.post("", None, &initialize()).await;
+    let fresh = session_of(&response);
+    messages(response).await;
+    let tools = ask(&h, &fresh, 2, "tools/list", json!({})).await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"c__echo") && !names.iter().any(|n| n.starts_with("b__")),
+        "{names:?}"
+    );
+    h.gateway.set_servers(vec![]).await;
+    assert_eq!(
+        h.post("", None, &initialize()).await.status(),
+        404,
+        "no servers, no root"
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn the_mock_servers_merged_at_the_root() {
+    let h = start(vec![
+        ("one", Arc::new(MockOverStreams(Schema::V1))),
+        ("two", Arc::new(MockOverStreams(Schema::V2))),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let session = session_of(&response);
+    messages(response).await;
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    assert_eq!(h.post("", Some(&session), &note).await.status(), 202);
+
+    let tools = ask(&h, &session, 2, "tools/list", json!({})).await;
+    let names: Vec<String> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.contains(&"one__echo".to_owned()), "{names:?}");
+    assert!(names.contains(&"two__add".to_owned()), "{names:?}");
+    assert!(
+        names
+            .iter()
+            .all(|n| n.starts_with("one__") || n.starts_with("two__"))
+    );
+
+    let echoed = ask(
+        &h,
+        &session,
+        3,
+        "tools/call",
+        json!({"name": "one__echo", "arguments": {"text": "merged"}}),
+    )
+    .await;
+    assert_eq!(echoed["result"]["content"][0]["text"], "merged");
+    assert!(h.observer.of("one").contains(&"-> tools/call".to_owned()));
+    assert!(!h.observer.of("two").contains(&"-> tools/call".to_owned()));
+
+    // Both list `mock://text/hello`: it is listed once, and read from one.
+    let list = ask(&h, &session, 4, "resources/list", json!({})).await;
+    let hello = list["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["uri"] == "mock://text/hello")
+        .count();
+    assert_eq!(hello, 1);
+    let read = ask(
+        &h,
+        &session,
+        5,
+        "resources/read",
+        json!({"uri": "mock://text/hello"}),
+    )
+    .await;
+    assert!(
+        read["result"]["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Hello")
+    );
+    h.gateway.stop().await;
+}
+
+// ---------------------------------------------- what the root's review found
+
+#[tokio::test]
+async fn a_root_connection_the_agent_walked_away_from_is_closed() {
+    let limits = Limits {
+        idle: Duration::from_millis(150),
+        sweep: Duration::from_millis(50),
+        ..Limits::default()
+    };
+    let h = start_with(
+        vec![
+            ("a", rich("a", false, false)),
+            ("b", rich("b", false, false)),
+        ],
+        limits,
+    )
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    let session = session_of(&response);
+    messages(response).await;
+    // A request no server answers, whose stream the agent drops.
+    let hang = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": "b__hang", "arguments": {}}});
+    let abandoned = h.post("", Some(&session), &hang).await;
+    assert_eq!(h.gateway.connections(), 1);
+    drop(abandoned);
+    wait_for("the sweep to end the root", || h.gateway.connections() == 0).await;
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_request_with_what_it_needs_missing_is_answered_not_left_waiting() {
+    let (h, session) = root_of_two().await;
+    for (id, method, params) in [
+        (2, "resources/read", json!({})),
+        (3, "resources/subscribe", json!({"nothing": true})),
+        (
+            4,
+            "completion/complete",
+            json!({"ref": {"type": "ref/resource"}}),
+        ),
+        (
+            5,
+            "completion/complete",
+            json!({"ref": {"type": "ref/prompt"}}),
+        ),
+        (
+            6,
+            "completion/complete",
+            json!({"ref": {"type": "ref/other"}}),
+        ),
+        (7, "tools/call", json!({})),
+    ] {
+        let got = ask(&h, &session, id, method, params).await;
+        assert_eq!(got["error"]["code"], -32602, "{method}: {got}");
+    }
+    // And the connection is not held by them.
+    assert_eq!(h.gateway.connections(), 1);
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn what_a_tool_linked_is_still_served_after_the_lists_are_read_again() {
+    let (h, session) = root_of_two().await;
+    ask(
+        &h,
+        &session,
+        2,
+        "tools/call",
+        json!({"name": "a__echo", "arguments": {}}),
+    )
+    .await;
+    // Listing again forgets what was listed, not what a result linked.
+    ask(&h, &session, 3, "resources/list", json!({})).await;
+    ask(&h, &session, 4, "resources/templates/list", json!({})).await;
+    let read = ask(
+        &h,
+        &session,
+        5,
+        "resources/read",
+        json!({"uri": "linked://a/x"}),
+    )
+    .await;
+    assert_eq!(read["result"]["contents"][0]["text"], "a read", "{read}");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn reads_of_uris_nobody_listed_yet_that_arrive_together_all_find_their_server() {
+    let (h, session) = root_of_two().await;
+    let h = Arc::new(h);
+    let mut tasks = Vec::new();
+    for id in 10..16 {
+        let (h, session) = (h.clone(), session.clone());
+        tasks.push(tokio::spawn(async move {
+            ask(
+                &h,
+                &session,
+                id,
+                "resources/read",
+                json!({"uri": "own://b/doc"}),
+            )
+            .await
+        }));
+    }
+    for task in tasks {
+        let read = task.await.unwrap();
+        assert_eq!(read["result"]["contents"][0]["text"], "b read", "{read}");
+    }
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn ids_the_gateway_makes_for_itself_are_not_the_agents_to_use() {
+    let (h, session) = root_of_two().await;
+    for reserved in ["coco:3", "coco-0-1"] {
+        let message = json!({"jsonrpc": "2.0", "id": reserved, "method": "tools/list"});
+        let got = messages(h.post("", Some(&session), &message).await).await;
+        assert_eq!(got[0]["error"]["code"], -32600, "{reserved}: {got:?}");
+    }
+    // Other string ids are the agent's, and come back as they went.
+    let message = json!({"jsonrpc": "2.0", "id": "my-id", "method": "ping"});
+    let got = messages(h.post("", Some(&session), &message).await).await;
+    assert_eq!(got[0]["id"], "my-id");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn the_root_speaks_the_oldest_version_every_server_agreed_to() {
+    let old = Arc::new(Rich {
+        namespace: "old",
+        prompts: false,
+        pages: false,
+        version: "2025-06-18",
+        fail_lists: false,
+    });
+    let h = start(vec![("a", rich("a", false, false)), ("old", old)]).await;
+    let response = h.post("", None, &initialize()).await;
+    let init = messages(response).await;
+    assert_eq!(init[0]["result"]["protocolVersion"], "2025-06-18");
+    h.gateway.stop().await;
+
+    let same = start(vec![("a", rich("a", false, false))]).await;
+    let init = messages(same.post("", None, &initialize()).await).await;
+    assert_eq!(
+        init[0]["result"]["protocolVersion"], "2025-11-25",
+        "as asked"
+    );
+    same.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_that_cancels_its_own_request_names_it_as_the_agent_knows_it() {
+    let (h, session) = root_of_two().await;
+    let call = json!({"jsonrpc": "2.0", "id": 30, "method": "tools/call",
+        "params": {"name": "b__ask_then_cancel", "arguments": {}}});
+    let response = h.post("", Some(&session), &call).await;
+    use futures::StreamExt as _;
+    let mut stream = response.bytes_stream();
+    let mut seen = String::new();
+    let got = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.next().await {
+            seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            if seen.contains("notifications/cancelled") {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(got.is_ok(), "{seen}");
+    // The request was `coco-1-0`; the cancellation says so.
+    assert!(seen.contains("\"id\":\"coco-1-0\""), "{seen}");
+    assert!(seen.contains("\"requestId\":\"coco-1-0\""), "{seen}");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_that_goes_away_mid_request_fails_it_and_leaves_the_others() {
+    let (h, session) = root_of_two().await;
+    let die = ask(
+        &h,
+        &session,
+        2,
+        "tools/call",
+        json!({"name": "b__die", "arguments": {}}),
+    )
+    .await;
+    assert_eq!(die["error"]["code"], -32603);
+    assert!(
+        die["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("went away"),
+        "{die}"
+    );
+    assert!(h.observer.of("b").iter().any(|l| l.starts_with("closed")));
+    // a goes on; b's tools are gone from the list and calls to it fail.
+    let echo = ask(
+        &h,
+        &session,
+        3,
+        "tools/call",
+        json!({"name": "a__echo", "arguments": {}}),
+    )
+    .await;
+    assert!(echo.get("result").is_some(), "{echo}");
+    let tools = ask(&h, &session, 4, "tools/list", json!({})).await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(names.iter().all(|n| n.starts_with("a__")), "{names:?}");
+    // With every server gone the root is over.
+    ask(
+        &h,
+        &session,
+        5,
+        "tools/call",
+        json!({"name": "a__die", "arguments": {}}),
+    )
+    .await;
+    wait_for("the root to end", || h.gateway.connections() == 0).await;
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_list_that_fails_leaves_that_server_out_and_not_the_answer() {
+    let broken = Arc::new(Rich {
+        namespace: "broken",
+        prompts: false,
+        pages: false,
+        version: "2025-11-25",
+        fail_lists: true,
+    });
+    let h = start(vec![("a", rich("a", false, false)), ("broken", broken)]).await;
+    let response = h.post("", None, &initialize()).await;
+    let session = session_of(&response);
+    messages(response).await;
+    let tools = ask(&h, &session, 2, "tools/list", json!({})).await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["a__echo", "a__only_a"]);
+    assert!(
+        h.observer
+            .of("broken")
+            .iter()
+            .any(|l| l.contains("left out of the list") && l.contains("list is broken"))
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn subscriptions_levels_and_cancellations_are_routed() {
+    let (h, session) = root_of_two().await;
+    let sub = ask(
+        &h,
+        &session,
+        2,
+        "resources/subscribe",
+        json!({"uri": "own://b/doc"}),
+    )
+    .await;
+    assert_eq!(sub["result"], json!({}));
+    assert!(
+        h.observer
+            .of("b")
+            .contains(&"-> resources/subscribe".to_owned())
+    );
+    assert!(
+        !h.observer
+            .of("a")
+            .contains(&"-> resources/subscribe".to_owned())
+    );
+
+    // A level is set on every server that logs.
+    let level = ask(
+        &h,
+        &session,
+        3,
+        "logging/setLevel",
+        json!({"level": "debug"}),
+    )
+    .await;
+    assert_eq!(level["result"], json!({}));
+    for ns in ["a", "b"] {
+        assert!(
+            h.observer
+                .of(ns)
+                .contains(&"-> logging/setLevel".to_owned()),
+            "{ns}"
+        );
+    }
+
+    // A request in flight is cancelled at the server that has it.
+    let hang = json!({"jsonrpc": "2.0", "id": 40, "method": "tools/call",
+        "params": {"name": "b__hang", "arguments": {}}});
+    let _waiting = h.post("", Some(&session), &hang).await;
+    let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+        "params": {"requestId": 40}});
+    assert_eq!(h.post("", Some(&session), &cancel).await.status(), 202);
+    wait_for("the cancellation at b", || {
+        h.observer
+            .of("b")
+            .contains(&"-> notifications/cancelled".to_owned())
+    })
+    .await;
+    assert!(
+        !h.observer
+            .of("a")
+            .contains(&"-> notifications/cancelled".to_owned())
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn only_the_servers_after_the_first_to_list_a_uri_are_told_it_is_not_theirs() {
+    let h = start(vec![
+        ("a", rich("a", false, false)),
+        ("b", rich("b", false, false)),
+        ("c", rich("c", false, false)),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    let session = session_of(&response);
+    messages(response).await;
+    ask(&h, &session, 2, "resources/list", json!({})).await;
+    let told = |ns: &str| {
+        h.observer
+            .of(ns)
+            .iter()
+            .any(|l| l.contains("shared://both") && l.contains("serves it at the root"))
+    };
+    assert!(!told("a"), "the first lists it and serves it");
+    assert!(told("b") && told("c"));
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_that_cannot_open_leaves_a_trace_in_its_log() {
+    let h = start(vec![
+        ("a", rich("a", false, false)),
+        ("broken", Arc::new(Broken)),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    messages(response).await;
+    // That an agent reached for it, who, why it could not be opened, and that
+    // it is gone: in that order, so a log can show all of it.
+    let lines = h.observer.of("broken");
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert_eq!(lines[0], "opened broken");
+    assert_eq!(lines[1], "client test-agent 9.1");
+    assert!(lines[2].contains("could not open") && lines[2].contains("it will not start"));
+    assert_eq!(lines[3], "closed could not be opened");
+    h.gateway.stop().await;
+}
+
+/// A server that answers every POST with an event stream that carries a
+/// notification and ends: it never answers the request.
+async fn unanswering_sse_server() -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                // The request: its head, then the body it announces.
+                let mut seen = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let Ok(n) = socket.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    seen.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&seen).to_string();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let length = text[..end]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if seen.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let body = "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n";
+                let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nmcp-session-id: up-1\r\nconnection: close\r\n\r\n";
+                let _ = socket.write_all(format!("{head}{body}").as_bytes()).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn an_event_stream_that_ends_without_an_answer_is_answered_with_an_error() {
+    let url = unanswering_sse_server().await;
+    let h = start(vec![("web", connector(&url, Arc::new(NoAuth)))]).await;
+    let response = h.post("web", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let got = tokio::time::timeout(Duration::from_secs(5), messages(response))
+        .await
+        .expect("the stream ended instead of hanging");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0]["method"], "notifications/progress");
+    assert_eq!(got[1]["id"], 1);
+    assert!(
+        got[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("ended before it answered")
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn servers_over_http_are_merged_at_the_root_too() {
+    let one = http_mock(HttpAuth::None).await;
+    let two = http_mock(HttpAuth::Bearer("two-secret".into())).await;
+    let h = start(vec![
+        ("one", connector(&one.url, Arc::new(NoAuth))),
+        (
+            "two",
+            connector(&two.url, Arc::new(Bearer("two-secret".into()))),
+        ),
+    ])
+    .await;
+    let response = h.post("", None, &initialize()).await;
+    assert_eq!(response.status(), 200);
+    let session = session_of(&response);
+    messages(response).await;
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    assert_eq!(h.post("", Some(&session), &note).await.status(), 202);
+    let tools = ask(&h, &session, 2, "tools/list", json!({})).await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"one__echo") && names.contains(&"two__echo"),
+        "{names:?}"
+    );
+    let echoed = ask(
+        &h,
+        &session,
+        3,
+        "tools/call",
+        json!({"name": "two__echo", "arguments": {"text": "over http"}}),
+    )
+    .await;
+    assert_eq!(
+        echoed["result"]["content"][0]["text"], "over http",
+        "{echoed}"
+    );
+    h.gateway.stop().await;
+    one.shutdown();
+    two.shutdown();
 }

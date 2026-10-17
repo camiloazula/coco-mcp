@@ -25,12 +25,15 @@
 // unwrap()/expect() are denied in shipped code but fine inside tests.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod aggregate;
 mod frame;
 mod http;
+mod merge;
 mod observe;
 mod relay;
 mod server;
 mod stdio;
+mod streams;
 mod upstream;
 
 pub use observe::{ClientInfo, Observer, Silent, Traffic};

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +23,57 @@ use crate::upstream::{Frame, INCOMING, Opened, RequestContext, Upstream, Upstrea
 
 /// Messages kept for a stream that is not open yet; the oldest go first.
 const BACKLOG: usize = 256;
+
+/// One agent's connection, to one server or to all of them: what the server
+/// side holds for it.
+#[async_trait]
+pub(crate) trait Session: Send + Sync {
+    /// Names the connection.
+    fn id(&self) -> &str;
+    /// The server it reaches; empty for the root.
+    fn namespace(&self) -> &str;
+    /// Whether it is over.
+    fn is_closed(&self) -> bool;
+    /// Whether nobody has used it for `limit`.
+    fn is_idle(&self, limit: Duration) -> bool;
+    /// Take what the agent posted.
+    async fn post(&self, frame: Frame, context: &RequestContext) -> Result<Posted, UpstreamError>;
+    /// Open the agent's stream. `None` when one is open already.
+    fn listen(&self) -> Option<mpsc::Receiver<Value>>;
+    /// End it.
+    async fn close(&self, reason: &str);
+}
+
+#[async_trait]
+impl Session for Relay {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    fn is_closed(&self) -> bool {
+        Relay::is_closed(self)
+    }
+
+    fn is_idle(&self, limit: Duration) -> bool {
+        Relay::is_idle(self, limit)
+    }
+
+    async fn post(&self, frame: Frame, context: &RequestContext) -> Result<Posted, UpstreamError> {
+        Relay::post(self, frame, context).await
+    }
+
+    fn listen(&self) -> Option<mpsc::Receiver<Value>> {
+        Relay::listen(self)
+    }
+
+    async fn close(&self, reason: &str) {
+        Relay::close(self, reason).await;
+    }
+}
 
 /// What posting a message came to.
 #[derive(Debug)]
