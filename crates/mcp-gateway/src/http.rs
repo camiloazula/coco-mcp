@@ -145,6 +145,12 @@ fn failed(e: impl std::fmt::Display) -> UpstreamError {
     UpstreamError::Failed(e.to_string())
 }
 
+/// A failed request, without the URL reqwest names it by: the URL may carry
+/// the server's credential, and this goes back to the agent.
+fn unreached(e: reqwest::Error) -> UpstreamError {
+    UpstreamError::Failed(e.without_url().to_string())
+}
+
 impl Session {
     /// A request carrying what every one does: the server's own headers,
     /// the agent's `Mcp-*` ones, the session and the credentials.
@@ -192,7 +198,7 @@ impl Session {
             .await?
             .send()
             .await
-            .map_err(failed)?;
+            .map_err(unreached)?;
         self.remember(response.headers());
         let status = response.status();
         if !status.is_success() {
@@ -328,7 +334,7 @@ async fn read_capped(response: reqwest::Response, cap: usize) -> Result<Vec<u8>,
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(failed)?;
+        let chunk = chunk.map_err(unreached)?;
         if body.len() + chunk.len() > cap {
             return Err(UpstreamError::Failed(format!(
                 "the server's answer is over {cap} bytes"
@@ -386,6 +392,14 @@ fn event_end(buffer: &[u8]) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_separator_split_between_chunks_is_still_one() {
+        let mut events = Events::default();
+        assert!(events.feed(b"data: {\"a\":1}\r\n").unwrap().is_empty());
+        assert!(events.feed(b"\r").unwrap().is_empty());
+        assert_eq!(events.feed(b"\n").unwrap(), [r#"{"a":1}"#]);
+    }
 
     #[test]
     fn events_are_read_across_chunks_and_separators() {

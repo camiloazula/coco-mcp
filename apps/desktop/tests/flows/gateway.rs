@@ -210,7 +210,9 @@ pub fn gateway_flow() {
                 .unwrap();
         })
     });
-    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
+    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "flow-agent", "version": "1.0"}}});
     let mut renamed = 0;
     for _ in 0..80 {
         renamed = call(
@@ -239,6 +241,53 @@ pub fn gateway_flow() {
         Some(ping),
     );
     assert_eq!(old.status, 404, "the old one does not");
+
+    // The token is replaced while an agent is connected (the one that just
+    // initialized on the new path): the gateway comes back on the same port,
+    // and only the new token gets in.
+    let old_token = token.clone();
+    live.cx.update(|cx| {
+        live.state
+            .update(cx, |s, cx| s.gateway_regenerate_token(cx))
+    });
+    live.wait("the gateway restarts with a new token", |s| {
+        matches!(s.gateway.status, Gateway::Running(_))
+            && s.gateway.token().is_some_and(|t| t != old_token)
+    });
+    let new_token = live
+        .cx
+        .update(|cx| live.state.read(cx).gateway.token().map(str::to_owned))
+        .unwrap();
+    let hello = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "flow-agent", "version": "1.0"}}});
+    let stale = call(
+        &bridge,
+        port,
+        &old_token,
+        reqwest::Method::POST,
+        "renamed",
+        None,
+        Some(hello.clone()),
+    );
+    assert_eq!(stale.status, 401, "the old token is turned away");
+    let fresh = call(
+        &bridge,
+        port,
+        &new_token,
+        reqwest::Method::POST,
+        "renamed",
+        None,
+        Some(hello),
+    );
+    assert_eq!(fresh.status, 200, "{}", fresh.body);
+    let status = live
+        .cx
+        .update(|cx| live.state.read(cx).gateway.status.clone());
+    assert!(
+        matches!(status, Gateway::Running(addr) if addr.port() == port),
+        "{status:?}"
+    );
 
     // Off, and nothing is listening.
     live.cx

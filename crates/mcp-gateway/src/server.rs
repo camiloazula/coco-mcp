@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -26,11 +27,11 @@ use crate::upstream::{Connector, Frame, RequestContext, StderrSink, UpstreamErro
 
 /// Largest message an agent may post, in bytes.
 const MAX_BODY: usize = 32 * 1024 * 1024;
-/// Agent connections one server takes at once.
+/// Agent connections one server takes at once, by default.
 const MAX_CONNECTIONS: usize = 16;
-/// How long a connection nobody uses is kept.
+/// How long a connection nobody uses is kept, by default.
 const IDLE_LIMIT: Duration = Duration::from_secs(30 * 60);
-/// How often connections are checked for that.
+/// How often connections are checked for that, by default.
 const SWEEP: Duration = Duration::from_secs(30);
 /// How long stopping may wait for the streams to end.
 const STOP_AFTER: Duration = Duration::from_secs(3);
@@ -62,9 +63,36 @@ pub fn valid_namespace(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// How much the gateway lets an agent have.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Agent connections one server takes at once.
+    pub connections: usize,
+    /// How long a connection nobody uses is kept.
+    pub idle: Duration,
+    /// How often connections are checked for that.
+    pub sweep: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            connections: MAX_CONNECTIONS,
+            idle: IDLE_LIMIT,
+            sweep: SWEEP,
+        }
+    }
+}
+
 struct Shared {
     token: String,
     port: u16,
+    limits: Limits,
+    /// Set once stopping begins: nothing new is accepted.
+    stopping: AtomicBool,
+    /// Connections being opened, by server, so the cap holds for agents that
+    /// arrive together.
+    opening: Mutex<HashMap<String, usize>>,
     servers: RwLock<HashMap<String, Arc<dyn Connector>>>,
     relays: Mutex<HashMap<String, Arc<Relay>>>,
     observer: Arc<dyn Observer>,
@@ -96,11 +124,25 @@ impl Gateway {
         servers: Vec<RelayServer>,
         observer: Arc<dyn Observer>,
     ) -> std::io::Result<Self> {
+        Self::start_with(port, token, servers, observer, Limits::default()).await
+    }
+
+    /// [`Self::start`], with other limits.
+    pub async fn start_with(
+        port: u16,
+        token: String,
+        servers: Vec<RelayServer>,
+        observer: Arc<dyn Observer>,
+        limits: Limits,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port)).await?;
         let addr = listener.local_addr()?;
         let shared = Arc::new(Shared {
             token,
             port: addr.port(),
+            limits,
+            stopping: AtomicBool::new(false),
+            opening: Mutex::new(HashMap::new()),
             servers: RwLock::new(
                 servers
                     .into_iter()
@@ -187,14 +229,17 @@ impl Gateway {
     /// Stop: end every agent connection and the servers behind them. Stopping
     /// a gateway that has stopped does nothing.
     pub async fn stop(&self) {
-        let relays: Vec<Arc<Relay>> = self
-            .shared
-            .relays
-            .lock()
-            .map(|r| r.values().cloned().collect())
-            .unwrap_or_default();
-        for relay in relays {
-            relay.close("the gateway stopped").await;
+        // Nothing new from here on, then every connection there is, ended
+        // together so that one server slow to close does not hold the rest.
+        self.shared.stopping.store(true, Ordering::SeqCst);
+        for _ in 0..2 {
+            let relays: Vec<Arc<Relay>> = self
+                .shared
+                .relays
+                .lock()
+                .map(|r| r.values().filter(|r| !r.is_closed()).cloned().collect())
+                .unwrap_or_default();
+            futures::future::join_all(relays.iter().map(|r| r.close("the gateway stopped"))).await;
         }
         self.cancel.cancel();
         let serving = self.serving.lock().ok().and_then(|mut s| s.take());
@@ -209,14 +254,14 @@ async fn sweep(shared: Arc<Shared>, stop: CancellationToken) {
     loop {
         tokio::select! {
             () = stop.cancelled() => return,
-            () = tokio::time::sleep(SWEEP) => {}
+            () = tokio::time::sleep(shared.limits.sweep) => {}
         }
         let (idle, ended): (Vec<_>, Vec<_>) = shared
             .relays
             .lock()
             .map(|r| r.values().cloned().partition(|r| !r.is_closed()))
             .unwrap_or_default();
-        for relay in idle.iter().filter(|r| r.is_idle(IDLE_LIMIT)) {
+        for relay in idle.iter().filter(|r| r.is_idle(shared.limits.idle)) {
             relay.close("the agent was idle for too long").await;
         }
         if let Ok(mut relays) = shared.relays.lock() {
@@ -298,6 +343,13 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
     if let Some(refused) = shared.check(&parts.headers) {
         return refused;
     }
+    if shared.stopping.load(Ordering::SeqCst) {
+        return rpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            -32603,
+            "The gateway is stopping",
+        );
+    }
     let namespace = parts.uri.path().trim_matches('/').to_owned();
     let Some(connector) = shared.connector(&namespace) else {
         return rpc_error(
@@ -357,10 +409,22 @@ async fn post(
                 return rpc_error(StatusCode::NOT_FOUND, -32600, "Unknown or ended session");
             }
         },
-        None => match connect(shared, namespace, &connector).await {
-            Ok(relay) => (relay, true),
-            Err(response) => return *response,
-        },
+        None => {
+            // A connection starts a process or a session of its own, so a
+            // message that is not the start of one does not make it.
+            let method = value.get("method").and_then(Value::as_str);
+            if !matches!(method, Some("initialize" | "server/discover")) {
+                return rpc_error(
+                    StatusCode::BAD_REQUEST,
+                    -32600,
+                    "Start with initialize, and send the Mcp-Session-Id it answers with",
+                );
+            }
+            match connect(shared, namespace, &connector).await {
+                Ok(relay) => (relay, true),
+                Err(response) => return *response,
+            }
+        }
     };
     if created && let Some(info) = client_info(&value) {
         shared.observer.client(namespace, &relay.id, info);
@@ -397,38 +461,79 @@ async fn connect(
     namespace: &str,
     connector: &Arc<dyn Connector>,
 ) -> Result<Arc<Relay>, Box<Response>> {
-    let open = shared.relays.lock().map_or(0, |relays| {
-        relays
+    // Count what is open and what is being opened, and reserve a place, in
+    // one step: agents that arrive together cannot all see room.
+    let reserved = {
+        let (Ok(relays), Ok(mut opening)) = (shared.relays.lock(), shared.opening.lock()) else {
+            return Err(Box::new(rpc_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                -32603,
+                "The gateway is in an unusable state",
+            )));
+        };
+        let open = relays
             .values()
             .filter(|r| r.namespace == namespace && !r.is_closed())
-            .count()
-    });
-    if open >= MAX_CONNECTIONS {
+            .count();
+        let pending = opening.entry(namespace.to_owned()).or_insert(0);
+        if open + *pending >= shared.limits.connections {
+            false
+        } else {
+            *pending += 1;
+            true
+        }
+    };
+    if !reserved {
         return Err(Box::new(rpc_error(
             StatusCode::TOO_MANY_REQUESTS,
             -32600,
             "Too many agents are connected to this server",
         )));
     }
+    let release = || {
+        if let Ok(mut opening) = shared.opening.lock()
+            && let Some(pending) = opening.get_mut(namespace)
+        {
+            *pending = pending.saturating_sub(1);
+        }
+    };
     let id = uuid::Uuid::new_v4().simple().to_string();
     let stderr: StderrSink = {
         let observer = shared.observer.clone();
         let (namespace, id) = (namespace.to_owned(), id.clone());
         Arc::new(move |line| observer.stderr(&namespace, &id, &line))
     };
-    let opened = connector
-        .open(stderr)
-        .await
-        .map_err(|e| Box::new(upstream_error(e)))?;
+    let opened = match connector.open(stderr).await {
+        Ok(opened) => opened,
+        Err(e) => {
+            release();
+            return Err(Box::new(upstream_error(e)));
+        }
+    };
     let relay = Relay::start(
         namespace.to_owned(),
         id.clone(),
         opened,
         shared.observer.clone(),
     );
+    // The server may have been changed, or the gateway stopped, while it was
+    // opening: a connection to what is no longer answered for is not kept.
+    let current = shared
+        .connector(namespace)
+        .is_some_and(|now| std::ptr::addr_eq(Arc::as_ptr(&now), Arc::as_ptr(connector)));
+    if !current || shared.stopping.load(Ordering::SeqCst) {
+        release();
+        relay.close("the server changed while it was opening").await;
+        return Err(Box::new(rpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            -32603,
+            "The server changed while it was opening: try again",
+        )));
+    }
     if let Ok(mut relays) = shared.relays.lock() {
         relays.insert(id.clone(), relay.clone());
     }
+    release();
     shared.observer.opened(namespace, &id);
     Ok(relay)
 }
@@ -474,6 +579,21 @@ fn stream_response(messages: mpsc::Receiver<Value>) -> Response {
 /// it was one, else a gateway error.
 fn upstream_error(error: UpstreamError) -> Response {
     match error {
+        // The server turned the gateway away, not the agent: the agent is not
+        // sent to authorize against the gateway over it.
+        UpstreamError::Http {
+            status: status @ (401 | 403),
+            body,
+            ..
+        } => {
+            let detail = String::from_utf8_lossy(&body);
+            let detail: String = detail.chars().take(300).collect();
+            rpc_error(
+                StatusCode::BAD_GATEWAY,
+                -32603,
+                &format!("The server refused the gateway's credentials (HTTP {status}): {detail}"),
+            )
+        }
         UpstreamError::Http {
             status,
             headers,

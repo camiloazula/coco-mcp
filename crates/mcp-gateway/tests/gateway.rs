@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use mcp_gateway::{
-    Authorizer, Bearer, ClientInfo, Connector, Direction, Frame, Gateway, HttpConnector, NoAuth,
-    Observer, Opened, RelayServer, RequestContext, StderrSink, Traffic, Upstream, UpstreamError,
-    stdio_over_streams,
+    Authorizer, Bearer, ClientInfo, Connector, Direction, Frame, Gateway, HttpConnector, Limits,
+    NoAuth, Observer, Opened, RelayServer, RequestContext, StderrSink, Traffic, Upstream,
+    UpstreamError, stdio_over_streams,
 };
 use mcp_mockserver::http::{HttpAuth, serve_http_with};
 use mcp_mockserver::{Faults, MockServer, Schema};
@@ -178,6 +178,10 @@ struct Harness {
 }
 
 async fn start(servers: Vec<(&str, Arc<dyn Connector>)>) -> Harness {
+    start_with(servers, Limits::default()).await
+}
+
+async fn start_with(servers: Vec<(&str, Arc<dyn Connector>)>, limits: Limits) -> Harness {
     let observer = Arc::new(Recorder::default());
     let servers = servers
         .into_iter()
@@ -186,7 +190,7 @@ async fn start(servers: Vec<(&str, Arc<dyn Connector>)>) -> Harness {
             connector,
         })
         .collect();
-    let gateway = Gateway::start(0, TOKEN.into(), servers, observer.clone())
+    let gateway = Gateway::start_with(0, TOKEN.into(), servers, observer.clone(), limits)
         .await
         .unwrap();
     let base = format!("http://127.0.0.1:{}", gateway.addr().port());
@@ -270,7 +274,7 @@ async fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
 #[tokio::test]
 async fn only_this_machine_with_the_token_gets_in() {
     let h = start(vec![("fake", fake())]).await;
-    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
+    let body = initialize();
     let post = |request: reqwest::RequestBuilder| {
         let request = request.json(&body);
         async move { request.send().await.unwrap() }
@@ -329,7 +333,7 @@ async fn only_this_machine_with_the_token_gets_in() {
 async fn paths_sessions_and_messages_that_are_wrong_are_refused() {
     let h = start(vec![("fake", fake())]).await;
     let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-    assert_eq!(h.post("nobody", None, &ping).await.status(), 404);
+    assert_eq!(h.post("nobody", None, &initialize()).await.status(), 404);
     assert_eq!(
         h.post("fake", Some("not-a-session"), &ping).await.status(),
         404
@@ -352,7 +356,7 @@ async fn paths_sessions_and_messages_that_are_wrong_are_refused() {
 
     // A session belongs to the server it was opened for.
     let other = start(vec![("a", fake()), ("b", fake())]).await;
-    let first = other.post("a", None, &ping).await;
+    let first = other.post("a", None, &initialize()).await;
     let session = session_of(&first);
     assert_eq!(other.post("b", Some(&session), &ping).await.status(), 404);
     assert_eq!(other.post("a", Some(&session), &ping).await.status(), 200);
@@ -521,8 +525,7 @@ async fn a_server_that_goes_away_ends_the_connection() {
         }
     }
     let h = start(vec![("gone", Arc::new(Exits))]).await;
-    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-    let _ = h.post("gone", None, &ping).await;
+    let _ = h.post("gone", None, &initialize()).await;
     wait_for("the connection to end", || h.gateway.connections() == 0).await;
     h.gateway.stop().await;
 }
@@ -532,8 +535,8 @@ async fn changing_the_servers_ends_the_connections_to_one_that_changed() {
     let a = fake();
     let h = start(vec![("a", a.clone()), ("b", fake())]).await;
     let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-    let on_a = session_of(&h.post("a", None, &ping).await);
-    let on_b = session_of(&h.post("b", None, &ping).await);
+    let on_a = session_of(&h.post("a", None, &initialize()).await);
+    let on_b = session_of(&h.post("b", None, &initialize()).await);
     assert_eq!(h.gateway.connections(), 2);
 
     // `a` stays as it is, `b` is replaced, `c` is new.
@@ -554,12 +557,12 @@ async fn changing_the_servers_ends_the_connections_to_one_that_changed() {
     h.gateway.set_servers(servers).await;
     assert_eq!(h.post("a", Some(&on_a), &ping).await.status(), 200);
     assert_eq!(h.post("b", Some(&on_b), &ping).await.status(), 404);
-    assert_eq!(h.post("c", None, &ping).await.status(), 200);
+    assert_eq!(h.post("c", None, &initialize()).await.status(), 200);
 
     h.gateway.set_servers(vec![]).await;
     assert_eq!(h.post("a", Some(&on_a), &ping).await.status(), 404);
     assert_eq!(
-        h.post("a", None, &ping).await.status(),
+        h.post("a", None, &initialize()).await.status(),
         404,
         "no such path now"
     );
@@ -571,9 +574,8 @@ async fn stopping_ends_every_connection() {
     let connector = fake();
     let closes = connector.closes.clone();
     let h = start(vec![("fake", connector)]).await;
-    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
     for _ in 0..3 {
-        h.post("fake", None, &ping).await;
+        h.post("fake", None, &initialize()).await;
     }
     assert_eq!(h.gateway.connections(), 3);
     let observer = h.observer.clone();
@@ -592,11 +594,10 @@ async fn stopping_ends_every_connection() {
 #[tokio::test]
 async fn one_server_takes_only_so_many_agents() {
     let h = start(vec![("fake", fake())]).await;
-    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
     for _ in 0..16 {
-        assert_eq!(h.post("fake", None, &ping).await.status(), 200);
+        assert_eq!(h.post("fake", None, &initialize()).await.status(), 200);
     }
-    assert_eq!(h.post("fake", None, &ping).await.status(), 429);
+    assert_eq!(h.post("fake", None, &initialize()).await.status(), 429);
     h.gateway.stop().await;
 }
 
@@ -607,25 +608,48 @@ async fn an_http_error_from_the_server_reaches_the_agent_as_it_was() {
     let refusing = Arc::new(Fake {
         script: script(),
         fail: Some(|| UpstreamError::Http {
-            status: 401,
-            headers: vec![(
-                "www-authenticate".into(),
-                "Bearer realm=\"upstream\"".into(),
-            )],
-            body: br#"{"error":"nope"}"#.to_vec(),
+            status: 406,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: br#"{"error":"not acceptable"}"#.to_vec(),
         }),
         closes: Arc::default(),
     });
     let h = start(vec![("fake", refusing)]).await;
     let response = h.post("fake", None, &initialize()).await;
-    assert_eq!(response.status(), 401);
+    assert_eq!(response.status(), 406);
+    assert_eq!(response.headers()["content-type"], "application/json");
     assert_eq!(
-        response.headers()["www-authenticate"],
-        "Bearer realm=\"upstream\""
+        response.text().await.unwrap(),
+        r#"{"error":"not acceptable"}"#
     );
-    assert_eq!(response.text().await.unwrap(), r#"{"error":"nope"}"#);
     // The connection that could not start is not left behind.
     wait_for("it to end", || h.gateway.connections() == 0).await;
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_servers_refusal_of_the_gateway_is_not_taken_for_the_agents_own() {
+    let refusing = Arc::new(Fake {
+        script: script(),
+        fail: Some(|| UpstreamError::Http {
+            status: 401,
+            headers: vec![(
+                "www-authenticate".into(),
+                "Bearer realm=\"upstream\"".into(),
+            )],
+            body: br#"{"error":"bad token"}"#.to_vec(),
+        }),
+        closes: Arc::default(),
+    });
+    let h = start(vec![("fake", refusing)]).await;
+    let response = h.post("fake", None, &initialize()).await;
+    assert_eq!(response.status(), 502, "not the 401 the agent would act on");
+    assert!(!response.headers().contains_key("www-authenticate"));
+    let text = response.text().await.unwrap();
+    assert!(
+        text.contains("HTTP 401") && text.contains("bad token"),
+        "{text}"
+    );
     h.gateway.stop().await;
 }
 
@@ -744,8 +768,12 @@ async fn the_servers_credentials_are_added_and_its_refusal_passed_on() {
     assert_eq!(init[0]["result"]["serverInfo"]["name"], "mcp-mockserver");
 
     let refused = h.post("bad", None, &initialize()).await;
-    assert_eq!(refused.status(), 401, "the server's own answer");
-    assert!(refused.headers().contains_key("www-authenticate"));
+    assert_eq!(
+        refused.status(),
+        502,
+        "the gateway's credentials, not the agent's"
+    );
+    assert!(refused.text().await.unwrap().contains("HTTP 401"));
     h.gateway.stop().await;
     server.shutdown();
 }
@@ -765,8 +793,7 @@ async fn a_process_is_started_per_agent_and_stopped_with_its_session() {
         cwd: None,
     });
     let h = start(vec![("proc", connector)]).await;
-    let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-    let response = h.post("proc", None, &ping).await;
+    let response = h.post("proc", None, &initialize()).await;
     let session = session_of(&response);
     assert_eq!(
         messages(response).await,
@@ -796,9 +823,157 @@ async fn a_process_is_started_per_agent_and_stopped_with_its_session() {
         }),
     )])
     .await;
-    let failed = missing.post("nope", None, &ping).await;
+    let failed = missing.post("nope", None, &initialize()).await;
     assert_eq!(failed.status(), 502);
     assert!(failed.text().await.unwrap().contains("failed to start"));
     missing.gateway.stop().await;
+    h.gateway.stop().await;
+}
+
+// ----------------------------------------------------- what the review found
+
+#[tokio::test]
+async fn a_message_that_does_not_start_a_connection_makes_none() {
+    let h = start(vec![("fake", fake())]).await;
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}});
+    assert_eq!(h.post("fake", None, &call).await.status(), 400);
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    assert_eq!(h.post("fake", None, &note).await.status(), 400);
+    assert_eq!(h.gateway.connections(), 0);
+    assert!(h.observer.log().is_empty(), "nothing was opened");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_request_the_agent_gave_up_on_does_not_keep_its_connection() {
+    let limits = Limits {
+        idle: Duration::from_millis(150),
+        sweep: Duration::from_millis(50),
+        ..Limits::default()
+    };
+    let h = start_with(vec![("fake", fake())], limits).await;
+    let response = h.post("fake", None, &initialize()).await;
+    let session = session_of(&response);
+    messages(response).await;
+    // A request the server never answers, whose stream the agent drops.
+    let hang = json!({"jsonrpc": "2.0", "id": 9, "method": "hang_up"});
+    let abandoned = h.post("fake", Some(&session), &hang).await;
+    assert_eq!(h.gateway.connections(), 1);
+    drop(abandoned);
+    wait_for("the sweep to end it", || h.gateway.connections() == 0).await;
+    assert!(h.observer.log().iter().any(|l| l.contains("idle")));
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn stopping_frees_the_port_for_the_next_start_at_once() {
+    let server = http_mock(HttpAuth::None).await;
+    let h = start(vec![("web", connector(&server.url, Arc::new(NoAuth)))]).await;
+    let response = h.post("web", None, &initialize()).await;
+    messages(response).await;
+    assert_eq!(h.gateway.connections(), 1);
+    let port = h.gateway.addr().port();
+    h.gateway.stop().await;
+    let again = Gateway::start(port, TOKEN.into(), vec![], Arc::new(mcp_gateway::Silent))
+        .await
+        .expect("the port is free after stop");
+    again.stop().await;
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn a_server_url_that_carries_a_credential_is_not_given_to_the_agent() {
+    // Nothing listens on port 1.
+    let leaky = connector(
+        "http://127.0.0.1:1/mcp?api_key=SUPERSECRETKEY",
+        Arc::new(NoAuth),
+    );
+    let h = start(vec![("leaky", leaky)]).await;
+    let response = h.post("leaky", None, &initialize()).await;
+    assert_eq!(response.status(), 502);
+    let text = response.text().await.unwrap();
+    assert!(!text.contains("SUPERSECRETKEY"), "{text}");
+    assert!(!text.contains("api_key"), "{text}");
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn a_host_or_origin_that_is_not_exactly_this_machine_is_turned_away() {
+    let h = start(vec![("fake", fake())]).await;
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
+    for (name, value) in [
+        ("host", "localhost".to_owned()),
+        ("host", format!("127.0.0.1:{}", h.gateway.addr().port() + 1)),
+        ("origin", "null".to_owned()),
+    ] {
+        let response = h
+            .request(reqwest::Method::POST, "fake")
+            .header(name, &value)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 403, "{name}: {value}");
+    }
+    // No Host at all (HTTP/1.0), which a client has no reason to send.
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut raw = tokio::net::TcpStream::connect(h.gateway.addr())
+        .await
+        .unwrap();
+    raw.write_all(
+        format!(
+            "POST /fake HTTP/1.0\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: 2\r\n\r\n{{}}"
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut answer = String::new();
+    raw.read_to_string(&mut answer).await.unwrap();
+    assert!(
+        answer.starts_with("HTTP/1.0 403") || answer.starts_with("HTTP/1.1 403"),
+        "{answer}"
+    );
+    h.gateway.stop().await;
+}
+
+#[tokio::test]
+async fn agents_that_arrive_together_cannot_pass_the_cap() {
+    // A server slow to open, so every request is in the middle of it at once.
+    struct Slow(Arc<Fake>);
+    #[async_trait]
+    impl Connector for Slow {
+        async fn open(&self, stderr: StderrSink) -> Result<Opened, UpstreamError> {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            self.0.open(stderr).await
+        }
+    }
+    let limits = Limits {
+        connections: 4,
+        ..Limits::default()
+    };
+    let h = Arc::new(start_with(vec![("slow", Arc::new(Slow(fake())))], limits).await);
+    let mut tasks = Vec::new();
+    for _ in 0..12 {
+        let h = h.clone();
+        tasks.push(tokio::spawn(async move {
+            h.post("slow", None, &initialize()).await.status().as_u16()
+        }));
+    }
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap());
+    }
+    assert_eq!(
+        statuses.iter().filter(|s| **s == 200).count(),
+        4,
+        "{statuses:?}"
+    );
+    assert_eq!(
+        statuses.iter().filter(|s| **s == 429).count(),
+        8,
+        "{statuses:?}"
+    );
+    assert_eq!(h.gateway.connections(), 4);
     h.gateway.stop().await;
 }

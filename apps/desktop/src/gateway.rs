@@ -633,16 +633,27 @@ impl AppState {
                 })
                 .detach();
             }
-            Err(e) => self.gateway.status = Status::Failed(e),
+            // What the settings ask for cannot be built: the gateway does not
+            // go on answering for what they no longer say.
+            Err(e) => {
+                self.gateway_stop(cx);
+                self.gateway.status = Status::Failed(e);
+            }
         }
     }
 
-    /// Stop the gateway; every agent is disconnected.
-    pub fn gateway_stop(&mut self, cx: &mut Context<Self>) {
+    /// Let go of the running gateway without stopping it yet: the model
+    /// reads as off from here, and the handle is returned to be stopped.
+    fn gateway_detach(&mut self) -> Option<Arc<mcp_gateway::Gateway>> {
         self.gateway.run += 1;
         self.gateway.status = Status::Off;
         self.gateway.agents.clear();
-        if let (Some(handle), Some(bridge)) = (self.gateway.handle.take(), self.bridge.clone()) {
+        self.gateway.handle.take()
+    }
+
+    /// Stop `handle` in the background.
+    fn gateway_halt(&self, handle: Arc<mcp_gateway::Gateway>, cx: &mut Context<Self>) {
+        if let Some(bridge) = self.bridge.clone() {
             let task = bridge.run(async move { handle.stop().await });
             cx.spawn(async move |_, _| {
                 task.await;
@@ -651,9 +662,18 @@ impl AppState {
         }
     }
 
+    /// Stop the gateway; every agent is disconnected.
+    pub fn gateway_stop(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.gateway_detach() {
+            self.gateway_halt(handle, cx);
+        }
+    }
+
     /// Start the gateway on the chosen port, replacing one that is running.
     pub fn gateway_start(&mut self, cx: &mut Context<Self>) {
-        self.gateway_stop(cx);
+        // The one that is running is stopped before the next binds its port:
+        // it holds the port until its agents are let go.
+        let old = self.gateway_detach();
         let Some(bridge) = self.bridge.clone() else {
             return;
         };
@@ -667,6 +687,9 @@ impl AppState {
                 Ok(servers) => servers,
                 Err(e) => {
                     self.gateway.status = Status::Failed(e);
+                    if let Some(old) = old {
+                        self.gateway_halt(old, cx);
+                    }
                     return;
                 }
             };
@@ -676,6 +699,9 @@ impl AppState {
         let (port, secrets) = (self.gateway.settings.port, self.secrets.clone());
         let (tx, mut events) = mpsc::unbounded();
         let task = bridge.run(async move {
+            if let Some(old) = old {
+                old.stop().await;
+            }
             let kept = secrets.clone();
             let token = tokio::task::spawn_blocking(move || token_from(&kept))
                 .await

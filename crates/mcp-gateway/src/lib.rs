@@ -34,7 +34,7 @@ mod stdio;
 mod upstream;
 
 pub use observe::{ClientInfo, Observer, Silent, Traffic};
-pub use server::{Gateway, RelayServer, valid_namespace};
+pub use server::{Gateway, Limits, RelayServer, valid_namespace};
 pub use upstream::{
     Authorizer, Bearer, Connector, Frame, HttpConnector, NoAuth, Opened, RequestContext,
     StderrSink, StdioConnector, Upstream, UpstreamError, stdio_over_streams,
