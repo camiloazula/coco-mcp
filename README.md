@@ -116,7 +116,8 @@ use:
   to `http://127.0.0.1:<port>/<server>` instead of the server itself. Its
   messages go through unchanged, and each shows in that server's log under
   the agent's name, and each tool call, resource read or prompt it makes
-  becomes a row of History under its name, which can be replayed from there.
+  becomes a row of History under its name, which can be replayed from there
+  (the newest 500 per server are kept).
   The root, `http://127.0.0.1:<port>/`, is every included
   server as one for an agent that connects once: tools and prompts are named
   `<server>__<name>`, resources keep their URIs. The gateway answers only on

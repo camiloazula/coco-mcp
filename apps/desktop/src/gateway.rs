@@ -176,11 +176,16 @@ struct Pending {
     kind: CallKind,
     name: String,
     args: Value,
+    /// When it was asked, to drop the oldest first.
+    seq: u64,
 }
 
 /// Calls remembered at most: an agent that never has its requests answered
-/// cannot grow the table without end.
+/// cannot grow the table without end. The oldest go first.
 const MAX_PENDING: usize = 4096;
+/// Calls kept in History for each server's agents: older ones are deleted,
+/// the History list shows no more than this many anyway.
+const MAX_AGENT_CALLS: usize = 500;
 
 /// What an agent's request is, when it is a call that History keeps: a tool
 /// call, a resource read or a prompt. The same shapes Coco records for its
@@ -194,11 +199,13 @@ fn call_of(method: &str, params: Option<&Value>) -> Option<Pending> {
             kind: CallKind::Tool,
             name: name("name")?,
             args: arguments(),
+            seq: 0,
         }),
         "prompts/get" => Some(Pending {
             kind: CallKind::Prompt,
             name: name("name")?,
             args: arguments(),
+            seq: 0,
         }),
         "resources/read" => {
             let uri = name("uri")?;
@@ -206,8 +213,69 @@ fn call_of(method: &str, params: Option<&Value>) -> Option<Pending> {
                 kind: CallKind::Resource,
                 args: Value::String(uri.clone()),
                 name: uri,
+                seq: 0,
             })
         }
+        _ => None,
+    }
+}
+
+/// How a server answered a call, in the shapes Coco records for its own.
+#[derive(Debug, Clone, PartialEq)]
+struct Answer {
+    result: Option<Value>,
+    status: CallStatus,
+    error: Option<String>,
+    elapsed: Option<std::time::Duration>,
+}
+
+/// The id a message answers and how, when it is a server's answer: a result
+/// (a tool's own error is one, recorded as such) or a JSON-RPC error, which
+/// is written as Coco writes its own: the code and message as the error, and
+/// the structured `data` as the result only when the server sent some.
+fn answer_of(kind: &EventKind) -> Option<(&Value, Answer)> {
+    match kind {
+        EventKind::Response {
+            direction: Direction::Inbound,
+            id,
+            result,
+            elapsed,
+            ..
+        } => {
+            let failed = result.get("isError").and_then(Value::as_bool) == Some(true);
+            Some((
+                id,
+                Answer {
+                    result: Some(result.clone()),
+                    status: if failed {
+                        CallStatus::ToolError
+                    } else {
+                        CallStatus::Ok
+                    },
+                    error: None,
+                    elapsed: *elapsed,
+                },
+            ))
+        }
+        EventKind::Error {
+            direction: Direction::Inbound,
+            id: Some(id),
+            code,
+            message,
+            data,
+            elapsed,
+            ..
+        } => Some((
+            id,
+            Answer {
+                result: data.as_ref().map(
+                    |data| serde_json::json!({"code": code, "message": message, "data": data}),
+                ),
+                status: CallStatus::Failed,
+                error: Some(format!("server error {code}: {message}")),
+                elapsed: *elapsed,
+            },
+        )),
         _ => None,
     }
 }
@@ -246,6 +314,8 @@ pub struct GatewayState {
     /// Calls agents made that are waiting for their answer, to become History
     /// rows when it comes.
     pending: HashMap<String, Pending>,
+    /// Hands out [`Pending::seq`].
+    asked: u64,
     token: Option<String>,
     handle: Option<Arc<mcp_gateway::Gateway>>,
     /// How each path is opened, kept while its server is unchanged so that
@@ -275,6 +345,7 @@ impl Default for GatewayState {
             status: Status::Off,
             agents: BTreeMap::new(),
             pending: HashMap::new(),
+            asked: 0,
             token: None,
             handle: None,
             connectors: HashMap::new(),
@@ -950,81 +1021,95 @@ impl AppState {
     /// Keep a call an agent made in History: its request is remembered, and
     /// when its answer comes the pair is recorded under the agent's name.
     fn relay_call(&mut self, key: &str, kind: &EventKind, cx: &mut Context<Self>) {
-        let (id, outcome) = match kind {
+        match kind {
             EventKind::Request {
                 direction: Direction::Outbound,
                 id,
                 method,
                 params,
             } => {
-                if let Some(pending) = call_of(method, params.as_ref()) {
+                if let Some(mut pending) = call_of(method, params.as_ref()) {
                     if self.gateway.pending.len() >= MAX_PENDING {
-                        self.gateway.pending.clear();
+                        let oldest = self
+                            .gateway
+                            .pending
+                            .iter()
+                            .min_by_key(|(_, p)| p.seq)
+                            .map(|(k, _)| k.clone());
+                        if let Some(oldest) = oldest {
+                            self.gateway.pending.remove(&oldest);
+                        }
                     }
+                    self.gateway.asked += 1;
+                    pending.seq = self.gateway.asked;
+                    // An id an agent reuses while its first is still out is
+                    // not told apart: JSON-RPC does not allow it, and the
+                    // gateway does not route it either.
                     self.gateway.pending.insert(pending_key(key, id), pending);
                 }
-                return;
             }
-            EventKind::Response {
-                direction: Direction::Inbound,
-                id,
-                result,
-                elapsed,
-                ..
-            } => {
-                let failed = result.get("isError").and_then(Value::as_bool) == Some(true);
-                let status = if failed {
-                    CallStatus::ToolError
-                } else {
-                    CallStatus::Ok
+            // An agent giving up on a request: it is not answered, so it is
+            // not a call.
+            EventKind::Notification {
+                direction: Direction::Outbound,
+                method,
+                params: Some(params),
+            } if method == "notifications/cancelled" => {
+                if let Some(id) = params.get("requestId") {
+                    self.gateway.pending.remove(&pending_key(key, id));
+                }
+            }
+            answer => {
+                let Some((id, answer)) = answer_of(answer) else {
+                    return;
                 };
-                (id, (Some(result.clone()), status, None, *elapsed))
+                let Some(pending) = self.gateway.pending.remove(&pending_key(key, id)) else {
+                    return;
+                };
+                self.record_agent_call(key, pending, answer, cx);
             }
-            EventKind::Error {
-                direction: Direction::Inbound,
-                id: Some(id),
-                code,
-                message,
-                data,
-                elapsed,
-                ..
-            } => {
-                let raw = serde_json::json!({"code": code, "message": message, "data": data});
-                (
-                    id,
-                    (
-                        Some(raw),
-                        CallStatus::Failed,
-                        Some(message.clone()),
-                        *elapsed,
-                    ),
-                )
-            }
-            _ => return,
-        };
-        let Some(pending) = self.gateway.pending.remove(&pending_key(key, id)) else {
-            return;
-        };
+        }
+    }
+
+    /// Record a call an agent made, once its answer is in.
+    fn record_agent_call(
+        &mut self,
+        key: &str,
+        pending: Pending,
+        answer: Answer,
+        cx: &mut Context<Self>,
+    ) {
         let Some(agent) = self.gateway.agents.get(key) else {
             return;
         };
-        let (result, status, error, elapsed) = outcome;
+        // A server deleted while the call was out has no row to record
+        // against, as for a call made in Coco.
+        if !self.servers.iter().any(|s| s.record.id == agent.server_id) {
+            return;
+        }
         let call = NewCall {
             server_id: agent.server_id.clone(),
             kind: pending.kind,
             name: pending.name,
             args: pending.args,
-            result,
-            status,
-            error,
-            elapsed_ms: elapsed.map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            result: answer.result,
+            status: answer.status,
+            error: answer.error,
+            elapsed_ms: answer
+                .elapsed
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             agent: Some(agent.name.clone()),
         };
         let Ok(Some(store)) = self.writable_store() else {
             return;
         };
         self.in_background(
-            move || store.record_call(call).map_err(|e| e.to_string()),
+            move || {
+                let record = store.record_call(call).map_err(|e| e.to_string())?;
+                // Whatever an agent does, the database keeps the newest few.
+                let _ = store.prune_agent_calls(&record.server_id, MAX_AGENT_CALLS);
+                Ok::<_, String>(record)
+            },
             |state, recorded, cx| {
                 let recorded = recorded.unwrap_or_else(|| Err("call recording task failed".into()));
                 if let Some(record) = state.note_write("an agent's call was not recorded", recorded)
@@ -1188,6 +1273,7 @@ mod tests {
                 kind: CallKind::Tool,
                 name: "echo".into(),
                 args: json!({"a": 1}),
+                seq: 0,
             })
         );
         let resource = call_of("resources/read", Some(&json!({"uri": "mock://x"}))).unwrap();
@@ -1209,6 +1295,73 @@ mod tests {
             pending_key("a/s1", &json!(1)),
             pending_key("a/s1", &json!("1")),
             "a number id and a string id are two ids"
+        );
+    }
+
+    #[test]
+    fn how_a_server_answers_is_recorded_as_coco_records_its_own() {
+        use serde_json::json;
+        let response = |result: Value| EventKind::Response {
+            direction: Direction::Inbound,
+            id: json!(7),
+            method: Some("tools/call".into()),
+            result,
+            elapsed: Some(std::time::Duration::from_millis(12)),
+        };
+        let answered = response(json!({"content": []}));
+        let (id, ok) = answer_of(&answered).unwrap();
+        assert_eq!(*id, json!(7));
+        assert_eq!((ok.status, ok.error), (CallStatus::Ok, None));
+        assert_eq!(ok.elapsed, Some(std::time::Duration::from_millis(12)));
+        // A tool's own error is a result, recorded as one.
+        let failed = response(json!({"isError": true, "content": []}));
+        let (_, tool) = answer_of(&failed).unwrap();
+        assert_eq!(tool.status, CallStatus::ToolError);
+        assert!(tool.result.is_some());
+
+        let error = |data: Option<Value>| EventKind::Error {
+            direction: Direction::Inbound,
+            id: Some(json!("a")),
+            method: Some("resources/read".into()),
+            code: -32002,
+            message: "Resource not found".into(),
+            data,
+            elapsed: None,
+        };
+        let plain = error(None);
+        let (id, bare) = answer_of(&plain).unwrap();
+        assert_eq!(*id, json!("a"), "a string id is its own");
+        assert_eq!(bare.status, CallStatus::Failed);
+        assert_eq!(
+            bare.error.as_deref(),
+            Some("server error -32002: Resource not found")
+        );
+        assert_eq!(
+            bare.result, None,
+            "no data, no result, as for a call made in Coco"
+        );
+        let detailed = error(Some(json!({"uri": "x://y"})));
+        let (_, with) = answer_of(&detailed).unwrap();
+        assert_eq!(with.result.unwrap()["data"]["uri"], "x://y");
+
+        // What is not an answer, or is the agent's own, is not one.
+        let request = EventKind::Request {
+            direction: Direction::Outbound,
+            id: json!(1),
+            method: "tools/call".into(),
+            params: None,
+        };
+        assert!(answer_of(&request).is_none());
+        let from_agent = EventKind::Response {
+            direction: Direction::Outbound,
+            id: json!(1),
+            method: None,
+            result: json!({}),
+            elapsed: None,
+        };
+        assert!(
+            answer_of(&from_agent).is_none(),
+            "an answer to the server's request"
         );
     }
 }

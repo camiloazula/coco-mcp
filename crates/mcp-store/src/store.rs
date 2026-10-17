@@ -430,6 +430,18 @@ impl Store {
             .transpose()
     }
 
+    /// Keep the newest `keep` calls agents made through the gateway to
+    /// `server_id`, and delete the older ones. A call made in Coco is never
+    /// touched. Returns how many rows were removed.
+    pub fn prune_agent_calls(&self, server_id: &str, keep: usize) -> Result<usize> {
+        Ok(self.conn()?.execute(
+            "DELETE FROM calls WHERE server_id = ?1 AND agent IS NOT NULL AND id NOT IN (
+                 SELECT id FROM calls WHERE server_id = ?1 AND agent IS NOT NULL
+                 ORDER BY julianday(at) DESC, id DESC LIMIT ?2)",
+            params![server_id, keep as i64],
+        )?)
+    }
+
     /// Delete one recorded call. Returns whether a row was removed.
     pub fn delete_call(&self, id: &str) -> Result<bool> {
         let removed = self
@@ -892,7 +904,51 @@ mod tests {
                 .any(|c| c.agent.is_some()),
             "and in a list"
         );
+        // Only an agent's calls are pruned, the newest kept.
+        for n in 0..5 {
+            store
+                .record_call(NewCall {
+                    server_id: a.id.clone(),
+                    kind: CallKind::Tool,
+                    name: format!("t{n}"),
+                    args: Value::Null,
+                    result: None,
+                    status: CallStatus::Ok,
+                    error: None,
+                    elapsed_ms: 1,
+                    agent: Some("claude-code".into()),
+                })
+                .unwrap();
+        }
+        assert_eq!(store.prune_agent_calls(&a.id, 2).unwrap(), 4, "of six");
+        let agents: Vec<String> = store
+            .list_calls(Some(&a.id), 20)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.agent.is_some())
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(agents, ["t4", "t3"], "the newest two");
+        assert!(
+            store.get_call(&ok.id).unwrap().is_some(),
+            "Coco's own is kept"
+        );
+        assert_eq!(store.prune_agent_calls(&b.id, 0).unwrap(), 0);
+        let by_agent = store
+            .record_call(NewCall {
+                server_id: a.id.clone(),
+                kind: CallKind::Tool,
+                name: "echo".into(),
+                args: Value::Null,
+                result: None,
+                status: CallStatus::Ok,
+                error: None,
+                elapsed_ms: 1,
+                agent: Some("claude-code".into()),
+            })
+            .unwrap();
         assert!(store.delete_call(&by_agent.id).unwrap());
+        store.prune_agent_calls(&a.id, 0).unwrap();
         assert_eq!(store.list_calls(None, 10).unwrap().len(), 2);
         let only_a = store.list_calls(Some(&a.id), 10).unwrap();
         assert_eq!(only_a.len(), 1);

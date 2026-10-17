@@ -216,6 +216,81 @@ pub fn gateway_flow() {
             && s.servers[0].history()[0].name == "echo"
     });
 
+    // A resource read, a prompt and a read the server refuses are calls too,
+    // recorded as Coco records its own: the URI as a read's arguments, and a
+    // refusal as a failure with its code and message.
+    let read = json!({"jsonrpc": "2.0", "id": 10, "method": "resources/read",
+        "params": {"uri": "mock://text/hello"}});
+    call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "mock",
+        Some(&session),
+        Some(read),
+    );
+    let prompt = json!({"jsonrpc": "2.0", "id": 11, "method": "prompts/get",
+        "params": {"name": "greet", "arguments": {"name": "Ada"}}});
+    call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "mock",
+        Some(&session),
+        Some(prompt),
+    );
+    let missing = json!({"jsonrpc": "2.0", "id": 12, "method": "resources/read",
+        "params": {"uri": "mock://nope"}});
+    call(
+        &bridge,
+        port,
+        &token,
+        reqwest::Method::POST,
+        "mock",
+        Some(&session),
+        Some(missing),
+    );
+    live.wait("the read, the prompt and the refusal are in History", |s| {
+        let by_agent = |name: &str| {
+            s.servers[0]
+                .history()
+                .iter()
+                .any(|c| c.name == name && c.agent.as_deref() == Some("flow-agent"))
+        };
+        by_agent("mock://text/hello") && by_agent("greet") && by_agent("mock://nope")
+    });
+    live.cx.update(|cx| {
+        let state = live.state.read(cx);
+        let history = state.servers[0].history();
+        let find = |name: &str| {
+            history
+                .iter()
+                .find(|c| c.name == name && c.agent.is_some())
+                .unwrap()
+        };
+        let hello = find("mock://text/hello");
+        assert_eq!(hello.kind, mcp_store::CallKind::Resource);
+        assert_eq!(hello.args, json!("mock://text/hello"));
+        assert_eq!(hello.status, mcp_store::CallStatus::Ok);
+        let greet = find("greet");
+        assert_eq!(greet.kind, mcp_store::CallKind::Prompt);
+        assert_eq!(greet.args, json!({"name": "Ada"}));
+        let refused = find("mock://nope");
+        assert_eq!(refused.status, mcp_store::CallStatus::Failed);
+        assert!(
+            refused
+                .error
+                .as_deref()
+                .is_some_and(|e| e.starts_with("server error -")),
+            "{:?}",
+            refused.error
+        );
+        // Not a call: the agent's handshake and its notifications.
+        assert!(history.iter().all(|c| c.name != "initialize"));
+    });
+
     // The same agent through the root: every server as one, names in front.
     let root_hello = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": "2025-11-25", "capabilities": {},
