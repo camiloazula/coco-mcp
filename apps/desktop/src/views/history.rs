@@ -74,6 +74,19 @@ pub fn render(
         mono(cx, 11., facts).text_color(t.muted),
     );
 
+    // Whose call it was, when an agent made it through the gateway.
+    let by_agent = record.agent.clone().map(|agent| {
+        h_flex()
+            .id("call-agent")
+            .px(px(24.))
+            .pb(px(8.))
+            .gap(px(6.))
+            .text_size(px(12.))
+            .child(muted(cx, 12., "called by"))
+            .child(div().text_color(t.accent).child(agent))
+            .test_support()
+    });
+
     // The form is the tool's or prompt's, drawn only with a session: without
     // one the pane shows the server's settings, so it says so instead.
     let open_in_form = matches!(record.kind, CallKind::Tool | CallKind::Prompt).then(|| {
@@ -191,6 +204,7 @@ pub fn render(
             .size_full()
             .min_h_0()
             .child(header)
+            .children(by_agent)
             .child(toolbar)
             .child(split::render(
                 ws,

@@ -185,6 +185,7 @@ mod tests {
             error: None,
             elapsed_ms: 3,
             at: at(secs),
+            agent: None,
         };
         // The app keeps history newest first; a file reads better in order.
         let text = history_jsonl(&[call("new", 100), call("old", 1)]);

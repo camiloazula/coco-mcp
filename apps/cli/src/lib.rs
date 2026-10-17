@@ -580,6 +580,7 @@ async fn run(cli: Cli) -> Result<u8, String> {
                             },
                             error: None,
                             elapsed_ms,
+                            agent: None,
                         })?;
                     }
                     ctx.print(&with_elapsed(outcome.raw, outcome.elapsed))?;
@@ -601,6 +602,7 @@ async fn run(cli: Cli) -> Result<u8, String> {
                             status: CallStatus::Failed,
                             error: Some(e.to_string()),
                             elapsed_ms,
+                            agent: None,
                         })?;
                     }
                     Err(format!("call `{tool}`: {e}"))
@@ -763,6 +765,7 @@ fn finish(
                     status: CallStatus::Ok,
                     error: None,
                     elapsed_ms,
+                    agent: None,
                 })?;
             }
             ctx.print(&with_elapsed(raw, elapsed))?;
@@ -779,6 +782,7 @@ fn finish(
                     status: CallStatus::Failed,
                     error: Some(e.to_string()),
                     elapsed_ms,
+                    agent: None,
                 })?;
             }
             Err(format!("{} `{name}`: {e}", kind.as_str()))

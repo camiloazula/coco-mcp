@@ -334,6 +334,7 @@ mod tests {
             error: None,
             elapsed_ms: 12,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         }
     }
 

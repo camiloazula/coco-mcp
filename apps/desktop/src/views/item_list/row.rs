@@ -100,6 +100,16 @@ pub(super) fn item_row(row: Row<'_>, entity: &Entity<AppState>, cx: &App) -> Any
                     .test_support(),
             )
         })
+        // The agent that made a call through the gateway.
+        .children(item.agent.clone().map(|a| {
+            mono(cx, 11., a)
+                .flex_none()
+                .max_w(px(96.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_color(t.accent)
+        }))
         .children(
             item.meta
                 .clone()
