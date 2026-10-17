@@ -678,6 +678,7 @@ impl AppState {
                                 _ => None,
                             },
                             elapsed_ms,
+                            agent: None,
                         };
                         (store, call)
                     });

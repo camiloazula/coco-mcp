@@ -16,12 +16,12 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui_kit::Context;
 use mcp_auth::SecretStore;
-use mcp_core::{AuthRef, Event, EventKind, ServerSpec};
+use mcp_core::{AuthRef, Direction, Event, EventKind, ServerSpec};
 use mcp_gateway::{
     Authorizer, ClientInfo, Connector, HttpConnector, NoAuth, Observer, RelayServer,
     StdioConnector, Traffic, valid_namespace,
 };
-use mcp_store::{ServerRecord, Store};
+use mcp_store::{CallKind, CallStatus, NewCall, ServerRecord, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -170,6 +170,54 @@ pub enum Status {
     Failed(String),
 }
 
+/// A call an agent has made that no server has answered yet.
+#[derive(Debug, Clone, PartialEq)]
+struct Pending {
+    kind: CallKind,
+    name: String,
+    args: Value,
+}
+
+/// Calls remembered at most: an agent that never has its requests answered
+/// cannot grow the table without end.
+const MAX_PENDING: usize = 4096;
+
+/// What an agent's request is, when it is a call that History keeps: a tool
+/// call, a resource read or a prompt. The same shapes Coco records for its
+/// own calls, so a replay of one is the same request.
+fn call_of(method: &str, params: Option<&Value>) -> Option<Pending> {
+    let params = params?;
+    let name = |field: &str| params.get(field)?.as_str().map(str::to_owned);
+    let arguments = || params.get("arguments").cloned().unwrap_or(Value::Null);
+    match method {
+        "tools/call" => Some(Pending {
+            kind: CallKind::Tool,
+            name: name("name")?,
+            args: arguments(),
+        }),
+        "prompts/get" => Some(Pending {
+            kind: CallKind::Prompt,
+            name: name("name")?,
+            args: arguments(),
+        }),
+        "resources/read" => {
+            let uri = name("uri")?;
+            Some(Pending {
+                kind: CallKind::Resource,
+                args: Value::String(uri.clone()),
+                name: uri,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// How a request is told from another of the same agent's: its connection
+/// and its id.
+fn pending_key(agent: &str, id: &Value) -> String {
+    format!("{agent}#{id}")
+}
+
 /// An agent connected through the gateway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
@@ -195,6 +243,9 @@ pub struct GatewayState {
     pub status: Status,
     /// Who is connected, by connection.
     pub agents: BTreeMap<String, Agent>,
+    /// Calls agents made that are waiting for their answer, to become History
+    /// rows when it comes.
+    pending: HashMap<String, Pending>,
     token: Option<String>,
     handle: Option<Arc<mcp_gateway::Gateway>>,
     /// How each path is opened, kept while its server is unchanged so that
@@ -223,6 +274,7 @@ impl Default for GatewayState {
             settings: Settings::default(),
             status: Status::Off,
             agents: BTreeMap::new(),
+            pending: HashMap::new(),
             token: None,
             handle: None,
             connectors: HashMap::new(),
@@ -685,6 +737,7 @@ impl AppState {
         self.gateway.run += 1;
         self.gateway.status = Status::Off;
         self.gateway.agents.clear();
+        self.gateway.pending.clear();
         self.gateway.handle.take()
     }
 
@@ -853,9 +906,11 @@ impl AppState {
                     at,
                     kind,
                 } => {
+                    let key = agent_key(&namespace, &session);
+                    self.relay_call(&key, &kind, cx);
                     let row = incoming(Event { seq: 0, at, kind }).row;
                     if let Some(row) = row {
-                        self.relay_row(&agent_key(&namespace, &session), row);
+                        self.relay_row(&key, row);
                     }
                 }
                 Relayed::Stderr {
@@ -883,10 +938,103 @@ impl AppState {
                     let key = agent_key(&namespace, &session);
                     self.relay_note(&key, at, "disconnected", &reason);
                     self.gateway.agents.remove(&key);
+                    // What it asked and was never answered is not a call.
+                    let ours = format!("{key}#");
+                    self.gateway.pending.retain(|k, _| !k.starts_with(&ours));
                 }
             }
         }
         self.changed(cx);
+    }
+
+    /// Keep a call an agent made in History: its request is remembered, and
+    /// when its answer comes the pair is recorded under the agent's name.
+    fn relay_call(&mut self, key: &str, kind: &EventKind, cx: &mut Context<Self>) {
+        let (id, outcome) = match kind {
+            EventKind::Request {
+                direction: Direction::Outbound,
+                id,
+                method,
+                params,
+            } => {
+                if let Some(pending) = call_of(method, params.as_ref()) {
+                    if self.gateway.pending.len() >= MAX_PENDING {
+                        self.gateway.pending.clear();
+                    }
+                    self.gateway.pending.insert(pending_key(key, id), pending);
+                }
+                return;
+            }
+            EventKind::Response {
+                direction: Direction::Inbound,
+                id,
+                result,
+                elapsed,
+                ..
+            } => {
+                let failed = result.get("isError").and_then(Value::as_bool) == Some(true);
+                let status = if failed {
+                    CallStatus::ToolError
+                } else {
+                    CallStatus::Ok
+                };
+                (id, (Some(result.clone()), status, None, *elapsed))
+            }
+            EventKind::Error {
+                direction: Direction::Inbound,
+                id: Some(id),
+                code,
+                message,
+                data,
+                elapsed,
+                ..
+            } => {
+                let raw = serde_json::json!({"code": code, "message": message, "data": data});
+                (
+                    id,
+                    (
+                        Some(raw),
+                        CallStatus::Failed,
+                        Some(message.clone()),
+                        *elapsed,
+                    ),
+                )
+            }
+            _ => return,
+        };
+        let Some(pending) = self.gateway.pending.remove(&pending_key(key, id)) else {
+            return;
+        };
+        let Some(agent) = self.gateway.agents.get(key) else {
+            return;
+        };
+        let (result, status, error, elapsed) = outcome;
+        let call = NewCall {
+            server_id: agent.server_id.clone(),
+            kind: pending.kind,
+            name: pending.name,
+            args: pending.args,
+            result,
+            status,
+            error,
+            elapsed_ms: elapsed.map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            agent: Some(agent.name.clone()),
+        };
+        let Ok(Some(store)) = self.writable_store() else {
+            return;
+        };
+        self.in_background(
+            move || store.record_call(call).map_err(|e| e.to_string()),
+            |state, recorded, cx| {
+                let recorded = recorded.unwrap_or_else(|| Err("call recording task failed".into()));
+                if let Some(record) = state.note_write("an agent's call was not recorded", recorded)
+                {
+                    state.push_history(record);
+                    state.changed(cx);
+                }
+            },
+            cx,
+        );
     }
 
     /// A note in the log of the server `session` reaches.
@@ -1025,5 +1173,42 @@ mod tests {
         assert_eq!(state.token_hint().as_deref(), Some("coco_••••1234"));
         assert!(!format!("{state:?}").contains("secret"));
         assert_eq!(new_token().len(), "coco_".len() + 64);
+    }
+
+    #[test]
+    fn what_an_agent_asks_becomes_a_call_as_coco_records_its_own() {
+        use serde_json::json;
+        let tool = call_of(
+            "tools/call",
+            Some(&json!({"name": "echo", "arguments": {"a": 1}})),
+        );
+        assert_eq!(
+            tool,
+            Some(Pending {
+                kind: CallKind::Tool,
+                name: "echo".into(),
+                args: json!({"a": 1}),
+            })
+        );
+        let resource = call_of("resources/read", Some(&json!({"uri": "mock://x"}))).unwrap();
+        assert_eq!(resource.kind, CallKind::Resource);
+        assert_eq!(resource.name, "mock://x");
+        assert_eq!(
+            resource.args,
+            json!("mock://x"),
+            "the URI, as a read's arguments are"
+        );
+        let prompt = call_of("prompts/get", Some(&json!({"name": "brief"}))).unwrap();
+        assert_eq!(prompt.kind, CallKind::Prompt);
+        assert_eq!(prompt.args, Value::Null, "no arguments given");
+        // What History does not keep.
+        assert_eq!(call_of("tools/list", Some(&json!({}))), None);
+        assert_eq!(call_of("ping", None), None);
+        assert_eq!(call_of("tools/call", Some(&json!({}))), None, "no name");
+        assert_ne!(
+            pending_key("a/s1", &json!(1)),
+            pending_key("a/s1", &json!("1")),
+            "a number id and a string id are two ids"
+        );
     }
 }

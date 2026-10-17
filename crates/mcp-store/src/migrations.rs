@@ -76,7 +76,13 @@ const V4: &str = r#"
 ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'legacy';
 "#;
 
-const MIGRATIONS_SLICE: &[M<'static>] = &[M::up(V1), M::up(V2), M::up(V3), M::up(V4)];
+// Who made a call: the name an agent gave when it made one through the
+// gateway. A call made in Coco or from the command line has none.
+const V5: &str = r#"
+ALTER TABLE calls ADD COLUMN agent TEXT;
+"#;
+
+const MIGRATIONS_SLICE: &[M<'static>] = &[M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)];
 
 /// All migrations, oldest first.
 pub const MIGRATIONS: Migrations<'static> = Migrations::from_slice(MIGRATIONS_SLICE);
@@ -164,5 +170,29 @@ mod tests {
             })
             .unwrap();
         assert_eq!(protocol, mcp_core::ProtocolMode::Legacy.as_str());
+    }
+
+    #[test]
+    fn calls_recorded_before_agents_have_none() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        MIGRATIONS.to_version(&mut conn, 4).unwrap();
+        conn.execute(
+            "INSERT INTO servers (id, name, spec, policy) VALUES ('s', 's', '{}', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO calls (id, server_id, kind, name, args, status, elapsed_ms, at) \
+             VALUES ('c', 's', 'tool', 'echo', '{}', 'ok', 1, '2026-10-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        MIGRATIONS.to_latest(&mut conn).unwrap();
+        let agent: Option<String> = conn
+            .query_row("SELECT agent FROM calls WHERE id = 'c'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(agent, None);
     }
 }

@@ -476,6 +476,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(second),
+            agent: None,
         }
     }
 

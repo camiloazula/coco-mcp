@@ -683,6 +683,8 @@ pub struct Item {
     /// What else the filter may match, lowercased: a history row carries
     /// the call's kind, status, error, arguments and result.
     pub text: Option<Rc<str>>,
+    /// The agent that made the call through the gateway (history rows).
+    pub agent: Option<String>,
 }
 
 impl Item {
@@ -695,6 +697,7 @@ impl Item {
             changed: false,
             text: None,
             watched: false,
+            agent: None,
         }
     }
 }
@@ -3260,6 +3263,7 @@ fn history_item(call: &CallRecord, text: Rc<str>) -> Item {
         changed: false,
         watched: false,
         text: Some(text),
+        agent: call.agent.clone(),
     }
 }
 
@@ -3291,6 +3295,9 @@ fn search_text(call: &CallRecord) -> String {
     };
     push(&format!("{:?}", call.kind));
     push(&call.name);
+    if let Some(agent) = &call.agent {
+        push(agent);
+    }
     push(&format!("{:?}", call.status));
     if let Some(error) = &call.error {
         push(error);
@@ -3883,6 +3890,7 @@ mod tests {
                     error: error.map(str::to_owned),
                     elapsed_ms: 1,
                     at: time::OffsetDateTime::UNIX_EPOCH,
+                    agent: None,
                 }
             };
         state.push_history(record(
@@ -3953,6 +3961,7 @@ mod tests {
                 error: None,
                 elapsed_ms: 1,
                 at: time::OffsetDateTime::UNIX_EPOCH,
+                agent: None,
             });
         }
         state.mode = Mode::History;
@@ -3995,6 +4004,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         };
         let text = search_text(&call);
         assert!(text.len() <= SEARCH_TEXT_LIMIT + 8, "{}", text.len());
@@ -4019,6 +4029,7 @@ mod tests {
                 error: None,
                 elapsed_ms: 1,
                 at: time::OffsetDateTime::UNIX_EPOCH,
+                agent: None,
             });
         }
         state.mode = Mode::History;
@@ -4040,6 +4051,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         });
         assert_eq!(state.selected_item, Some(2), "selection follows the row");
         assert_eq!(state.selected_call().unwrap().name, "tool0");
@@ -4065,6 +4077,7 @@ mod tests {
                     status: mcp_store::CallStatus::Ok,
                     error: None,
                     elapsed_ms: 1,
+                    agent: None,
                 })
                 .unwrap();
         }
@@ -4093,6 +4106,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         });
         state.selected_item = Some(0);
         let stored = store.list_calls(Some(&record.id), MAX_HISTORY).unwrap();
@@ -4162,6 +4176,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         };
         state.filter.clear();
         state.mode = Mode::History;
@@ -4677,6 +4692,7 @@ mod tests {
             error: None,
             elapsed_ms: 1,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         });
         let key = |server: &str| (server.to_owned(), Mode::Tools, "get_weather".to_owned());
         for server in [&id, &kept] {

@@ -181,6 +181,41 @@ pub fn gateway_flow() {
             .all(|(agent, _)| agent == "flow-agent")
     );
 
+    // The call is in History under the agent's name, as the server was asked
+    // it, and replaying it from there is Coco's own call.
+    live.wait("the agent's call is in History", |s| {
+        s.servers[0]
+            .history()
+            .iter()
+            .any(|c| c.name == "echo" && c.agent.as_deref() == Some("flow-agent"))
+    });
+    let record = live.cx.update(|cx| {
+        live.state.read(cx).servers[0]
+            .history()
+            .iter()
+            .find(|c| c.agent.is_some())
+            .cloned()
+            .unwrap()
+    });
+    assert_eq!(record.args, json!({"text": "through the gateway"}));
+    assert_eq!(record.status, mcp_store::CallStatus::Ok);
+    assert!(
+        record
+            .result
+            .as_ref()
+            .is_some_and(|r| r.to_string().contains("through the gateway"))
+    );
+    let before = live
+        .cx
+        .update(|cx| live.state.read(cx).servers[0].history().len());
+    live.cx
+        .update(|cx| live.state.update(cx, |s, cx| s.replay(&record, cx)));
+    live.wait("the replay is recorded as Coco's own call", |s| {
+        s.servers[0].history().len() == before + 1
+            && s.servers[0].history()[0].agent.is_none()
+            && s.servers[0].history()[0].name == "echo"
+    });
+
     // The same agent through the root: every server as one, names in front.
     let root_hello = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": "2025-11-25", "capabilities": {},
@@ -225,6 +260,15 @@ pub fn gateway_flow() {
         rows.iter()
             .any(|r| r.agent.as_deref() == Some("root-agent") && r.method == "tools/call")
     });
+    live.wait(
+        "the root agent's call is in History as the server knows it",
+        |s| {
+            s.servers[0]
+                .history()
+                .iter()
+                .any(|c| c.name == "echo" && c.agent.as_deref() == Some("root-agent"))
+        },
+    );
     // Two connections, whatever the number of servers each reaches.
     assert_eq!(
         live.cx

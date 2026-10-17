@@ -1335,6 +1335,7 @@ mod macos {
                         status: mcp_store::CallStatus::Ok,
                         error: None,
                         elapsed_ms: 1,
+                        agent: None,
                     })
                     .unwrap();
             }
@@ -1686,6 +1687,7 @@ mod macos {
             error: None,
             elapsed_ms: 3,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         });
         let mut cx = context();
         let state = cx.update(|cx| cx.new(|_| model));
@@ -2342,6 +2344,7 @@ mod macos {
                     error: None,
                     elapsed_ms: 1,
                     at: time::OffsetDateTime::UNIX_EPOCH,
+                    agent: None,
                 });
             });
             workspace.update(cx, |ws, _| {
@@ -2426,6 +2429,7 @@ mod macos {
             error: None,
             elapsed_ms: 40,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         };
         // Twenty thousand rows, led by an index longer than a screen.
         let rows: Vec<_> = (0..20_000).map(|i| json!({"id": i, "ok": true})).collect();
@@ -3243,6 +3247,7 @@ mod macos {
             error: None,
             elapsed_ms: 7,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         });
         // An HTTP server with a bearer token: nothing that leaves the app may
         // carry it unless the action is the one named for it.
@@ -3861,6 +3866,70 @@ mod macos {
         capture("76-log-agent", s, true);
     }
 
+    /// History, with calls agents made through the gateway beside one made
+    /// in Coco: the agent's name in the list, and whose call it was in the
+    /// detail, where it can be replayed.
+    fn history_agent_calls() {
+        use coco_mcp::state::Mode;
+        use mcp_store::{CallKind, CallRecord, CallStatus};
+        let mut s = demo_state(true);
+        let server_id = s.servers[0].record.id.clone();
+        let call = |id: &str,
+                    name: &str,
+                    args: serde_json::Value,
+                    result: serde_json::Value,
+                    status: CallStatus,
+                    agent: Option<&str>| CallRecord {
+            id: id.into(),
+            server_id: server_id.clone(),
+            kind: CallKind::Tool,
+            name: name.into(),
+            args,
+            result: Some(result),
+            error: None,
+            elapsed_ms: 140,
+            at: time::OffsetDateTime::UNIX_EPOCH,
+            status,
+            agent: agent.map(str::to_owned),
+        };
+        let text = |t: &str| json!({"content": [{"type": "text", "text": t}]});
+        s.servers[0].push_call(call(
+            "c1",
+            "search_city",
+            json!({"query": "Bergen"}),
+            text("Bergen, NO"),
+            CallStatus::Ok,
+            None,
+        ));
+        s.servers[0].push_call(call(
+            "c2",
+            "get_alerts",
+            json!({"region": "NO-46"}),
+            json!({"isError": true, "content": [{"type": "text", "text": "upstream timeout"}]}),
+            CallStatus::ToolError,
+            Some("cursor"),
+        ));
+        s.servers[0].push_call(call(
+            "c3",
+            "get_forecast",
+            json!({"city": "Oslo", "days": 3}),
+            text("Oslo: -2 to 1 C, light snow"),
+            CallStatus::Ok,
+            Some("claude-code"),
+        ));
+        s.servers[0].push_call(call(
+            "c4",
+            "get_weather",
+            json!({"city": "Oslo", "units": "metric"}),
+            text("{\"temp\":-1.4}"),
+            CallStatus::Ok,
+            Some("claude-code"),
+        ));
+        s.mode = Mode::History;
+        s.selected_item = Some(1);
+        capture("77-history-agent", s, true);
+    }
+
     /// A newer release, installed through Homebrew: the note in the status
     /// bar opens the popover with the command, the About window names the
     /// release, and skipping it takes the note away.
@@ -3963,6 +4032,7 @@ mod macos {
             error: None,
             elapsed_ms: 40,
             at: time::OffsetDateTime::UNIX_EPOCH,
+            agent: None,
         };
         let rows = |n: usize| -> serde_json::Value {
             serde_json::Value::Array((0..n).map(|i| json!({"id": i, "ok": true})).collect())
@@ -4183,6 +4253,7 @@ mod macos {
         settings_flow();
         settings_gateway_window();
         log_agent_rows();
+        history_agent_calls();
         update_notice_flow();
         assemble_tour();
         compare_with_references();

@@ -133,6 +133,9 @@ pub struct NewCall {
     pub error: Option<String>,
     /// Round-trip time in milliseconds.
     pub elapsed_ms: u64,
+    /// The agent that made the call through the gateway, by the name it
+    /// gave; `None` for a call made in Coco or from the command line.
+    pub agent: Option<String>,
 }
 
 /// A stored call.
@@ -159,4 +162,8 @@ pub struct CallRecord {
     /// When the call was made.
     #[serde(with = "time::serde::rfc3339")]
     pub at: OffsetDateTime,
+    /// The agent that made the call through the gateway, by the name it
+    /// gave; `None` for a call made in Coco or from the command line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
