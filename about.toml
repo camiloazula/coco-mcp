@@ -1,0 +1,37 @@
+# cargo-about configuration: what `just notices` writes THIRD-PARTY-NOTICES.md
+# from. The licence policy itself is deny.toml's and is enforced there; this
+# list holds the same licences, in the order a crate offered a choice of them
+# is taken: Apache-2.0 first, whose terms for a binary are met by one copy of
+# its text (no crate has a NOTICE file), then MIT, whose copyright line must
+# travel with the binary, so each distinct MIT notice is printed.
+accepted = [
+  "Apache-2.0",
+  "MIT",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "MPL-2.0",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "0BSD",
+  "MIT-0",
+  "CC0-1.0",
+  "bzip2-1.0.6",
+]
+
+# The crates the one binary is built from for the targets the release builds
+# (.github/workflows/release.yml). Build-time tools and test dependencies are
+# not in it, so they carry no obligation and are left out.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The workspace's own crates are Coco's, under LICENSE-MIT and LICENSE-APACHE.
+[private]
+ignore = true

@@ -49,7 +49,18 @@ two modes. These rules keep it that way.
   than importing the crate, so `just test-app` (and CI) build the mock
   server first; `just mock` runs it directly.
 - No `unwrap()`/`expect()` outside tests (clippy denies them). No `unsafe`.
-- State the licence of any new dependency in the commit message.
+- State the licence of any new dependency in the commit message, and run
+  `just notices` after any change to `Cargo.lock` or a manifest:
+  `THIRD-PARTY-NOTICES.md` is generated from them by cargo-about 0.9.2
+  through `about.toml` and `about.hbs` (`.github/scripts/notices.sh`), and
+  names the digest of what it was generated from, which `just notices-check`
+  fails on when any of it moved. It lists every crate the released binary
+  is built from, for the four released targets, with its licence
+  expression, then the notices under one heading per licence: a crate
+  offering Apache-2.0 is taken under it and its text printed once, every
+  other distinct notice is printed with the crates it covers, and the two
+  fonts' notices close the file. The release archives carry it and the
+  About window links to it.
 - Commits, titles and descriptions say what changed and carry no
   attribution to a tool: no co-author trailer except for a person's GitHub
   account, no "Generated with" line, and the author is the person who made
@@ -157,6 +168,7 @@ two modes. These rules keep it that way.
 | Versions | `semver` | 1.0 | MIT/Apache-2.0 | Release versions in the update notice; already in the graph through `rustc_version`. |
 | Time, ids, digest | `time`, `uuid` v7, `sha2`, `hex` | | MIT/Apache-2.0 | |
 | Licence audit | `cargo-deny` | any current | | `just deny` locally; `EmbarkStudios/cargo-deny-action@v2` in CI. |
+| Third-party notices | `cargo-about` | 0.9.2 | | `just notices` writes `THIRD-PARTY-NOTICES.md` from the lockfile (`cargo install cargo-about --version 0.9.2 --locked --features cli`); `just notices-check` (in `just check`, CI and the release workflow) needs no tool. |
 | Fonts | Inter 4.0, Geist Mono 1.5 | | OFL-1.1 | Embedded from `apps/desktop/assets/fonts/`, registered in `theme::install`. |
 
 ## Layout
@@ -179,13 +191,14 @@ apps/desktop             the one binary (package coco-mcp): --desktop draws the 
 
 ```bash
 just              # list every recipe
-just check        # fmt-check + clippy + tests for every package + cargo-deny
+just check        # fmt-check + clippy + tests for every package + cargo-deny + notices-check
 just test-app     # app unit tests + headless flows, mock server built first
 just clippy-app   # clippy for the GPUI app (slow)
 just run          # the window
 just coco <args>  # the command-line mode
 just screenshots  # headless UI flows + PNGs (macOS)
 just accept-renders  # take the last renders as the references in docs/
+just notices      # regenerate THIRD-PARTY-NOTICES.md after a dependency change
 ```
 
 ## Releasing
@@ -221,8 +234,11 @@ it. Tags never move: a wrong release gets the next patch version.
    does not match `Cargo.toml`, builds the binary for macOS (arm64 and
    x86_64), Linux (x86_64) and Windows (x86_64), then creates the release
    as a draft with the generated notes, attaches the archives and a
-   `SHA256SUMS` file, and publishes it. The notes can still be edited on
-   the site afterwards; the files and the tag cannot.
+   `SHA256SUMS` file, and publishes it. Each archive holds the binary,
+   `README.md`, the two licence files and `THIRD-PARTY-NOTICES.md`, and
+   the workflow refuses a tag whose notices are behind its lockfile. The
+   notes can still be edited on the site afterwards; the files and the
+   tag cannot.
 5. The Homebrew formula and the npm packages follow on their own. Once
    the release is published, the workflow sends a `release` dispatch with
    the version to `camiloazula/homebrew-coco`, whose `bump` workflow points

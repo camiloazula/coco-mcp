@@ -35,6 +35,7 @@ jobs:
           sudo apt-get install -y pkg-config libfontconfig1-dev libfreetype-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
             libwayland-dev libvulkan-dev
+      - run: just notices-check
       - run: just fmt-check
       - run: just clippy
       - run: just test

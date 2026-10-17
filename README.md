@@ -494,6 +494,11 @@ intentionally submitted for inclusion in the work by you, as defined in the
 Apache-2.0 license, shall be dual licensed as above, without any additional
 terms or conditions.
 
+The notices of the crates the binary is built from and of the fonts it
+embeds, with their licence texts, are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which every release
+archive carries and the About window links to.
+
 The whole stack is open source. Every dependency is under a permissive
 licence on the allow-list in `deny.toml`: MIT, Apache-2.0, BSD-2-Clause,
 BSD-3-Clause, MPL-2.0, ISC, Zlib, and a few public-domain-style

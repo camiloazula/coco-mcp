@@ -23,7 +23,8 @@ env:
 
 jobs:
   # The tag names the version; the workspace manifest is the version. A
-  # release where the two disagree is refused before anything is built.
+  # release where the two disagree, or whose third-party notices are behind
+  # its lockfile, is refused before anything is built.
   version:
     name: version
     runs-on: ubuntu-latest
@@ -31,6 +32,8 @@ jobs:
       version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v2
+      - run: just notices-check
       - id: read
         run: |
           version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)
@@ -95,7 +98,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/"$ARCHIVE"
-          cp LICENSE-MIT LICENSE-APACHE README.md dist/"$ARCHIVE"/
+          cp LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.md README.md dist/"$ARCHIVE"/
           if [[ "$RUNNER_OS" == Windows ]]; then
             cp target/${{ matrix.target }}/release/coco-mcp.exe dist/"$ARCHIVE"/
             (cd dist && 7z a -tzip "$ARCHIVE.zip" "$ARCHIVE" > /dev/null)
