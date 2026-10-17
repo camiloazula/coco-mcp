@@ -1,6 +1,7 @@
 //! The About window: the mark, the `coco` wordmark, the build it came from,
-//! whether a newer release is out, and two links. 320 × 400, not resizable, with the platform's own window
-//! controls in the 36px header.
+//! whether a newer release is out, two links, and the licence line, which
+//! opens the third-party notices. 320 × 400, not resizable, with the
+//! platform's own window controls in the 36px header.
 
 use gpui_kit::component::{TitleBar, h_flex, v_flex};
 use gpui_kit::{
@@ -25,6 +26,8 @@ const INLINE_MARK: f32 = 20.;
 /// Where the two buttons go.
 const SOURCE: &str = "https://github.com/camiloazula/coco-mcp";
 const ISSUES: &str = "https://github.com/camiloazula/coco-mcp/issues";
+/// The notices of the crates compiled into the binary, in the repository.
+const NOTICES: &str = "THIRD-PARTY-NOTICES.md";
 
 /// `0.1.0 (a3f9c2e)`, or just the version when the build carries no commit.
 pub fn build_line() -> String {
@@ -37,6 +40,16 @@ pub fn build_line() -> String {
 /// Commit date of the build, when it has one.
 pub fn build_date() -> Option<String> {
     clock::build_date(option_env!("COCO_DATE"))
+}
+
+/// The third-party notices as they were for this build: at its commit, or
+/// at the version's tag when the build carries no commit.
+pub fn notices_url() -> String {
+    let rev = match option_env!("COCO_COMMIT") {
+        Some(commit) => commit.to_owned(),
+        None => format!("v{}", env!("CARGO_PKG_VERSION")),
+    };
+    format!("{SOURCE}/blob/{rev}/{NOTICES}")
 }
 
 /// The About window's contents.
@@ -154,6 +167,28 @@ impl About {
             .test_support()
             .into_any_element()
     }
+
+    /// The licence, and the notices of the crates in the binary, which the
+    /// line opens in the browser.
+    fn licence_line(&self, cx: &App) -> AnyElement {
+        let t = *tokens(cx);
+        div()
+            .id("third-party-notices")
+            .mt(px(14.))
+            .text_size(px(11.))
+            .text_color(t.muted)
+            .cursor_pointer()
+            .hover(|s| s.text_color(t.fg))
+            .on_click(|_, _, _| {
+                let url = notices_url();
+                if let Err(e) = open::that_detached(&url) {
+                    tracing::warn!("cannot open {url}: {e}");
+                }
+            })
+            .child("MIT OR Apache-2.0 · Third-party notices")
+            .test_support()
+            .into_any_element()
+    }
 }
 
 impl Focusable for About {
@@ -207,7 +242,7 @@ impl Render for About {
                             .child(self.link("source-code", "Source code", SOURCE, cx))
                             .child(self.link("report-issue", "Report an issue", ISSUES, cx)),
                     )
-                    .child(div().mt(px(14.)).child(muted(cx, 11., "MIT OR Apache-2.0"))),
+                    .child(self.licence_line(cx)),
             )
     }
 }
@@ -263,5 +298,23 @@ mod tests {
             assert!(line.ends_with(&format!("({commit})")), "{line}");
             assert_eq!(commit.len(), 7, "short hash");
         }
+    }
+
+    #[test]
+    fn the_notices_are_those_of_this_build() {
+        let url = notices_url();
+        assert!(url.starts_with(&format!("{SOURCE}/blob/")), "{url}");
+        assert!(url.ends_with(&format!("/{NOTICES}")), "{url}");
+        let rev = &url[SOURCE.len() + "/blob/".len()..url.len() - NOTICES.len() - 1];
+        match option_env!("COCO_COMMIT") {
+            Some(commit) => assert_eq!(rev, commit),
+            None => assert_eq!(rev, format!("v{}", env!("CARGO_PKG_VERSION"))),
+        }
+        // The link points into the repository at the build's commit, where
+        // the file must be, under that name, at the root.
+        let in_repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(NOTICES);
+        assert!(in_repo.is_file(), "{} is missing", in_repo.display());
     }
 }

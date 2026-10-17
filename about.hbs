@@ -1,0 +1,56 @@
+# Third-party notices
+
+Coco MCP is Copyright (c) 2026 Camilo Azula, licensed under either the MIT
+license (`LICENSE-MIT`) or the Apache License, Version 2.0 (`LICENSE-APACHE`),
+at your option. The `coco-mcp` binary is built from the open-source crates
+below, each under the licence expression beside it, and embeds two fonts.
+Their notices follow, one heading per licence. A crate offered a choice of
+licences is taken under Apache-2.0 when it offers it, whose text is printed
+once; under every other licence each distinct notice is printed once, with
+the crates it covers, so each copyright line travels with the binary. A crate
+that ships no notice of its own is listed with its licence's canonical text.
+
+Generated from `Cargo.lock` by `just notices` for the targets the release
+builds; do not edit by hand. Inputs digest `@INPUTS_DIGEST@` (what
+`just notices-check` compares).
+
+## Crates
+
+| Crate | Version | Licence |
+| --- | --- | --- |
+{{#each crates~}}
+| [{{{package.name}}}](https://crates.io/crates/{{{package.name}}}/{{{package.version}}}) | {{{package.version}}} | {{{license}}} |
+{{/each}}
+
+## Notices
+{{#each licenses}}
+{{#if first_of_kind}}
+
+### {{{name}}} ({{{id}}})
+{{#if (eq id "Apache-2.0")}}
+
+```text
+{{{text}}}
+```
+
+Taken under it:
+
+{{/if}}
+{{/if}}
+{{#if (eq id "Apache-2.0")}}
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}
+{{/each}}
+{{else}}
+
+Notice of:
+
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+{{/if}}
+{{/each}}

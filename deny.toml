@@ -79,4 +79,10 @@ ignore = [
   { id = "RUSTSEC-2024-0436", reason = "paste: proc-macro via gpui-pre; no runtime code" },
   { id = "RUSTSEC-2026-0192", reason = "ttf-parser: font parsing inside gpui-pre/cosmic-text" },
   { id = "RUSTSEC-2026-0206", reason = "rustybuzz: text shaping inside usvg/gpui-pre" },
+  # zbus 5 split these into crates of their own; zbus 6 merges them back.
+  # They arrive with gpui-pre-linux, accesskit_unix and keyring's
+  # secret-service store, none of which has moved to zbus 6 yet.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: D-Bus wire format of zbus 5, via gpui-pre-linux, accesskit_unix and keyring" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: D-Bus name types of zbus 5, same path" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: derive macros of zbus 5, same path" },
 ]
