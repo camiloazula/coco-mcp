@@ -3858,7 +3858,7 @@ mod macos {
         for kind in traffic {
             let event = sink.emit(kind);
             let mut row = log_row(&event).unwrap();
-            row.agent = Some("claude-code".into());
+            row.agent = Some("some-agent".into());
             s.servers[0].push_log(row);
         }
         s.drawer_open = true;
@@ -3915,7 +3915,7 @@ mod macos {
             json!({"city": "Oslo", "days": 3}),
             text("Oslo: -2 to 1 C, light snow"),
             CallStatus::Ok,
-            Some("claude-code"),
+            Some("some-agent"),
         ));
         s.servers[0].push_call(call(
             "c4",
@@ -3923,7 +3923,7 @@ mod macos {
             json!({"city": "Oslo", "units": "metric"}),
             text("{\"temp\":-1.4}"),
             CallStatus::Ok,
-            Some("claude-code"),
+            Some("some-agent"),
         ));
         s.mode = Mode::History;
         s.selected_item = Some(1);
