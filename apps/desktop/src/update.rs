@@ -239,6 +239,13 @@ pub fn skip(cx: &mut App) {
     close(cx);
 }
 
+/// Whether checks run, and whether the environment alone turned them off
+/// (which the window cannot change). Without a model, off by the environment.
+pub fn checks(cx: &App) -> (bool, bool) {
+    cx.try_global::<Update>()
+        .map_or((false, true), |u| (u.on(), u.env_off))
+}
+
 /// Turn checks on or off from the window, for the command line too.
 pub fn toggle_checks(cx: &mut App) {
     let Some(update) = cx.try_global::<Update>() else {

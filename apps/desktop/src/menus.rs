@@ -16,9 +16,9 @@ use crate::actions::{
     About, AddServer, CancelCall, CheckForUpdates, ClearHistory, CommandPalette,
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
-    ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, ShowHistory, ShowPrompts,
-    ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
-    ToggleTheme, ToggleUpdateChecks, ZoomLog,
+    ExportSnapshot, ForgetCredentials, ImportConfig, OpenSettings, Quit, Reconnect, ShowHistory,
+    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
+    ToggleResponse, ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{AppState, Status};
 use crate::views::about;
@@ -88,6 +88,7 @@ impl Global for Installed {}
 pub fn install(cx: &mut App) {
     cx.set_global(AboutWindow::default());
     cx.on_action(|_: &About, cx| open_about(cx));
+    cx.on_action(|_: &OpenSettings, cx| crate::views::settings::show(cx));
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::check(true, cx));
     cx.on_action(|_: &ToggleUpdateChecks, cx| crate::update::toggle_checks(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -119,6 +120,8 @@ fn menu_bar(a: Available) -> Vec<Menu> {
             vec![
                 MenuItem::action(format!("About {APP_NAME}"), About),
                 MenuItem::action("Check for Updates…", CheckForUpdates),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", OpenSettings),
                 MenuItem::separator(),
                 MenuItem::action(format!("Quit {APP_NAME}"), Quit),
             ],

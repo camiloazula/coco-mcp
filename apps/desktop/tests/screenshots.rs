@@ -3690,6 +3690,57 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
+    /// The Settings window: each choice changes the model the main window
+    /// reads, and what was chosen is drawn as chosen.
+    fn settings_flow() {
+        let mut cx = context();
+        let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+        let store = mcp_store::Store::open_in_memory().unwrap();
+        let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), Some(store))));
+        let handle = cx
+            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
+            .expect("Settings window opens");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            for id in [
+                "settings",
+                "section-general",
+                "theme-dark",
+                "theme-light",
+                "names-identifiers",
+                "names-display",
+                "checks-on",
+                "checks-off",
+            ] {
+                assert!(window.try_find(id).is_some(), "{id} is drawn");
+            }
+        })
+        .unwrap();
+        let read = |cx: &mut HeadlessAppContext| {
+            cx.update(|cx| {
+                let s = state.read(cx);
+                (s.dark, s.display_names)
+            })
+        };
+        assert_eq!(read(&mut cx), (true, false), "the defaults");
+        for (id, want) in [
+            ("theme-light", (false, false)),
+            ("names-display", (false, true)),
+            ("theme-dark", (true, true)),
+            ("names-identifiers", (true, false)),
+        ] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(id, cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(read(&mut cx), want, "after {id}");
+        }
+        // A change made elsewhere shows here without a click.
+        cx.update(|cx| state.update(cx, |s, cx| s.set_display_names(true, cx)));
+        snap(&mut cx, handle, "74-settings");
+    }
+
     /// A newer release, installed through Homebrew: the note in the status
     /// bar opens the popover with the command, the About window names the
     /// release, and skipping it takes the note away.
@@ -4008,6 +4059,7 @@ mod macos {
         capture("05-light", s, false);
         about_window(true, "24-about");
         about_window(false, "25-about-light");
+        settings_flow();
         update_notice_flow();
         assemble_tour();
         compare_with_references();
