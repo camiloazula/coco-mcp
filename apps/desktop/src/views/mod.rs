@@ -27,6 +27,7 @@ pub mod request_dialog;
 mod response;
 mod server_fields;
 mod server_view;
+pub mod settings;
 mod sidebar;
 mod split;
 mod status_bar;

@@ -55,6 +55,14 @@ impl Update {
         }
     }
 
+    /// The same model with the environment's say changed, for the renders
+    /// of the Settings window, which draws a choice the environment decided
+    /// differently from one the person may make.
+    pub fn with_env_off(mut self, env_off: bool) -> Self {
+        self.env_off = env_off;
+        self
+    }
+
     /// What to show in the status bar and the popover, if anything.
     pub fn notice(&self) -> Option<Notice> {
         if self.dismissed {
@@ -237,6 +245,13 @@ pub fn skip(cx: &mut App) {
     };
     change(move |state| state.skipped = Some(version.clone()), cx);
     close(cx);
+}
+
+/// Whether checks run, and whether the environment alone turned them off
+/// (which the window cannot change). Without a model, off by the environment.
+pub fn checks(cx: &App) -> (bool, bool) {
+    cx.try_global::<Update>()
+        .map_or((false, true), |u| (u.on(), u.env_off))
 }
 
 /// Turn checks on or off from the window, for the command line too.

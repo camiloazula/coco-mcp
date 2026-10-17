@@ -3690,6 +3690,124 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
+    /// The Settings window: each choice changes the model the main window
+    /// reads, what was chosen is drawn as chosen, a second request raises
+    /// the window instead of opening another, and the View menu's two
+    /// choices still work while it is in front.
+    fn settings_flow() {
+        use coco_mcp::actions::{ToggleDisplayNames, ToggleTheme};
+        use coco_mcp::update::Update;
+        use coco_update::{Channel, State};
+
+        let mut cx = context();
+        let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+        let store = mcp_store::Store::open_in_memory().unwrap();
+        // Checks the environment leaves to the person, and not due: turning
+        // them back on must not reach for the network.
+        let checks = State {
+            checked_at: Some(coco_update::now()),
+            ..State::default()
+        };
+        cx.update(|cx| {
+            cx.set_global(
+                Update::fixed(bridge.clone(), Channel::Homebrew, checks).with_env_off(false),
+            );
+            coco_mcp::menus::install(cx);
+        });
+        let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), Some(store))));
+        cx.update(|cx| cx.set_global(coco_mcp::views::settings::Model(state.clone())));
+        // The main window beside it, which has to follow.
+        let main = cx
+            .open_window(size(px(1200.), px(760.)), |window, cx| {
+                let workspace = cx.new(|cx| Workspace::new(state.clone(), window, cx));
+                cx.new(|cx| Root::new(workspace, window, cx))
+            })
+            .unwrap();
+        let before = cx.update(|cx| cx.windows().len());
+        cx.update(coco_mcp::views::settings::show);
+        assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "opened");
+        cx.update(coco_mcp::views::settings::show);
+        assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "raised");
+        let handle = cx
+            .update(|cx| {
+                cx.windows()
+                    .into_iter()
+                    .filter_map(|w| w.downcast::<Root>())
+                    .find(|w| w.window_id() != main.window_id())
+            })
+            .expect("the Settings window");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            for id in [
+                "settings",
+                "section-general",
+                "theme-dark",
+                "theme-light",
+                "names-identifiers",
+                "names-display",
+                "checks-on",
+                "checks-off",
+            ] {
+                assert!(window.try_find(id).is_some(), "{id} is drawn");
+            }
+        })
+        .unwrap();
+        let read = |cx: &mut HeadlessAppContext| {
+            cx.update(|cx| {
+                let s = state.read(cx);
+                (
+                    s.dark,
+                    s.display_names,
+                    coco_mcp::theme::tokens(cx).dark,
+                    coco_mcp::update::checks(cx).0,
+                )
+            })
+        };
+        assert_eq!(read(&mut cx), (true, false, true, true), "the defaults");
+        // (dark, names, tokens, checks) after each click.
+        for (id, want) in [
+            ("theme-light", (false, false, false, true)),
+            ("names-display", (false, true, false, true)),
+            ("theme-dark", (true, true, true, true)),
+            ("names-identifiers", (true, false, true, true)),
+            ("checks-off", (true, false, true, false)),
+            ("checks-on", (true, false, true, true)),
+        ] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(id, cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(read(&mut cx), want, "after {id}");
+        }
+        // The View menu's choices, from the Settings window.
+        for (action, want) in [
+            (
+                Box::new(ToggleTheme) as Box<dyn gpui_kit::Action>,
+                (false, false, false, true),
+            ),
+            (Box::new(ToggleDisplayNames), (false, true, false, true)),
+        ] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.dispatch_action(action, cx)
+            })
+            .unwrap();
+            cx.run_until_parked();
+            assert_eq!(read(&mut cx), want);
+        }
+        // The main window follows what was chosen here.
+        cx.update_window(main.into(), |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        cx.update(|cx| {
+            state.update(cx, |s, cx| {
+                s.set_dark(true, cx);
+                s.set_display_names(true, cx)
+            });
+            coco_mcp::theme::set_dark(true, None, cx);
+        });
+        snap(&mut cx, handle, "74-settings");
+    }
+
     /// A newer release, installed through Homebrew: the note in the status
     /// bar opens the popover with the command, the About window names the
     /// release, and skipping it takes the note away.
@@ -4008,6 +4126,7 @@ mod macos {
         capture("05-light", s, false);
         about_window(true, "24-about");
         about_window(false, "25-about-light");
+        settings_flow();
         update_notice_flow();
         assemble_tour();
         compare_with_references();

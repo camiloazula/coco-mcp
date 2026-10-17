@@ -86,6 +86,8 @@ gpui_kit::actions!(
         ExportConfig,
         /// Open the About window (application menu).
         About,
+        /// Open the Settings window (⌘,).
+        OpenSettings,
         /// Ask now whether a newer release is out.
         CheckForUpdates,
         /// Turn the daily update check off, or back on.
@@ -163,6 +165,7 @@ pub fn bind(cx: &mut App) {
             KeyBinding::new("cmd-e", EditServer, Some(WORKSPACE)),
             KeyBinding::new("cmd-shift-c", CopyResponse, Some(WORKSPACE)),
             KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-,", OpenSettings, None),
         ]
         .into_iter()
         .chain(list_bindings(SERVER_LIST))

@@ -13,9 +13,9 @@ use crate::actions::{
     AddServer, Call, CancelCall, CheckForUpdates, ClearHistory, ClearLog, CompareSnapshotFile,
     CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
     Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
-    ForgetCredentials, ImportConfig, Reconnect, SelectServer, ShowHistory, ShowPrompts,
-    ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog, ToggleResponse,
-    ToggleTheme, ToggleUpdateChecks, ZoomLog,
+    ForgetCredentials, ImportConfig, OpenSettings, Reconnect, SelectServer, ShowHistory,
+    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
+    ToggleResponse, ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{Mode, Status};
 use crate::views::Workspace;
@@ -229,6 +229,11 @@ pub fn render(
             if dark { "Light theme" } else { "Dark theme" },
             ToggleTheme,
             &["theme", "dark", "light"],
+        ),
+        item(
+            "Open settings",
+            OpenSettings,
+            &["preferences", "options", "theme", "names", "updates"],
         ),
         item(
             "Check for updates",

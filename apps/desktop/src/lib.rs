@@ -97,6 +97,7 @@ pub fn run() -> anyhow::Result<()> {
                 state.secrets = std::sync::Arc::new(mcp_auth::KeyringStore::default());
                 state
             });
+            cx.set_global(views::settings::Model(state.clone()));
             let options = window_options(cx);
             let opened = cx.open_window(options, |window, cx| {
                 let workspace = cx.new(|cx| Workspace::new(state, window, cx));
