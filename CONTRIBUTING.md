@@ -56,11 +56,11 @@ two modes. These rules keep it that way.
   names the digest of what it was generated from, which `just notices-check`
   fails on when any of it moved. It lists every crate the released binary
   is built from, for the four released targets, with its licence
-  expression, then the notices under one heading per licence: a crate
-  offering Apache-2.0 is taken under it and its text printed once, every
-  other distinct notice is printed with the crates it covers, and the two
-  fonts' notices close the file. The release archives carry it and the
-  About window links to it.
+  expression, then each licence's text once, as SPDX publishes it at the
+  release the script pins, with the crates taken under it (Apache-2.0
+  when a crate offers it, else the first licence of `about.toml`'s order
+  it offers); the two fonts' notices close the file. The release archives
+  carry it and the About window links to it.
 - Commits, titles and descriptions say what changed and carry no
   attribution to a tool: no co-author trailer except for a person's GitHub
   account, no "Generated with" line, and the author is the person who made
