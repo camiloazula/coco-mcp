@@ -49,6 +49,15 @@ const MAX_PAGES: usize = 100;
 const NAME: &str = "coco-mcp-gateway";
 /// The id of the handshake with each server.
 const INIT: &str = "coco:init";
+/// Requests one agent may have being answered at once.
+const MAX_INFLIGHT: usize = 256;
+
+/// Whether `id` is of the kind the gateway makes for itself, which an agent
+/// may not use: it would meet the answer to one of the gateway's own.
+fn reserved(id: &Value) -> bool {
+    id.as_str()
+        .is_some_and(|id| id.starts_with("coco:") || id.starts_with("coco-"))
+}
 
 /// What waits for a server's response.
 enum Waiter {
@@ -69,6 +78,8 @@ struct Member {
     namespace: String,
     upstream: Arc<dyn Upstream>,
     capabilities: Value,
+    /// The protocol version it settled on, sent with what goes to it after.
+    version: String,
     waiting: Mutex<HashMap<String, Waiting>>,
     down: AtomicBool,
 }
@@ -84,8 +95,13 @@ pub(crate) struct Aggregate {
     /// Which server each forwarded request went to, by the agent's id.
     inflight: Mutex<HashMap<String, usize>>,
     /// Whether the resource lists were read, so a read of a URI the agent
-    /// never listed can look for its server.
-    listed: AtomicBool,
+    /// never listed can look for its server. Held while they are read, so
+    /// reads that arrive together wait for it.
+    listed: tokio::sync::Mutex<bool>,
+    /// A list failed while the lists were read: they are read again.
+    list_failed: AtomicBool,
+    /// Places for requests being answered.
+    permits: Arc<tokio::sync::Semaphore>,
     next: AtomicU64,
     ended: CancellationToken,
 }
@@ -137,18 +153,11 @@ impl Aggregate {
         });
         let mut members = Vec::new();
         let mut incoming = Vec::new();
-        for (opened, (namespace, _)) in join_all(opening).await.into_iter().zip(servers) {
-            match opened {
-                Ok((member, rx)) => {
-                    members.push(member);
-                    incoming.push(rx);
-                }
-                Err(why) => observer.stderr(
-                    namespace,
-                    &id,
-                    &format!("the gateway could not open this server for the root: {why}"),
-                ),
-            }
+        // A server that could not be opened said so in its own log, in
+        // `open_member`, and is left out.
+        for (member, rx) in join_all(opening).await.into_iter().flatten() {
+            members.push(member);
+            incoming.push(rx);
         }
         if members.is_empty() {
             return Err(UpstreamError::Failed(
@@ -156,11 +165,17 @@ impl Aggregate {
             ));
         }
         let capabilities = merge::capabilities(members.iter().map(|m| &m.capabilities));
-        let version = params
+        let requested = params
             .get("protocolVersion")
             .and_then(Value::as_str)
-            .unwrap_or("2025-11-25")
-            .to_owned();
+            .unwrap_or("2025-11-25");
+        let version = merge::negotiated(
+            requested,
+            &members
+                .iter()
+                .map(|m| m.version.as_str())
+                .collect::<Vec<_>>(),
+        );
         let aggregate = Arc::new_cyclic(|me| Self {
             me: me.clone(),
             id,
@@ -169,7 +184,9 @@ impl Aggregate {
             observer,
             owners: Mutex::new(Owners::default()),
             inflight: Mutex::new(HashMap::new()),
-            listed: AtomicBool::new(false),
+            listed: tokio::sync::Mutex::new(false),
+            list_failed: AtomicBool::new(false),
+            permits: Arc::new(tokio::sync::Semaphore::new(MAX_INFLIGHT)),
             next: AtomicU64::new(1),
             ended: CancellationToken::new(),
         });
@@ -208,10 +225,10 @@ impl Aggregate {
                 elapsed: None,
             },
         );
-        member
-            .upstream
-            .send(&frame_of(message), &RequestContext::default())
-            .await
+        let context = RequestContext {
+            headers: vec![("mcp-protocol-version".into(), member.version.clone())],
+        };
+        member.upstream.send(&frame_of(message), &context).await
     }
 
     /// Send a request to member `idx` and note what waits for its response.
@@ -250,10 +267,20 @@ impl Aggregate {
         self.ask_with(idx, &id, method, &params, Waiter::Internal(tx))
             .await
             .map_err(|e| e.to_string())?;
-        let response = tokio::time::timeout(LIST_TIMEOUT, rx)
-            .await
-            .map_err(|_| "it did not answer in time".to_owned())?
-            .map_err(|_| "it went away".to_owned())?;
+        let waited = tokio::select! {
+            () = self.ended.cancelled() => Err("the agent left".to_owned()),
+            response = tokio::time::timeout(LIST_TIMEOUT, rx) => response
+                .map_err(|_| "it did not answer in time".to_owned()),
+        };
+        let response = match waited {
+            Ok(response) => response.map_err(|_| "it went away".to_owned())?,
+            Err(why) => {
+                if let Ok(mut waiting) = self.members[idx].waiting.lock() {
+                    waiting.remove(&id_key(&id));
+                }
+                return Err(why);
+            }
+        };
         match response.get("error") {
             Some(error) => Err(error["message"].as_str().unwrap_or("it refused").to_owned()),
             None => Ok(response.get("result").cloned().unwrap_or(Value::Null)),
@@ -300,6 +327,7 @@ impl Aggregate {
             let items = match result {
                 Ok(items) => items,
                 Err(why) => {
+                    self.list_failed.store(true, Ordering::SeqCst);
                     self.observer.stderr(
                         &namespace,
                         &self.id,
@@ -358,34 +386,42 @@ impl Aggregate {
             }
             listed.push((namespace, uris));
         }
-        for uri in Owners::clashes(&listed) {
-            for (namespace, uris) in listed.iter().skip(1) {
-                if uris.contains(&uri) {
-                    self.observer.stderr(
-                        namespace,
-                        &self.id,
-                        &format!("{uri} is also listed by a server before this one, which serves it at the root"),
-                    );
-                }
-            }
+        for (uri, namespace) in Owners::clashes(&listed) {
+            self.observer.stderr(
+                &namespace,
+                &self.id,
+                &format!(
+                    "{uri} is also listed by a server before this one, which serves it at the root"
+                ),
+            );
         }
         merged
     }
 
     /// The resource lists, read once, so an owner can be found for a URI.
     async fn ensure_listed(&self) {
-        if !self.listed.swap(true, Ordering::SeqCst) {
-            self.merged("resources/list", "resources", "resources")
-                .await;
-            self.merged("resources/templates/list", "resourceTemplates", "resources")
-                .await;
+        let mut done = self.listed.lock().await;
+        if *done {
+            return;
         }
+        self.list_failed.store(false, Ordering::SeqCst);
+        self.merged("resources/list", "resources", "resources")
+            .await;
+        self.merged("resources/templates/list", "resourceTemplates", "resources")
+            .await;
+        // A list that failed is asked again by the next read that needs it.
+        *done = !self.list_failed.load(Ordering::SeqCst);
     }
 
     /// Answer a request the agent made.
     async fn handle(self: Arc<Self>, id: Value, method: String, params: Value) {
         let key = id_key(&id);
         let reply = match method.as_str() {
+            _ if reserved(&id) => Some(failure(
+                &id,
+                -32600,
+                "Ids that start with coco: or coco- are the gateway's own",
+            )),
             "ping" => Some(ok(&id, json!({}))),
             "initialize" => Some(failure(&id, -32600, "already initialized")),
             "tools/list" => Some(ok(
@@ -461,7 +497,9 @@ impl Aggregate {
                 ),
             ));
         };
-        let idx = self.index_of(namespace)?;
+        let Some(idx) = self.index_of(namespace) else {
+            return Some(failure(id, -32603, "The server is not here any more"));
+        };
         params["name"] = Value::String(name.to_owned());
         self.forward(idx, id, method, params).await
     }
@@ -489,10 +527,9 @@ impl Aggregate {
 
     /// A request about a resource: the URI says which server.
     async fn forward_uri(&self, id: &Value, method: &str, params: Value) -> Option<Value> {
-        let uri = params
-            .get("uri")
-            .and_then(Value::as_str)
-            .map(str::to_owned)?;
+        let Some(uri) = params.get("uri").and_then(Value::as_str).map(str::to_owned) else {
+            return Some(failure(id, -32602, "No uri was given"));
+        };
         match self.owner_of(&uri).await {
             Some(idx) => self.forward(idx, id, method, params).await,
             None => Some(json!({"jsonrpc": "2.0", "id": id, "error": {
@@ -505,16 +542,26 @@ impl Aggregate {
         let reference = params.get("ref").cloned().unwrap_or(Value::Null);
         match reference.get("type").and_then(Value::as_str) {
             Some("ref/prompt") => {
-                let merged = reference.get("name").and_then(Value::as_str)?.to_owned();
-                let Some((namespace, name)) = merge::split(&merged, self.namespaces()) else {
+                let Some(merged) = reference.get("name").and_then(Value::as_str) else {
+                    return Some(failure(id, -32602, "No prompt name was given"));
+                };
+                let Some((namespace, name)) = merge::split(merged, self.namespaces()) else {
                     return Some(failure(id, -32602, "Unknown prompt"));
                 };
-                let idx = self.index_of(namespace)?;
+                let Some(idx) = self.index_of(namespace) else {
+                    return Some(failure(id, -32603, "The server is not here any more"));
+                };
                 params["ref"]["name"] = Value::String(name.to_owned());
                 self.forward(idx, id, "completion/complete", params).await
             }
             Some("ref/resource") => {
-                let uri = reference.get("uri").and_then(Value::as_str)?.to_owned();
+                let Some(uri) = reference
+                    .get("uri")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    return Some(failure(id, -32602, "No uri was given"));
+                };
                 match self.owner_of(&uri).await {
                     Some(idx) => self.forward(idx, id, "completion/complete", params).await,
                     None => Some(failure(id, -32002, "Resource not found")),
@@ -563,7 +610,7 @@ impl Aggregate {
                         && let Ok(mut owners) = self.owners.lock()
                     {
                         for uri in merge::uris_in_result(result) {
-                            owners.uri(&namespace, &uri);
+                            owners.link(&namespace, &uri);
                         }
                     }
                     let key = id_key(&id);
@@ -580,7 +627,18 @@ impl Aggregate {
                 message["id"] = Value::String(format!("coco-{idx}-{}", id_key(&id)));
                 self.streams.unsolicited(message).await;
             }
-            Kind::Notification | Kind::Other => self.streams.unsolicited(message).await,
+            Kind::Notification | Kind::Other => {
+                // A server giving up on a request of its own names it by the
+                // id it used, which the agent knows it by in the form it was
+                // sent on.
+                if message["method"] == "notifications/cancelled"
+                    && let Some(request) = message["params"].get("requestId").cloned()
+                {
+                    message["params"]["requestId"] =
+                        Value::String(format!("coco-{idx}-{}", id_key(&request)));
+                }
+                self.streams.unsolicited(message).await;
+            }
         }
     }
 
@@ -607,6 +665,9 @@ impl Aggregate {
             return;
         }
         self.observer.closed(&member.namespace, &self.id, reason);
+        if let Ok(mut inflight) = self.inflight.lock() {
+            inflight.retain(|_, at| *at != idx);
+        }
         let orphaned: Vec<(String, Waiting)> = member
             .waiting
             .lock()
@@ -717,7 +778,20 @@ impl Session for Aggregate {
                     .to_owned();
                 let params = frame.value.get("params").cloned().unwrap_or(Value::Null);
                 if let Some(me) = self.me.upgrade() {
-                    tokio::spawn(me.handle(id, method, params));
+                    match self.permits.clone().try_acquire_owned() {
+                        Ok(permit) => {
+                            tokio::spawn(async move {
+                                let _place = permit;
+                                me.handle(id, method, params).await;
+                            });
+                        }
+                        Err(_) => {
+                            tokio::spawn(async move {
+                                let busy = failure(&id, -32603, "Too many requests at once");
+                                me.streams.answer(&id_key(&id), busy).await;
+                            });
+                        }
+                    }
                 }
                 Ok(Posted::Stream(rx))
             }
@@ -747,7 +821,9 @@ impl Session for Aggregate {
     }
 }
 
-/// Open one server and shake hands with it.
+/// Open one server and shake hands with it. A server that cannot be opened
+/// still shows in its log: that an agent reached for it, why it could not be
+/// opened, and that it is gone.
 async fn open_member(
     namespace: String,
     connector: Arc<dyn Connector>,
@@ -756,6 +832,19 @@ async fn open_member(
     info: Option<ClientInfo>,
     observer: Arc<dyn Observer>,
 ) -> Result<(Member, mpsc::Receiver<Value>), String> {
+    observer.opened(&namespace, session);
+    if let Some(info) = info {
+        observer.client(&namespace, session, info);
+    }
+    let unopened = |why: &str| -> String {
+        observer.stderr(
+            &namespace,
+            session,
+            &format!("the gateway could not open this server for the root: {why}"),
+        );
+        observer.closed(&namespace, session, "could not be opened");
+        why.to_owned()
+    };
     let stderr: StderrSink = {
         let (observer, namespace, session) =
             (observer.clone(), namespace.clone(), session.to_owned());
@@ -764,14 +853,11 @@ async fn open_member(
     let Opened {
         upstream,
         mut incoming,
-    } = tokio::time::timeout(OPEN_TIMEOUT, connector.open(stderr))
-        .await
-        .map_err(|_| "it did not start in time".to_owned())?
-        .map_err(|e| e.to_string())?;
-    observer.opened(&namespace, session);
-    if let Some(info) = info {
-        observer.client(&namespace, session, info);
-    }
+    } = match tokio::time::timeout(OPEN_TIMEOUT, connector.open(stderr)).await {
+        Ok(Ok(opened)) => opened,
+        Ok(Err(e)) => return Err(unopened(&e.to_string())),
+        Err(_) => return Err(unopened("it did not start in time")),
+    };
     let report = |direction, frame: &Value, method, elapsed| {
         observer.frame(
             &namespace,
@@ -817,25 +903,33 @@ async fn open_member(
         Ok(Ok(result)) => result,
         Ok(Err(why)) => {
             upstream.close().await;
-            observer.closed(&namespace, session, &why);
-            return Err(why);
+            return Err(unopened(&why));
         }
         Err(_) => {
             upstream.close().await;
-            observer.closed(&namespace, session, "it did not answer in time");
-            return Err("it did not answer in time".to_owned());
+            return Err(unopened("it did not answer in time"));
         }
     };
     let initialized = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
     report(Direction::Outbound, &initialized, None, None);
-    upstream
+    if let Err(e) = upstream
         .send(&frame_of(initialized), &RequestContext::default())
         .await
-        .map_err(|e| e.to_string())?;
+    {
+        upstream.close().await;
+        return Err(unopened(&e.to_string()));
+    }
+    let version = result
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .or_else(|| params.get("protocolVersion").and_then(Value::as_str))
+        .unwrap_or("2025-11-25")
+        .to_owned();
     let member = Member {
-        namespace,
+        namespace: namespace.clone(),
         upstream,
         capabilities: result.get("capabilities").cloned().unwrap_or(Value::Null),
+        version,
         waiting: Mutex::new(HashMap::new()),
         down: AtomicBool::new(false),
     };

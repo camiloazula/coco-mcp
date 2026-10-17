@@ -33,6 +33,19 @@ pub(crate) fn split<'a>(
         .max_by_key(|(namespace, _)| namespace.len())
 }
 
+/// The protocol version the root tells the agent: the one it asked for when
+/// every server agreed to it, else the oldest any server settled on, which
+/// every one of them speaks.
+pub(crate) fn negotiated(requested: &str, servers: &[&str]) -> String {
+    if servers.iter().all(|v| *v == requested) {
+        return requested.to_owned();
+    }
+    servers
+        .iter()
+        .min()
+        .map_or_else(|| requested.to_owned(), |v| (*v).to_owned())
+}
+
 /// Whether `uri` is what `template` (RFC 6570, simple `{variable}`
 /// expressions) expands to for some values: its literal parts in order, and
 /// at least one character where each expression stands.
@@ -134,11 +147,18 @@ pub(crate) fn capabilities<'a>(servers: impl IntoIterator<Item = &'a Value>) -> 
     Value::Object(merged)
 }
 
+/// URIs remembered from tool results, at most: the oldest are dropped.
+const MAX_LINKED: usize = 4096;
+
 /// Where each resource URI, template and prompt a server listed belongs.
 #[derive(Debug, Default)]
 pub(crate) struct Owners {
-    /// A listed or linked URI, by the namespaces that served it.
+    /// A listed URI, by the namespaces that listed it.
     uris: HashMap<String, Vec<String>>,
+    /// A URI a tool result pointed at, oldest first, with the namespace of
+    /// the tool. Apart from the listed ones: listing again does not forget
+    /// what a result linked.
+    linked: std::collections::VecDeque<(String, String)>,
     /// A listed template, by the namespace that served it.
     templates: Vec<(String, String)>,
 }
@@ -150,6 +170,18 @@ impl Owners {
         if !owners.iter().any(|n| n == namespace) {
             owners.push(namespace.to_owned());
         }
+    }
+
+    /// A resource a tool of `namespace` pointed at in a result.
+    pub(crate) fn link(&mut self, namespace: &str, uri: &str) {
+        let entry = (namespace.to_owned(), uri.to_owned());
+        if self.linked.contains(&entry) {
+            return;
+        }
+        if self.linked.len() >= MAX_LINKED {
+            self.linked.pop_front();
+        }
+        self.linked.push_back(entry);
     }
 
     /// A resource template of `namespace`.
@@ -185,6 +217,13 @@ impl Owners {
         {
             return Some(first);
         }
+        if let Some(first) = order.iter().copied().find(|namespace| {
+            self.linked
+                .iter()
+                .any(|(owner, linked)| owner == namespace && linked == uri)
+        }) {
+            return Some(first);
+        }
         order.iter().copied().find(|namespace| {
             self.templates
                 .iter()
@@ -192,20 +231,23 @@ impl Owners {
         })
     }
 
-    /// URIs more than one server of `order` lists, for a warning.
-    pub(crate) fn clashes(listed: &[(String, Vec<String>)]) -> Vec<String> {
-        let mut seen: HashMap<&str, &str> = HashMap::new();
+    /// For each URI more than one server lists, the servers after the first
+    /// to list it: the ones that do not serve it, to be told so.
+    pub(crate) fn clashes(listed: &[(String, Vec<String>)]) -> Vec<(String, String)> {
+        let mut first: HashMap<&str, &str> = HashMap::new();
         let mut clashes = Vec::new();
         for (namespace, uris) in listed {
             for uri in uris {
-                match seen.get(uri.as_str()) {
-                    Some(first) if *first != namespace.as_str() => {
-                        if !clashes.contains(uri) {
-                            clashes.push(uri.clone());
+                match first.get(uri.as_str()) {
+                    Some(owner) if *owner != namespace.as_str() => {
+                        let clash = (uri.clone(), namespace.clone());
+                        if !clashes.contains(&clash) {
+                            clashes.push(clash);
                         }
                     }
-                    _ => {
-                        seen.insert(uri, namespace);
+                    Some(_) => {}
+                    None => {
+                        first.insert(uri, namespace);
                     }
                 }
             }
@@ -235,6 +277,24 @@ mod tests {
         assert_eq!(split("a__b__tool", namespaces), Some(("a", "b__tool")));
         assert_eq!(split("nobody__tool", namespaces), None);
         assert_eq!(split("weather_tool", namespaces), None, "no separator");
+    }
+
+    #[test]
+    fn the_version_is_one_every_server_speaks() {
+        assert_eq!(
+            negotiated("2025-11-25", &["2025-11-25", "2025-11-25"]),
+            "2025-11-25"
+        );
+        assert_eq!(
+            negotiated("2025-11-25", &["2025-11-25", "2025-06-18"]),
+            "2025-06-18"
+        );
+        assert_eq!(
+            negotiated("2099-01-01", &["2025-11-25"]),
+            "2025-11-25",
+            "not an unknown one"
+        );
+        assert_eq!(negotiated("2025-11-25", &[]), "2025-11-25");
     }
 
     #[test]
@@ -305,13 +365,45 @@ mod tests {
         assert_eq!(owners.owner("nowhere://x", &order), None);
         owners.forget_uris("a");
         assert_eq!(owners.owner("file:///x", &order), Some("b"));
+        // With three servers, only those after the first to list a URI are
+        // told: here `c`, not `b`, which is the one that serves it.
         let listed = vec![
-            (
-                "a".to_owned(),
-                vec!["file:///x".to_owned(), "mock://a".to_owned()],
-            ),
+            ("a".to_owned(), vec!["mock://a".to_owned()]),
             ("b".to_owned(), vec!["file:///x".to_owned()]),
+            ("c".to_owned(), vec!["file:///x".to_owned()]),
         ];
-        assert_eq!(Owners::clashes(&listed), ["file:///x"]);
+        assert_eq!(
+            Owners::clashes(&listed),
+            [("file:///x".to_owned(), "c".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_uri_a_tool_linked_survives_listing_again() {
+        let mut owners = Owners::default();
+        owners.link("a", "a://tmp/1");
+        owners.uri("a", "a://doc");
+        owners.forget_uris("a");
+        owners.forget_templates("a");
+        let order = ["a", "b"];
+        assert_eq!(owners.owner("a://tmp/1", &order), Some("a"), "still linked");
+        assert_eq!(
+            owners.owner("a://doc", &order),
+            None,
+            "the listed one is forgotten"
+        );
+        // What is remembered is bounded.
+        for n in 0..(MAX_LINKED + 10) {
+            owners.link("b", &format!("b://{n}"));
+        }
+        assert_eq!(
+            owners.owner("b://0", &order),
+            None,
+            "the oldest was dropped"
+        );
+        assert_eq!(
+            owners.owner(&format!("b://{}", MAX_LINKED + 9), &order),
+            Some("b")
+        );
     }
 }

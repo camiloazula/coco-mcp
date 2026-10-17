@@ -52,7 +52,10 @@ impl Streams {
         self.state.lock().is_ok_and(|state| {
             let listening = state.listener.as_ref().is_some_and(|l| !l.is_closed());
             let quiet = state.last_active.is_none_or(|at| at.elapsed() >= limit);
-            quiet && !listening && state.waiting.is_empty()
+            // A request whose agent stopped listening (it cancelled, or left)
+            // is not work anyone waits for.
+            let waited_on = state.waiting.values().any(|w| !w.is_closed());
+            quiet && !listening && !waited_on
         })
     }
 

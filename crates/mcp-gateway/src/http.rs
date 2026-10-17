@@ -213,11 +213,17 @@ impl Session {
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default()
             .to_ascii_lowercase();
+        // The id of the request this answers, if it was one: an answer that
+        // never comes is told to the agent, which would otherwise wait.
+        let awaiting = match frame::kind(&frame.value) {
+            Kind::Request(id) => Some(id),
+            _ => None,
+        };
         if content_type.starts_with("text/event-stream") {
-            self.clone().stream(response);
+            self.clone().stream(response, awaiting);
         } else if content_type.contains("json") {
             let body = read_capped(response, MAX_MESSAGE).await?;
-            self.deliver_json(&body).await;
+            self.deliver_json(&body, awaiting.as_ref()).await;
         } else if response.content_length() != Some(0) {
             return Err(UpstreamError::Failed(format!(
                 "the server answered with `{content_type}`, which is neither JSON nor an event stream"
@@ -230,7 +236,7 @@ impl Session {
     }
 
     /// A JSON body: one message, or a batch.
-    async fn deliver_json(&self, body: &[u8]) {
+    async fn deliver_json(&self, body: &[u8], awaiting: Option<&Value>) {
         match serde_json::from_slice::<Value>(body) {
             Ok(Value::Array(messages)) => {
                 for message in messages {
@@ -240,30 +246,57 @@ impl Session {
             Ok(message) => {
                 let _ = self.tx.send(message).await;
             }
-            Err(e) => tracing::warn!("an HTTP server answered with JSON that does not parse: {e}"),
+            Err(e) => {
+                tracing::warn!("an HTTP server answered with JSON that does not parse: {e}");
+                if let Some(id) = awaiting {
+                    self.unanswered(id, "the server answered with JSON that does not parse")
+                        .await;
+                }
+            }
         }
     }
 
+    /// Answer request `id` with an error, for a server that will not.
+    async fn unanswered(&self, id: &Value, why: &str) {
+        let error = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {"code": -32603, "message": why},
+        });
+        let _ = self.tx.send(error).await;
+    }
+
     /// Read an event stream to its end, delivering each message as it comes.
-    fn stream(self: Arc<Self>, response: reqwest::Response) {
+    ///
+    /// `awaiting` is the request the stream answers, if it does: when the
+    /// stream ends or breaks before its response, the agent is given an error
+    /// for it rather than left waiting.
+    fn stream(self: Arc<Self>, response: reqwest::Response, awaiting: Option<Value>) {
         tokio::spawn(async move {
             let mut events = Events::default();
             let mut body = response.bytes_stream();
+            let mut answered = false;
             loop {
                 let chunk = tokio::select! {
                     () = self.cancel.cancelled() => return,
                     chunk = body.next() => chunk,
                 };
                 let Some(Ok(chunk)) = chunk else {
-                    return;
+                    break;
                 };
                 let Ok(data) = events.feed(&chunk) else {
                     tracing::warn!("an event of an HTTP server is over {MAX_MESSAGE} bytes");
-                    return;
+                    break;
                 };
                 for data in data {
                     match serde_json::from_str::<Value>(&data) {
                         Ok(message) => {
+                            if let (Some(id), Kind::Response(of)) =
+                                (&awaiting, frame::kind(&message))
+                                && *id == of
+                            {
+                                answered = true;
+                            }
                             if self.tx.send(message).await.is_err() {
                                 return;
                             }
@@ -271,6 +304,10 @@ impl Session {
                         Err(e) => tracing::warn!("an event of an HTTP server is not JSON: {e}"),
                     }
                 }
+            }
+            if let (false, Some(id)) = (answered, &awaiting) {
+                self.unanswered(id, "the server's event stream ended before it answered")
+                    .await;
             }
         });
     }
@@ -300,7 +337,7 @@ impl Session {
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|t| t.to_ascii_lowercase().starts_with("text/event-stream"));
             if response.status().is_success() && streams {
-                this.stream(response);
+                this.stream(response, None);
             }
         });
     }
