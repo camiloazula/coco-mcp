@@ -20,9 +20,10 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::aggregate::Aggregate;
 use crate::frame::client_info;
 use crate::observe::Observer;
-use crate::relay::{Posted, Relay};
+use crate::relay::{Posted, Relay, Session};
 use crate::upstream::{Connector, Frame, RequestContext, StderrSink, UpstreamError};
 
 /// Largest message an agent may post, in bytes.
@@ -93,8 +94,10 @@ struct Shared {
     /// Connections being opened, by server, so the cap holds for agents that
     /// arrive together.
     opening: Mutex<HashMap<String, usize>>,
-    servers: RwLock<HashMap<String, Arc<dyn Connector>>>,
-    relays: Mutex<HashMap<String, Arc<Relay>>>,
+    /// The servers, in the order they were given: it settles which of two
+    /// that serve the same URI the root asks.
+    servers: RwLock<Vec<(String, Arc<dyn Connector>)>>,
+    relays: Mutex<HashMap<String, Arc<dyn Session>>>,
     observer: Arc<dyn Observer>,
 }
 
@@ -143,13 +146,7 @@ impl Gateway {
             limits,
             stopping: AtomicBool::new(false),
             opening: Mutex::new(HashMap::new()),
-            servers: RwLock::new(
-                servers
-                    .into_iter()
-                    .filter(|s| valid_namespace(&s.namespace))
-                    .map(|s| (s.namespace, s.connector))
-                    .collect(),
-            ),
+            servers: RwLock::new(ordered(servers)),
             relays: Mutex::new(HashMap::new()),
             observer,
         });
@@ -185,19 +182,24 @@ impl Gateway {
     /// Change the servers it answers for. Agent connections to a server that
     /// is gone, or opened differently now, end.
     pub async fn set_servers(&self, servers: Vec<RelayServer>) {
-        let next: HashMap<String, Arc<dyn Connector>> = servers
-            .into_iter()
-            .filter(|s| valid_namespace(&s.namespace))
-            .map(|s| (s.namespace, s.connector))
-            .collect();
-        let stale: Vec<Arc<Relay>> = {
+        let next = ordered(servers);
+        let stale: Vec<Arc<dyn Session>> = {
             let Ok(mut current) = self.shared.servers.write() else {
                 return;
             };
-            let same = |namespace: &str| match (current.get(namespace), next.get(namespace)) {
-                (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
+            let find = |list: &[(String, Arc<dyn Connector>)], namespace: &str| {
+                list.iter()
+                    .find(|(n, _)| n == namespace)
+                    .map(|(_, c)| Arc::as_ptr(c))
+            };
+            let same = |namespace: &str| match (find(&current, namespace), find(&next, namespace)) {
+                (Some(a), Some(b)) => std::ptr::addr_eq(a, b),
                 _ => false,
             };
+            // The root is every server at once: it ends when any changes.
+            let all_same = current.len() == next.len()
+                && current.iter().zip(&next).all(|((a, _), (b, _))| a == b)
+                && current.iter().all(|(n, _)| same(n));
             let stale = self
                 .shared
                 .relays
@@ -205,12 +207,18 @@ impl Gateway {
                 .map(|relays| {
                     relays
                         .values()
-                        .filter(|r| !same(&r.namespace))
+                        .filter(|r| {
+                            if r.namespace().is_empty() {
+                                !all_same
+                            } else {
+                                !same(r.namespace())
+                            }
+                        })
                         .cloned()
                         .collect()
                 })
                 .unwrap_or_default();
-            *current = next.clone();
+            *current = next;
             stale
         };
         for relay in stale {
@@ -233,7 +241,7 @@ impl Gateway {
         // together so that one server slow to close does not hold the rest.
         self.shared.stopping.store(true, Ordering::SeqCst);
         for _ in 0..2 {
-            let relays: Vec<Arc<Relay>> = self
+            let relays: Vec<Arc<dyn Session>> = self
                 .shared
                 .relays
                 .lock()
@@ -266,7 +274,7 @@ async fn sweep(shared: Arc<Shared>, stop: CancellationToken) {
         }
         if let Ok(mut relays) = shared.relays.lock() {
             for relay in ended {
-                relays.remove(&relay.id);
+                relays.remove(relay.id());
             }
         }
     }
@@ -321,13 +329,30 @@ impl Shared {
     }
 
     fn connector(&self, namespace: &str) -> Option<Arc<dyn Connector>> {
-        self.servers.read().ok()?.get(namespace).cloned()
+        self.servers
+            .read()
+            .ok()?
+            .iter()
+            .find(|(n, _)| n == namespace)
+            .map(|(_, c)| c.clone())
     }
 
-    fn relay(&self, id: &str, namespace: &str) -> Option<Arc<Relay>> {
+    fn relay(&self, id: &str, namespace: &str) -> Option<Arc<dyn Session>> {
         let relay = self.relays.lock().ok()?.get(id).cloned()?;
-        (relay.namespace == namespace && !relay.is_closed()).then_some(relay)
+        (relay.namespace() == namespace && !relay.is_closed()).then_some(relay)
     }
+}
+
+/// The servers in the order given, each namespace once and only the valid
+/// ones.
+fn ordered(servers: Vec<RelayServer>) -> Vec<(String, Arc<dyn Connector>)> {
+    let mut out: Vec<(String, Arc<dyn Connector>)> = Vec::new();
+    for server in servers {
+        if valid_namespace(&server.namespace) && !out.iter().any(|(n, _)| *n == server.namespace) {
+            out.push((server.namespace, server.connector));
+        }
+    }
+    out
 }
 
 /// Whether two byte strings are equal, taking as long either way.
@@ -351,15 +376,21 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         );
     }
     let namespace = parts.uri.path().trim_matches('/').to_owned();
-    let Some(connector) = shared.connector(&namespace) else {
+    // The root, `/`, is every server at once; a path is one.
+    let known = if namespace.is_empty() {
+        shared.servers.read().is_ok_and(|s| !s.is_empty())
+    } else {
+        shared.connector(&namespace).is_some()
+    };
+    if !known {
         return rpc_error(
             StatusCode::NOT_FOUND,
             -32600,
             "No server answers on this path",
         );
-    };
+    }
     match parts.method {
-        Method::POST => post(&shared, &namespace, connector, &parts.headers, body).await,
+        Method::POST => post(&shared, &namespace, &parts.headers, body).await,
         Method::GET => listen(&shared, &namespace, &parts.headers),
         Method::DELETE => end(&shared, &namespace, &parts.headers).await,
         _ => {
@@ -377,13 +408,7 @@ fn session_of(headers: &HeaderMap) -> Option<&str> {
     headers.get(SESSION).and_then(|v| v.to_str().ok())
 }
 
-async fn post(
-    shared: &Arc<Shared>,
-    namespace: &str,
-    connector: Arc<dyn Connector>,
-    headers: &HeaderMap,
-    body: Body,
-) -> Response {
+async fn post(shared: &Arc<Shared>, namespace: &str, headers: &HeaderMap, body: Body) -> Response {
     let Ok(raw) = to_bytes(body, MAX_BODY).await else {
         return rpc_error(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -402,32 +427,65 @@ async fn post(
             "Batches are not supported: post one message at a time",
         );
     }
-    let (relay, created) = match session_of(headers) {
+    let root = namespace.is_empty();
+    let (relay, created, first) = match session_of(headers) {
         Some(id) => match shared.relay(id, namespace) {
-            Some(relay) => (relay, false),
+            Some(relay) => (relay, false, None),
             None => {
                 return rpc_error(StatusCode::NOT_FOUND, -32600, "Unknown or ended session");
             }
         },
         None => {
             // A connection starts a process or a session of its own, so a
-            // message that is not the start of one does not make it.
+            // message that is not the start of one does not make it. The
+            // root only speaks the `initialize` handshake.
             let method = value.get("method").and_then(Value::as_str);
-            if !matches!(method, Some("initialize" | "server/discover")) {
-                return rpc_error(
-                    StatusCode::BAD_REQUEST,
-                    -32600,
-                    "Start with initialize, and send the Mcp-Session-Id it answers with",
-                );
+            let starts = if root {
+                method == Some("initialize")
+            } else {
+                matches!(method, Some("initialize" | "server/discover"))
+            };
+            if !starts {
+                let (status, code, message) = if root && method == Some("server/discover") {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        -32601,
+                        "Method not found: the root speaks initialize",
+                    )
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        -32600,
+                        "Start with initialize, and send the Mcp-Session-Id it answers with",
+                    )
+                };
+                return rpc_error(status, code, message);
             }
-            match connect(shared, namespace, &connector).await {
-                Ok(relay) => (relay, true),
-                Err(response) => return *response,
+            if root {
+                match connect_root(shared, &value).await {
+                    Ok((session, result)) => (session, true, Some(result)),
+                    Err(response) => return *response,
+                }
+            } else {
+                let Some(connector) = shared.connector(namespace) else {
+                    return rpc_error(
+                        StatusCode::NOT_FOUND,
+                        -32600,
+                        "No server answers on this path",
+                    );
+                };
+                match connect(shared, namespace, &connector).await {
+                    Ok(relay) => (relay, true, None),
+                    Err(response) => return *response,
+                }
             }
         }
     };
-    if created && let Some(info) = client_info(&value) {
-        shared.observer.client(namespace, &relay.id, info);
+    if created
+        && !root
+        && let Some(info) = client_info(&value)
+    {
+        shared.observer.client(namespace, relay.id(), info);
     }
     let context = RequestContext {
         headers: headers
@@ -436,7 +494,16 @@ async fn post(
             .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_owned())))
             .collect(),
     };
-    let posted = relay.post(Frame { value, raw }, &context).await;
+    // The root answers the handshake itself: its result came with the session.
+    let posted = match first {
+        Some(result) => {
+            let (tx, rx) = mpsc::channel(1);
+            let reply = json!({"jsonrpc": "2.0", "id": value["id"], "result": result});
+            let _ = tx.send(reply).await;
+            Ok(Posted::Stream(rx))
+        }
+        None => relay.post(Frame { value, raw }, &context).await,
+    };
     let mut response = match posted {
         Ok(Posted::Accepted) => StatusCode::ACCEPTED.into_response(),
         Ok(Posted::Stream(messages)) => stream_response(messages),
@@ -447,7 +514,7 @@ async fn post(
             upstream_error(e)
         }
     };
-    if let Ok(value) = HeaderValue::from_str(&relay.id) {
+    if let Ok(value) = HeaderValue::from_str(relay.id()) {
         response
             .headers_mut()
             .insert(HeaderName::from_static(SESSION), value);
@@ -455,61 +522,73 @@ async fn post(
     response
 }
 
-/// Open the server for a new agent connection.
-async fn connect(
-    shared: &Arc<Shared>,
-    namespace: &str,
-    connector: &Arc<dyn Connector>,
-) -> Result<Arc<Relay>, Box<Response>> {
-    // Count what is open and what is being opened, and reserve a place, in
-    // one step: agents that arrive together cannot all see room.
-    let reserved = {
-        let (Ok(relays), Ok(mut opening)) = (shared.relays.lock(), shared.opening.lock()) else {
-            return Err(Box::new(rpc_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                -32603,
-                "The gateway is in an unusable state",
-            )));
-        };
-        let open = relays
-            .values()
-            .filter(|r| r.namespace == namespace && !r.is_closed())
-            .count();
-        let pending = opening.entry(namespace.to_owned()).or_insert(0);
-        if open + *pending >= shared.limits.connections {
-            false
-        } else {
-            *pending += 1;
-            true
+/// A place among an agent's connections to a server, held while one is
+/// being opened so that agents arriving together cannot all see room.
+struct Reservation<'a> {
+    shared: &'a Shared,
+    namespace: String,
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut opening) = self.shared.opening.lock()
+            && let Some(pending) = opening.get_mut(&self.namespace)
+        {
+            *pending = pending.saturating_sub(1);
         }
+    }
+}
+
+/// Count what is open and what is being opened for `namespace`, and reserve a
+/// place, in one step.
+fn reserve<'a>(shared: &'a Shared, namespace: &str) -> Result<Reservation<'a>, Box<Response>> {
+    let (Ok(relays), Ok(mut opening)) = (shared.relays.lock(), shared.opening.lock()) else {
+        return Err(Box::new(rpc_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            -32603,
+            "The gateway is in an unusable state",
+        )));
     };
-    if !reserved {
+    let open = relays
+        .values()
+        .filter(|r| r.namespace() == namespace && !r.is_closed())
+        .count();
+    let pending = opening.entry(namespace.to_owned()).or_insert(0);
+    if open + *pending >= shared.limits.connections {
         return Err(Box::new(rpc_error(
             StatusCode::TOO_MANY_REQUESTS,
             -32600,
             "Too many agents are connected to this server",
         )));
     }
-    let release = || {
-        if let Ok(mut opening) = shared.opening.lock()
-            && let Some(pending) = opening.get_mut(namespace)
-        {
-            *pending = pending.saturating_sub(1);
-        }
-    };
-    let id = uuid::Uuid::new_v4().simple().to_string();
+    *pending += 1;
+    Ok(Reservation {
+        shared,
+        namespace: namespace.to_owned(),
+    })
+}
+
+fn new_session_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Open the server for a new agent connection.
+async fn connect(
+    shared: &Arc<Shared>,
+    namespace: &str,
+    connector: &Arc<dyn Connector>,
+) -> Result<Arc<dyn Session>, Box<Response>> {
+    let _place = reserve(shared, namespace)?;
+    let id = new_session_id();
     let stderr: StderrSink = {
         let observer = shared.observer.clone();
         let (namespace, id) = (namespace.to_owned(), id.clone());
         Arc::new(move |line| observer.stderr(&namespace, &id, &line))
     };
-    let opened = match connector.open(stderr).await {
-        Ok(opened) => opened,
-        Err(e) => {
-            release();
-            return Err(Box::new(upstream_error(e)));
-        }
-    };
+    let opened = connector
+        .open(stderr)
+        .await
+        .map_err(|e| Box::new(upstream_error(e)))?;
     let relay = Relay::start(
         namespace.to_owned(),
         id.clone(),
@@ -522,7 +601,6 @@ async fn connect(
         .connector(namespace)
         .is_some_and(|now| std::ptr::addr_eq(Arc::as_ptr(&now), Arc::as_ptr(connector)));
     if !current || shared.stopping.load(Ordering::SeqCst) {
-        release();
         relay.close("the server changed while it was opening").await;
         return Err(Box::new(rpc_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -530,12 +608,48 @@ async fn connect(
             "The server changed while it was opening: try again",
         )));
     }
+    let session: Arc<dyn Session> = relay;
     if let Ok(mut relays) = shared.relays.lock() {
-        relays.insert(id.clone(), relay.clone());
+        relays.insert(id.clone(), session.clone());
     }
-    release();
     shared.observer.opened(namespace, &id);
-    Ok(relay)
+    Ok(session)
+}
+
+/// Open every server for an agent at the root, and answer its `initialize`.
+async fn connect_root(
+    shared: &Arc<Shared>,
+    initialize: &Value,
+) -> Result<(Arc<dyn Session>, Value), Box<Response>> {
+    let _place = reserve(shared, "")?;
+    let servers = shared.servers.read().map(|s| s.clone()).unwrap_or_default();
+    let id = new_session_id();
+    let (aggregate, result) =
+        Aggregate::open(id.clone(), &servers, initialize, shared.observer.clone())
+            .await
+            .map_err(|e| Box::new(upstream_error(e)))?;
+    let session: Arc<dyn Session> = aggregate;
+    let unchanged = shared.servers.read().is_ok_and(|now| {
+        now.len() == servers.len()
+            && now
+                .iter()
+                .zip(&servers)
+                .all(|((a, x), (b, y))| a == b && std::ptr::addr_eq(Arc::as_ptr(x), Arc::as_ptr(y)))
+    });
+    if !unchanged || shared.stopping.load(Ordering::SeqCst) {
+        session
+            .close("the servers changed while the root was opening")
+            .await;
+        return Err(Box::new(rpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            -32603,
+            "The servers changed while the root was opening: try again",
+        )));
+    }
+    if let Ok(mut relays) = shared.relays.lock() {
+        relays.insert(id, session.clone());
+    }
+    Ok((session, result))
 }
 
 fn listen(shared: &Arc<Shared>, namespace: &str, headers: &HeaderMap) -> Response {

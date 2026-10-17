@@ -115,8 +115,10 @@ use:
 - **Watch an agent.** Turn the gateway on in Settings and an agent connects
   to `http://127.0.0.1:<port>/<server>` instead of the server itself. Its
   messages go through unchanged, and each shows in that server's log under
-  the agent's name. The gateway answers only on this machine, only with the
-  access token Settings holds.
+  the agent's name. The root, `http://127.0.0.1:<port>/`, is every included
+  server as one for an agent that connects once: tools and prompts are named
+  `<server>__<name>`, resources keep their URIs. The gateway answers only on
+  this machine, only with the access token Settings holds.
 - **Script it** with `coco-mcp --cli`: snapshot, call, read, prompt, diff
   (exit 1 on a breaking change) and export the saved servers as an
   `mcpServers` block.

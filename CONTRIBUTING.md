@@ -168,7 +168,7 @@ crates/mcp-store         SQLite: servers, snapshots, calls, settings
 crates/mcp-auth          keyring SecretStore, rmcp CredentialStore, loopback, OAuth orchestration
 crates/mcp-diff          Snapshot -> classified diff (breaking / compatible / cosmetic)
 crates/mcp-exchange      shared formats both ways: JSON-RPC, curl, client config, JSONL, Markdown
-crates/mcp-gateway       local relay between an agent and Coco's servers: a path per server, an access token, unchanged messages, an observer
+crates/mcp-gateway       local gateway between an agent and Coco's servers: a path per server relayed unchanged, a root that merges them, an access token, an observer
 crates/mcp-mockserver    hermetic test server: two schemas, faults, both eras, stdio and HTTP
 crates/coco-update       update notice: latest release, update.json, install channel and command
 apps/cli                 coco-cli library: snapshot, call, read, prompt, history, diff, import/export-config

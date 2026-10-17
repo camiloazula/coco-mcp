@@ -173,6 +173,9 @@ pub enum Status {
 /// An agent connected through the gateway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
+    /// The connection it is on: one agent at the root reaches several
+    /// servers, each under the same session.
+    pub session: String,
     /// The server it reaches.
     pub server_id: String,
     /// What it says it is called.
@@ -411,20 +414,24 @@ enum Relayed {
         session: String,
     },
     Client {
+        namespace: String,
         session: String,
         info: ClientInfo,
     },
     Frame {
+        namespace: String,
         session: String,
         at: time::OffsetDateTime,
         kind: EventKind,
     },
     Stderr {
+        namespace: String,
         session: String,
         at: time::OffsetDateTime,
         line: String,
     },
     Closed {
+        namespace: String,
         session: String,
         at: time::OffsetDateTime,
         reason: String,
@@ -442,16 +449,18 @@ impl Observer for Tap {
         });
     }
 
-    fn client(&self, _: &str, session: &str, info: ClientInfo) {
+    fn client(&self, namespace: &str, session: &str, info: ClientInfo) {
         let _ = self.0.unbounded_send(Relayed::Client {
+            namespace: namespace.to_owned(),
             session: session.to_owned(),
             info,
         });
     }
 
-    fn frame(&self, _: &str, session: &str, traffic: Traffic<'_>) {
+    fn frame(&self, namespace: &str, session: &str, traffic: Traffic<'_>) {
         if let Some(kind) = traffic.event() {
             let _ = self.0.unbounded_send(Relayed::Frame {
+                namespace: namespace.to_owned(),
                 session: session.to_owned(),
                 at: time::OffsetDateTime::now_utc(),
                 kind,
@@ -459,20 +468,48 @@ impl Observer for Tap {
         }
     }
 
-    fn stderr(&self, _: &str, session: &str, line: &str) {
+    fn stderr(&self, namespace: &str, session: &str, line: &str) {
         let _ = self.0.unbounded_send(Relayed::Stderr {
+            namespace: namespace.to_owned(),
             session: session.to_owned(),
             at: time::OffsetDateTime::now_utc(),
             line: line.to_owned(),
         });
     }
 
-    fn closed(&self, _: &str, session: &str, reason: &str) {
+    fn closed(&self, namespace: &str, session: &str, reason: &str) {
         let _ = self.0.unbounded_send(Relayed::Closed {
+            namespace: namespace.to_owned(),
             session: session.to_owned(),
             at: time::OffsetDateTime::now_utc(),
             reason: reason.to_owned(),
         });
+    }
+}
+
+/// How an agent's connection to one server is told from its others: a root
+/// connection reaches every server under the one session.
+fn agent_key(namespace: &str, session: &str) -> String {
+    format!("{namespace}/{session}")
+}
+
+impl GatewayState {
+    /// How many agents are connected: a connection, not each server it reaches.
+    pub fn agent_count(&self) -> usize {
+        self.agents
+            .values()
+            .map(|a| a.session.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    }
+
+    /// The address of the root, where every included server is one, when the
+    /// gateway is up.
+    pub fn root_url(&self) -> Option<String> {
+        match &self.status {
+            Status::Running(addr) => Some(format!("http://{addr}/")),
+            _ => None,
+        }
     }
 }
 
@@ -786,8 +823,9 @@ impl AppState {
                         continue;
                     };
                     self.gateway.agents.insert(
-                        session,
+                        agent_key(&namespace, &session),
                         Agent {
+                            session,
                             server_id,
                             name: UNNAMED.into(),
                             version: None,
@@ -795,19 +833,37 @@ impl AppState {
                         },
                     );
                 }
-                Relayed::Client { session, info } => {
-                    if let Some(agent) = self.gateway.agents.get_mut(&session) {
+                Relayed::Client {
+                    namespace,
+                    session,
+                    info,
+                } => {
+                    if let Some(agent) = self
+                        .gateway
+                        .agents
+                        .get_mut(&agent_key(&namespace, &session))
+                    {
                         agent.name = info.name;
                         agent.version = info.version;
                     }
                 }
-                Relayed::Frame { session, at, kind } => {
+                Relayed::Frame {
+                    namespace,
+                    session,
+                    at,
+                    kind,
+                } => {
                     let row = incoming(Event { seq: 0, at, kind }).row;
                     if let Some(row) = row {
-                        self.relay_row(&session, row);
+                        self.relay_row(&agent_key(&namespace, &session), row);
                     }
                 }
-                Relayed::Stderr { session, at, line } => {
+                Relayed::Stderr {
+                    namespace,
+                    session,
+                    at,
+                    line,
+                } => {
                     let row = incoming(Event {
                         seq: 0,
                         at,
@@ -815,16 +871,18 @@ impl AppState {
                     })
                     .row;
                     if let Some(row) = row {
-                        self.relay_row(&session, row);
+                        self.relay_row(&agent_key(&namespace, &session), row);
                     }
                 }
                 Relayed::Closed {
+                    namespace,
                     session,
                     at,
                     reason,
                 } => {
-                    self.relay_note(&session, at, "disconnected", &reason);
-                    self.gateway.agents.remove(&session);
+                    let key = agent_key(&namespace, &session);
+                    self.relay_note(&key, at, "disconnected", &reason);
+                    self.gateway.agents.remove(&key);
                 }
             }
         }

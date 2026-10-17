@@ -1,7 +1,7 @@
 //! The Settings window: Coco's own choices in one place, with a section list
 //! on the left. The menu items, palette entries and buttons that change the
 //! same choices stay, and a change made anywhere shows in every window.
-//! 560 × 640, not resizable, with the platform's window controls in the 36px
+//! 560 × 720, not resizable, with the platform's window controls in the 36px
 //! header.
 
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ mod gateway;
 mod general;
 
 /// Window size.
-const WINDOW: (f32, f32) = (560., 640.);
+const WINDOW: (f32, f32) = (560., 720.);
 /// Width of the section list.
 const NAV: f32 = 140.;
 /// Width of a row's label.

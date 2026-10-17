@@ -85,6 +85,65 @@ impl Settings {
         )
     }
 
+    /// The address that is every included server at once, and the config for it.
+    fn root_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = *tokens(cx);
+        let (url, any) = {
+            let state = self.state.read(cx);
+            let records: Vec<_> = state.servers.iter().map(|s| s.record.clone()).collect();
+            let any = state
+                .gateway
+                .settings
+                .plan(&records)
+                .iter()
+                .any(|(_, p)| p.on);
+            (
+                format!("http://127.0.0.1:{}/", state.gateway.settings.port),
+                any,
+            )
+        };
+        let copied = url.clone();
+        let content = v_flex()
+            .gap(px(4.))
+            .child(
+                h_flex()
+                    .gap(px(12.))
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(crate::theme::mono(cx))
+                            .text_size(px(11.))
+                            .text_color(if any { t.fg } else { t.muted })
+                            .child(url),
+                    )
+                    .child(self.choice(
+                        "copy-config-root",
+                        "Copy config",
+                        false,
+                        any,
+                        cx,
+                        move |_, _, cx| {
+                            let entry = ("coco-mcp".to_owned(), copied.clone());
+                            let config = mcp_exchange::gateway_config(&[entry]);
+                            crate::clip::copy(config.text(), "agent config · token left out", cx);
+                        },
+                    )),
+            )
+            .child(
+                muted(
+                    cx,
+                    11.,
+                    "Every server below as one: its tools and prompts are named <server>__<name>.",
+                )
+                .whitespace_normal(),
+            )
+            .into_any_element();
+        self.row_with("All servers", content, cx)
+    }
+
     /// The Gateway row's note: whether it is up, and who is connected.
     fn status_note(&self, cx: &App) -> (String, bool) {
         let state = self.state.read(cx);
@@ -95,7 +154,7 @@ impl Settings {
             ),
             Status::Starting => ("Starting…".into(), false),
             Status::Running(addr) => {
-                let agents = state.gateway.agents.len();
+                let agents = state.gateway.agent_count();
                 let who = match agents {
                     0 => "no agent connected".to_owned(),
                     1 => "1 agent connected".to_owned(),
@@ -140,6 +199,7 @@ impl Settings {
             .child(self.row_with("Gateway", status, cx))
             .child(self.port_row(cx))
             .child(self.token_row(cx))
+            .child(self.root_row(cx))
             .child(servers)
             .into_any_element()
     }
