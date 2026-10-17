@@ -16,6 +16,7 @@ pub mod clip;
 pub mod clock;
 pub mod explain;
 pub mod features;
+pub mod gateway;
 pub mod menus;
 pub mod persistence;
 pub mod state;
@@ -98,6 +99,12 @@ pub fn run() -> anyhow::Result<()> {
                 state
             });
             cx.set_global(views::settings::Model(state.clone()));
+            // The gateway runs while the app is open, when it was left on.
+            state.update(cx, |s, cx| {
+                if s.gateway_wanted() {
+                    s.gateway_start(cx);
+                }
+            });
             let options = window_options(cx);
             let opened = cx.open_window(options, |window, cx| {
                 let workspace = cx.new(|cx| Workspace::new(state, window, cx));

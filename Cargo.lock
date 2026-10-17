@@ -1190,6 +1190,7 @@ name = "coco-mcp"
 version = "0.5.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.23.1",
  "coco-cli",
  "coco-update",
@@ -1202,6 +1203,7 @@ dependencies = [
  "mcp-core",
  "mcp-diff",
  "mcp-exchange",
+ "mcp-gateway",
  "mcp-mockserver",
  "mcp-schema-form",
  "mcp-store",
@@ -4627,6 +4629,27 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+]
+
+[[package]]
+name = "mcp-gateway"
+version = "0.5.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures",
+ "mcp-core",
+ "mcp-mockserver",
+ "reqwest",
+ "rmcp",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

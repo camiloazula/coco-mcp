@@ -30,6 +30,8 @@ mcp-store.workspace = true
 mcp-auth.workspace = true
 mcp-diff.workspace = true
 mcp-exchange.workspace = true
+mcp-gateway.workspace = true
+async-trait.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 futures.workspace = true
 anyhow.workspace = true

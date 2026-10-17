@@ -112,6 +112,11 @@ use:
 - **Bring it in.** Import an `mcpServers` file from another MCP client and
   every server it names is added at once, with any token it carried moved
   into the keyring.
+- **Watch an agent.** Turn the gateway on in Settings and an agent connects
+  to `http://127.0.0.1:<port>/<server>` instead of the server itself. Its
+  messages go through unchanged, and each shows in that server's log under
+  the agent's name. The gateway answers only on this machine, only with the
+  access token Settings holds.
 - **Script it** with `coco-mcp --cli`: snapshot, call, read, prompt, diff
   (exit 1 on a breaking change) and export the saved servers as an
   `mcpServers` block.

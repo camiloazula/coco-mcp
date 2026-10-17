@@ -20,7 +20,10 @@ mod files;
 mod request;
 mod value;
 
-pub use config::{ClientConfig, ImportedConfig, ImportedServer, client_config, read_client_config};
+pub use config::{
+    ClientConfig, GATEWAY_TOKEN_PLACEHOLDER, ImportedConfig, ImportedServer, client_config,
+    gateway_config, read_client_config,
+};
 pub use files::{LogLine, diff_markdown, file_name, history_jsonl, log_jsonl, snapshot_json};
 /// A stdio server's command line. Implemented in `mcp-core`, whose
 /// [`mcp_core::ServerSpec::label`] prints the same quoting.

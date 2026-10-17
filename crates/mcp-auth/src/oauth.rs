@@ -68,6 +68,63 @@ pub fn browser_opener() -> Opener {
     })
 }
 
+/// The same client from stored credentials alone: never a browser, never a
+/// prompt. For what runs unattended (the gateway), which tells the person to
+/// sign in from the app when there are none.
+pub async fn stored_client(
+    url: &str,
+    secrets: Arc<dyn SecretStore>,
+    keyring_id: &str,
+) -> Result<AuthClient<reqwest::Client>> {
+    let http = mcp_core::transport::http_client_builder(url).build()?;
+    let mut manager = AuthorizationManager::new(url).await?;
+    manager.set_credential_store(KeyringCredentialStore::new(secrets, keyring_id));
+    if manager.initialize_from_store().await? {
+        Ok(AuthClient::new(http, manager))
+    } else {
+        Err(Error::MissingSecret(keyring_id.to_owned()))
+    }
+}
+
+/// A server's access token from its stored login, fetched and refreshed as
+/// needed, for what runs unattended. The login is read from the secret
+/// store on first use; [`Error::MissingSecret`] says there is none.
+pub struct StoredToken {
+    url: String,
+    secrets: Arc<dyn SecretStore>,
+    keyring_id: String,
+    client: tokio::sync::OnceCell<AuthClient<reqwest::Client>>,
+}
+
+impl std::fmt::Debug for StoredToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredToken")
+            .field("url", &self.url)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StoredToken {
+    /// The login of the server at `url`, kept under `keyring_id`.
+    pub fn new(url: &str, secrets: Arc<dyn SecretStore>, keyring_id: &str) -> Self {
+        Self {
+            url: url.to_owned(),
+            secrets,
+            keyring_id: keyring_id.to_owned(),
+            client: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    /// A token that is good now.
+    pub async fn access_token(&self) -> Result<String> {
+        let client = self
+            .client
+            .get_or_try_init(|| stored_client(&self.url, self.secrets.clone(), &self.keyring_id))
+            .await?;
+        Ok(client.get_access_token().await?)
+    }
+}
+
 /// An HTTP client that attaches (and refreshes) the server's token, running
 /// the browser flow first when the secret store holds no credentials.
 pub async fn authorized_client(

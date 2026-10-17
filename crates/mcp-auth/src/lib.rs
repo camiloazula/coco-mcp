@@ -26,7 +26,9 @@ use mcp_core::transport::TransportOptions;
 
 pub use credentials::KeyringCredentialStore;
 pub use loopback::{Callback, Loopback};
-pub use oauth::{OAuthOptions, Opener, authorized_client, browser_opener, forget};
+pub use oauth::{
+    OAuthOptions, Opener, StoredToken, authorized_client, browser_opener, forget, stored_client,
+};
 pub use secrets::{KeyringStore, MemoryStore, SecretStore, new_keyring_id};
 
 /// Errors produced by this crate.

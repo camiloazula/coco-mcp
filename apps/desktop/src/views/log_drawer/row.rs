@@ -9,6 +9,7 @@ pub(super) fn row(
     row: &LogRow,
     expanded: bool,
     server: &SharedString,
+    with_agent: bool,
     ws: &Workspace,
     cx: &Context<Workspace>,
 ) -> AnyElement {
@@ -51,6 +52,20 @@ pub(super) fn row(
                 .text_color(arrow_color)
                 .child(row.dir.arrow()),
         )
+        // Once an agent has gone through the gateway, each row says whose it
+        // is: the agent's name for its traffic, nothing for Coco's own.
+        .when(with_agent, |el| {
+            el.child(
+                div()
+                    .w(px(96.))
+                    .flex_none()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_color(t.accent)
+                    .child(row.agent.clone().unwrap_or_default()),
+            )
+        })
         .child(
             div()
                 .w(px(200.))
