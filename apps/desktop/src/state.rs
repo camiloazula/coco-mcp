@@ -169,6 +169,9 @@ pub struct LogRow {
     /// compact JSON, its body and its method), counted against
     /// [`LOG_BYTE_BUDGET`]. The parsed payload can take a few times that.
     pub(crate) bytes: usize,
+    /// The agent whose traffic through the gateway this row is, by the name
+    /// it gave; `None` for what Coco itself sent and heard.
+    pub agent: Option<String>,
     /// The row's id in its server's log, handed out in order by
     /// [`ServerEntry::push_log`] (not the JSON-RPC `id`). An index shifts when
     /// older rows leave; this does not, so folds, list measurements, the copy
@@ -182,7 +185,7 @@ impl LogRow {
     /// A payload over [`LOG_PAYLOAD_LIMIT`] is replaced by a marker holding
     /// its head and its original size, so the row, its copy menu and a log
     /// export all say what was left out.
-    fn new(
+    pub(crate) fn new(
         at: time::OffsetDateTime,
         dir: Dir,
         method: String,
@@ -224,6 +227,7 @@ impl LogRow {
             session_break: false,
             truncated,
             bytes,
+            agent: None,
             row_id: 0,
         }
     }
@@ -267,6 +271,9 @@ pub struct ServerEntry {
     next_log_id: u64,
     /// Sum of the rows' [`LogRow::bytes`], kept under [`LOG_BYTE_BUDGET`].
     log_bytes: usize,
+    /// Whether a row of an agent's traffic through the gateway was logged,
+    /// so the drawer gives the rows a column for the agent.
+    log_has_agents: bool,
     /// Round-trip of the last call, for the status bar.
     pub last_call_ms: Option<u64>,
     /// How the last snapshot compares with the stored one (set on connect).
@@ -390,6 +397,7 @@ impl ServerEntry {
             log: Vec::new(),
             next_log_id: 0,
             log_bytes: 0,
+            log_has_agents: false,
             last_call_ms: None,
             diff: None,
             diff_dismissed: false,
@@ -584,6 +592,7 @@ impl ServerEntry {
     /// cap or the byte budget; the row just added always stays. Returns how
     /// many rows were dropped.
     pub fn push_log(&mut self, mut row: LogRow) -> usize {
+        self.log_has_agents |= row.agent.is_some();
         row.row_id = self.next_log_id;
         self.next_log_id += 1;
         self.log_bytes += row.bytes;
@@ -605,6 +614,12 @@ impl ServerEntry {
     fn clear_log(&mut self) {
         self.log.clear();
         self.log_bytes = 0;
+        self.log_has_agents = false;
+    }
+
+    /// Whether the log holds rows of an agent's traffic through the gateway.
+    pub fn log_has_agents(&self) -> bool {
+        self.log_has_agents
     }
 
     /// Mark where a new session's rows start. The previous session's rows
@@ -839,6 +854,8 @@ pub struct AppState {
     pub screen: Screen,
     /// Dark (true) or light theme.
     pub dark: bool,
+    /// The gateway: its settings, whether it is up, who is connected.
+    pub gateway: crate::gateway::GatewayState,
     /// Whether the Tools, Resources and Prompts lists show display names
     /// instead of the identifiers a request names.
     pub display_names: bool,
@@ -1059,6 +1076,7 @@ impl AppState {
             expanded_log: BTreeSet::new(),
             screen: Screen::Detail,
             dark: true,
+            gateway: crate::gateway::GatewayState::default(),
             display_names: false,
             responses: Responses::default(),
             log_filter: LogFilter::All,
@@ -1107,6 +1125,7 @@ impl AppState {
             .note_write("theme could not be read", dark)
             .flatten()
             .unwrap_or(true);
+        self.load_gateway(store);
         let display_names = store.get_setting::<bool>(DISPLAY_NAMES_SETTING);
         self.display_names = self
             .note_write("list names could not be read", display_names)
@@ -1668,7 +1687,7 @@ impl AppState {
 
     /// Append a row to server `ix`'s log. When the cap or the byte budget
     /// dropped rows, returns the id every row below has left the log with.
-    fn append_log(&mut self, ix: usize, row: LogRow) -> Option<u64> {
+    pub(crate) fn append_log(&mut self, ix: usize, row: LogRow) -> Option<u64> {
         let entry = self.servers.get_mut(ix)?;
         if entry.push_log(row) == 0 {
             return None;

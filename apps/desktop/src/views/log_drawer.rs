@@ -258,7 +258,8 @@ pub fn body(ws: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace
             match drawn {
                 Some((server, log_ix, r)) => {
                     let expanded = state.expanded_log.contains(&r.row_id);
-                    row(log_ix, r, expanded, server, this, cx)
+                    let with_agent = state.server().is_some_and(|s| s.log_has_agents());
+                    row(log_ix, r, expanded, server, with_agent, this, cx)
                 }
                 None => div().into_any_element(),
             }

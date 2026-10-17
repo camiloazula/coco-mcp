@@ -82,6 +82,38 @@ pub fn client_config(servers: &[ServerRecord]) -> ClientConfig {
     }
 }
 
+/// The placeholder an exported gateway entry carries for the access token.
+pub const GATEWAY_TOKEN_PLACEHOLDER: &str = "<gateway token>";
+
+/// The `mcpServers` block that points an agent at the gateway: one entry per
+/// path, named by its namespace, each with the `Authorization` header the
+/// gateway wants. The access token is a credential and, like a server's
+/// bearer token, is never written: the entry carries a placeholder and a
+/// note says where the real one is copied from.
+pub fn gateway_config(entries: &[(String, String)]) -> ClientConfig {
+    let mut map = Map::new();
+    for (namespace, url) in entries {
+        map.insert(
+            namespace.clone(),
+            json!({
+                "url": url,
+                "headers": { "Authorization": format!("Bearer {GATEWAY_TOKEN_PLACEHOLDER}") },
+            }),
+        );
+    }
+    let notes = if entries.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!(
+            "the gateway's access token stays in the keyring; replace `{GATEWAY_TOKEN_PLACEHOLDER}` with the one Settings copies"
+        )]
+    };
+    ClientConfig {
+        value: json!({ "mcpServers": Value::Object(map) }),
+        notes,
+    }
+}
+
 /// A server read out of a client configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedServer {
@@ -235,6 +267,27 @@ fn map_of(value: Option<&Value>) -> BTreeMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_gateway_config_never_carries_the_token() {
+        let config = gateway_config(&[
+            ("weather".into(), "http://127.0.0.1:7341/weather".into()),
+            ("search".into(), "http://127.0.0.1:7341/search".into()),
+        ]);
+        let weather = &config.value["mcpServers"]["weather"];
+        assert_eq!(weather["url"], "http://127.0.0.1:7341/weather");
+        assert_eq!(
+            weather["headers"]["Authorization"],
+            format!("Bearer {GATEWAY_TOKEN_PLACEHOLDER}")
+        );
+        assert_eq!(config.notes.len(), 1);
+        assert!(gateway_config(&[]).notes.is_empty());
+        // What the export writes, the import reads back as a bearer server
+        // with no token, which is what it is.
+        let back = read_client_config(&config.text()).unwrap();
+        assert_eq!(back.servers.len(), 2);
+        assert!(back.servers.iter().all(|s| s.token.is_none()));
+    }
+
     use super::*;
     use std::collections::BTreeMap;
 

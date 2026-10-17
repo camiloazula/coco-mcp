@@ -233,7 +233,15 @@ pub fn render(
         item(
             "Open settings",
             OpenSettings,
-            &["preferences", "options", "theme", "names", "updates"],
+            &[
+                "preferences",
+                "options",
+                "theme",
+                "gateway",
+                "agents",
+                "names",
+                "updates",
+            ],
         ),
         item(
             "Check for updates",

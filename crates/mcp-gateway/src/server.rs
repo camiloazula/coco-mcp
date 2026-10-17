@@ -76,7 +76,7 @@ pub struct Gateway {
     addr: SocketAddr,
     shared: Arc<Shared>,
     cancel: CancellationToken,
-    serving: tokio::task::JoinHandle<()>,
+    serving: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl std::fmt::Debug for Shared {
@@ -131,7 +131,7 @@ impl Gateway {
             addr,
             shared,
             cancel,
-            serving,
+            serving: Mutex::new(Some(serving)),
         })
     }
 
@@ -184,8 +184,9 @@ impl Gateway {
             .map_or(0, |r| r.values().filter(|r| !r.is_closed()).count())
     }
 
-    /// Stop: end every agent connection and the servers behind them.
-    pub async fn stop(self) {
+    /// Stop: end every agent connection and the servers behind them. Stopping
+    /// a gateway that has stopped does nothing.
+    pub async fn stop(&self) {
         let relays: Vec<Arc<Relay>> = self
             .shared
             .relays
@@ -196,7 +197,10 @@ impl Gateway {
             relay.close("the gateway stopped").await;
         }
         self.cancel.cancel();
-        let _ = tokio::time::timeout(STOP_AFTER, self.serving).await;
+        let serving = self.serving.lock().ok().and_then(|mut s| s.take());
+        if let Some(serving) = serving {
+            let _ = tokio::time::timeout(STOP_AFTER, serving).await;
+        }
     }
 }
 

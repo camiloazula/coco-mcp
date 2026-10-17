@@ -1,13 +1,15 @@
 //! The General section: theme, list names and update checks.
 
+use gpui_kit::ElementId;
+
 use super::*;
 
 impl Settings {
     /// One option of a choice, drawn as the app's other two-way choices are.
     /// A disabled one does nothing.
-    fn choice(
+    pub(super) fn choice(
         &self,
-        id: &'static str,
+        id: impl Into<ElementId>,
         label: &'static str,
         chosen: bool,
         enabled: bool,
@@ -15,13 +17,39 @@ impl Settings {
         on: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> AnyElement {
         text_tab(cx, label, chosen)
-            .id(id)
+            .id(id.into())
             .py(px(4.))
             .when(!enabled, |el| el.opacity(0.5))
             .when(enabled, |el| {
                 el.on_click(cx.listener(move |this, _, window, cx| on(this, window, cx)))
             })
             .test_support()
+            .into_any_element()
+    }
+
+    /// A labelled row around any content.
+    pub(super) fn row_with(
+        &self,
+        label: &'static str,
+        content: AnyElement,
+        cx: &App,
+    ) -> AnyElement {
+        let t = *tokens(cx);
+        h_flex()
+            .py(px(10.))
+            .border_b_1()
+            .border_color(t.hair)
+            .items_start()
+            .child(
+                div()
+                    .w(px(LABEL))
+                    .flex_none()
+                    .py(px(4.))
+                    .text_size(px(13.))
+                    .text_color(t.muted)
+                    .child(label),
+            )
+            .child(div().flex_1().min_w_0().child(content))
             .into_any_element()
     }
 

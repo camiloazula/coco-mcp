@@ -213,6 +213,8 @@ impl Workspace {
         self.followed = selection;
         let available = crate::menus::Available::of(self.state.read(cx));
         crate::menus::refresh(available, cx);
+        // Servers added, edited or removed reach a running gateway.
+        self.state.update(cx, |s, cx| s.gateway_sync(cx));
         if dark != tokens(cx).dark {
             theme::set_dark(dark, None, cx);
         }

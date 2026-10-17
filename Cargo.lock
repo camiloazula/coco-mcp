@@ -1190,6 +1190,7 @@ name = "coco-mcp"
 version = "0.5.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.23.1",
  "coco-cli",
  "coco-update",
@@ -1202,6 +1203,7 @@ dependencies = [
  "mcp-core",
  "mcp-diff",
  "mcp-exchange",
+ "mcp-gateway",
  "mcp-mockserver",
  "mcp-schema-form",
  "mcp-store",

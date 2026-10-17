@@ -25,6 +25,10 @@ mod unhappy;
 mod eras;
 
 #[cfg(target_os = "macos")]
+#[path = "flows/gateway.rs"]
+mod gateway;
+
+#[cfg(target_os = "macos")]
 mod macos {
     use std::path::PathBuf;
 
@@ -3808,6 +3812,55 @@ mod macos {
         snap(&mut cx, handle, "74-settings");
     }
 
+    /// The Gateway section, with the gateway off, over the demo's servers.
+    fn settings_gateway_window() {
+        let mut cx = context();
+        let state = cx.update(|cx| cx.new(|_| demo_state(true)));
+        let handle = cx
+            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
+            .expect("Settings window opens");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("section-gateway", cx);
+            window.render_frame(cx);
+            for id in ["gateway-on", "gateway-off", "gateway-port"] {
+                assert!(window.try_find(id).is_some(), "{id} is drawn");
+            }
+        })
+        .unwrap();
+        snap(&mut cx, handle, "75-settings-gateway");
+    }
+
+    /// An agent's traffic through the gateway, in the log, under its name.
+    fn log_agent_rows() {
+        let mut s = demo_state(true);
+        let sink = EventSink::new(64);
+        let traffic = [
+            EventKind::Request {
+                direction: Direction::Outbound,
+                id: json!(1),
+                method: "tools/call".into(),
+                params: Some(json!({"name": "get_forecast", "arguments": {"city": "Oslo"}})),
+            },
+            EventKind::Response {
+                direction: Direction::Inbound,
+                id: json!(1),
+                method: Some("tools/call".into()),
+                result: json!({"content": [{"type": "text", "text": "{\"low\":-2}"}]}),
+                elapsed: None,
+            },
+        ];
+        for kind in traffic {
+            let event = sink.emit(kind);
+            let mut row = log_row(&event).unwrap();
+            row.agent = Some("claude-code".into());
+            s.servers[0].push_log(row);
+        }
+        s.drawer_open = true;
+        s.expanded_log.clear();
+        capture("76-log-agent", s, true);
+    }
+
     /// A newer release, installed through Homebrew: the note in the status
     /// bar opens the popover with the command, the About window names the
     /// release, and skipping it takes the note away.
@@ -4103,6 +4156,7 @@ mod macos {
         crate::interaction::plain_text_flow();
         crate::interaction::markdown_result_flow();
         crate::unhappy::failed_call_flow();
+        crate::gateway::gateway_flow();
         crate::unhappy::crash_mid_session_flow();
         crate::unhappy::edit_form_follows_the_session_flow();
         crate::unhappy::request_outcomes_flow();
@@ -4127,6 +4181,8 @@ mod macos {
         about_window(true, "24-about");
         about_window(false, "25-about-light");
         settings_flow();
+        settings_gateway_window();
+        log_agent_rows();
         update_notice_flow();
         assemble_tour();
         compare_with_references();

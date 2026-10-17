@@ -1,9 +1,12 @@
 //! The Settings window: Coco's own choices in one place, with a section list
 //! on the left. The menu items, palette entries and buttons that change the
 //! same choices stay, and a change made anywhere shows in every window.
-//! 560 × 380, not resizable, with the platform's window controls in the 36px
+//! 560 × 640, not resizable, with the platform's window controls in the 36px
 //! header.
 
+use std::collections::HashMap;
+
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Root, TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -19,10 +22,11 @@ use crate::theme::{self, tokens};
 use crate::update;
 use crate::views::{muted, text_tab};
 
+mod gateway;
 mod general;
 
 /// Window size.
-const WINDOW: (f32, f32) = (560., 380.);
+const WINDOW: (f32, f32) = (560., 640.);
 /// Width of the section list.
 const NAV: f32 = 140.;
 /// Width of a row's label.
@@ -33,21 +37,25 @@ const LABEL: f32 = 130.;
 pub enum Section {
     /// Theme, list names, update checks.
     General,
+    /// The gateway agents reach servers through.
+    Gateway,
 }
 
 impl Section {
     /// Every section, in list order.
-    pub const ALL: [Section; 1] = [Section::General];
+    pub const ALL: [Section; 2] = [Section::General, Section::Gateway];
 
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Gateway => "Gateway",
         }
     }
 
     fn id(self) -> &'static str {
         match self {
             Self::General => "section-general",
+            Self::Gateway => "section-gateway",
         }
     }
 }
@@ -70,7 +78,14 @@ pub struct Settings {
     state: Entity<AppState>,
     section: Section,
     focus: FocusHandle,
-    _observe: Subscription,
+    /// The port being typed.
+    port: Entity<InputState>,
+    port_error: Option<String>,
+    /// The path being typed for each server, by id, made as they are shown.
+    namespaces: HashMap<String, Entity<InputState>>,
+    /// A path that was refused, and for which server.
+    namespace_error: Option<(String, String)>,
+    subs: Vec<Subscription>,
 }
 
 impl std::fmt::Debug for Settings {
@@ -83,13 +98,26 @@ impl std::fmt::Debug for Settings {
 
 impl Settings {
     /// Build the view over the app's model.
-    pub fn new(state: Entity<AppState>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let observe = cx.observe(&state, |_, _, cx| cx.notify());
+    pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut subs = vec![cx.observe(&state, |_, _, cx| cx.notify())];
+        let shown = state.read(cx).gateway.settings.port.to_string();
+        let port = cx.new(|cx| InputState::new(window, cx).default_value(shown));
+        subs.push(
+            cx.subscribe_in(&port, window, |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.apply_port(cx);
+                }
+            }),
+        );
         Self {
             state,
             section: Section::General,
             focus: cx.focus_handle(),
-            _observe: observe,
+            port,
+            port_error: None,
+            namespaces: HashMap::new(),
+            namespace_error: None,
+            subs,
         }
     }
 
@@ -107,7 +135,7 @@ impl Focusable for Settings {
 }
 
 impl Render for Settings {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = *tokens(cx);
         let nav = Section::ALL.map(|section| {
             let chosen = section == self.section;
@@ -130,6 +158,7 @@ impl Render for Settings {
         });
         let body = match self.section {
             Section::General => self.general(cx),
+            Section::Gateway => self.gateway(window, cx),
         };
         v_flex()
             .id("settings")
@@ -156,8 +185,10 @@ impl Render for Settings {
                     )
                     .child(
                         v_flex()
+                            .id("settings-body")
                             .flex_1()
                             .min_w_0()
+                            .overflow_y_scroll()
                             .px(px(24.))
                             .py(px(14.))
                             .child(
