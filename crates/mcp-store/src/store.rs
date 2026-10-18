@@ -889,12 +889,12 @@ mod tests {
                 status: CallStatus::Ok,
                 error: None,
                 elapsed_ms: 5,
-                agent: Some("claude-code".into()),
+                agent: Some("some-agent".into()),
             })
             .unwrap();
-        assert_eq!(by_agent.agent.as_deref(), Some("claude-code"));
+        assert_eq!(by_agent.agent.as_deref(), Some("some-agent"));
         let read = store.get_call(&by_agent.id).unwrap().unwrap();
-        assert_eq!(read.agent.as_deref(), Some("claude-code"));
+        assert_eq!(read.agent.as_deref(), Some("some-agent"));
         assert_eq!(store.get_call(&ok.id).unwrap().unwrap().agent, None);
         assert!(
             store
@@ -916,7 +916,7 @@ mod tests {
                     status: CallStatus::Ok,
                     error: None,
                     elapsed_ms: 1,
-                    agent: Some("claude-code".into()),
+                    agent: Some("some-agent".into()),
                 })
                 .unwrap();
         }
@@ -944,7 +944,7 @@ mod tests {
                 status: CallStatus::Ok,
                 error: None,
                 elapsed_ms: 1,
-                agent: Some("claude-code".into()),
+                agent: Some("some-agent".into()),
             })
             .unwrap();
         assert!(store.delete_call(&by_agent.id).unwrap());
