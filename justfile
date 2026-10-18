@@ -12,7 +12,7 @@ default:
 
 # Format, lint, test and audit everything, the app and its headless flows
 # included. Run before every commit.
-check: fmt-check clippy test clippy-app test-app deny
+check: fmt-check clippy test clippy-app test-app deny notices-check
 
 # Fail if a commit since main carries attribution to anyone but its writers
 # (what the attribution workflow runs on a pull request).
@@ -83,3 +83,14 @@ deny:
 # Vulnerability audit; needs network access to the RustSec database.
 audit:
     cargo deny check advisories
+
+# Needs cargo-about 0.9.2 (`cargo install cargo-about --version 0.9.2 --locked --features cli`).
+# Write THIRD-PARTY-NOTICES.md from Cargo.lock: every crate the released binary is built from, with its licence and notice.
+notices:
+    .github/scripts/notices.sh
+
+# So a dependency change cannot ship without its notice. Compares digests
+# only: no build, no cargo-about.
+# Fail when THIRD-PARTY-NOTICES.md was not generated from the current Cargo.lock and template.
+notices-check:
+    .github/scripts/notices.sh --check
