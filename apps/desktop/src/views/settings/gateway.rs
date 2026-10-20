@@ -172,7 +172,7 @@ impl Settings {
         let on = self.state.read(cx).gateway.settings.on;
         let (note, failed) = self.status_note(cx);
         let state = self.state.clone();
-        let switch = self.switch("gateway", on, true, cx, move |next, _, cx| {
+        let switch = self.switch("gateway", "Gateway", on, true, cx, move |next, _, cx| {
             state.update(cx, |s, cx| s.gateway_set_on(next, cx))
         });
         let status = v_flex()
@@ -236,9 +236,10 @@ impl Settings {
                         h_flex()
                             .gap(px(12.))
                             .items_center()
-                            .child(div().w(px(110.)).flex_none().truncate().child(name))
+                            .child(div().w(px(110.)).flex_none().truncate().child(name.clone()))
                             .child(self.switch(
                                 SharedString::from(format!("included-{id}")),
+                                format!("Include {name}"),
                                 included.on,
                                 true,
                                 cx,

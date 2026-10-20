@@ -2,14 +2,14 @@
 
 use std::rc::Rc;
 
-use gpui_kit::ElementId;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, Sizable as _, Size};
+use gpui_kit::{ElementId, SharedString};
 
 use super::*;
 
 impl Settings {
-    /// A switch showing `on`, with its state in words at its right. `change`
+    /// A switch named `name` for a screen reader, showing `on`, with its state in words at its right. `change`
     /// is given the value the person asked for; the model it writes is read
     /// back on the next frame, so nothing is kept here. A disabled switch
     /// does nothing. The word is the app's 13px text and takes the click too,
@@ -17,6 +17,7 @@ impl Settings {
     pub(super) fn switch(
         &self,
         id: impl Into<ElementId>,
+        name: impl Into<SharedString>,
         on: bool,
         enabled: bool,
         cx: &App,
@@ -31,6 +32,7 @@ impl Settings {
             .items_center()
             .child(
                 Switch::new(id.clone())
+                    .accessibility_label(name)
                     .checked(on)
                     .with_size(Size::Small)
                     .disabled(!enabled)
@@ -46,7 +48,8 @@ impl Settings {
                             .on_click(move |_, window, cx| change(!on, window, cx))
                     })
                     .when(!enabled, |el| el.opacity(0.5))
-                    .child(if on { "On" } else { "Off" }),
+                    .child(if on { "On" } else { "Off" })
+                    .test_support(),
             )
             .into_any_element()
     }

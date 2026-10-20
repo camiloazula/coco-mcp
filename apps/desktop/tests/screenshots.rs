@@ -3794,6 +3794,21 @@ mod macos {
             .unwrap();
             assert_eq!(read(&mut cx), want, "after {id}");
         }
+        // The word beside the switch asks for the same, and the switch has a
+        // name a screen reader announces.
+        for want in [false, true] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(read(&mut cx).3, want, "after the word");
+        }
+        cx.update_window(handle.into(), |_, window, _| {
+            let switch = window.find("update-checks");
+            assert_eq!(switch.label(), Some("Update checks"));
+        })
+        .unwrap();
         // The View menu's choices, from the Settings window.
         for (action, want) in [
             (
@@ -3868,6 +3883,7 @@ mod macos {
         // put back, so the render shows the defaults.
         let first = ids[0].clone();
         let was = included(&mut cx, &first).expect("the server is planned");
+        let others: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
         for want in [!was, was] {
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(
@@ -3878,8 +3894,42 @@ mod macos {
             })
             .unwrap();
             assert_eq!(included(&mut cx, &first), Some(want), "after the click");
+            let now: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
+            assert_eq!(now, others, "no other server's switch moved");
         }
         snap(&mut cx, handle, "75-settings-gateway");
+    }
+
+    /// Update checks that the environment turned off: neither the switch
+    /// nor the word beside it changes anything. The switch does not report
+    /// a disabled flag to the test support, so that is the proof.
+    fn settings_env_off_window() {
+        use coco_mcp::update::Update;
+        use coco_update::{Channel, State};
+
+        let mut cx = context();
+        let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+        cx.update(|cx| {
+            cx.set_global(
+                Update::fixed(bridge.clone(), Channel::Homebrew, State::default())
+                    .with_env_off(true),
+            )
+        });
+        let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), None)));
+        let handle = cx
+            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
+            .expect("Settings window opens");
+        let checks = |cx: &mut HeadlessAppContext| cx.update(|cx| coco_mcp::update::checks(cx));
+        let (was, env_off) = checks(&mut cx);
+        assert!(env_off, "the environment turned them off");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("update-checks", cx);
+            window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        assert_eq!(checks(&mut cx), (was, true), "nothing changed");
     }
 
     /// An agent's traffic through the gateway, in the log, under its name.
@@ -4298,6 +4348,7 @@ mod macos {
         about_window(false, "25-about-light");
         settings_flow();
         settings_gateway_window();
+        settings_env_off_window();
         log_agent_rows();
         history_agent_calls();
         update_notice_flow();
