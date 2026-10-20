@@ -9,10 +9,11 @@ use gpui_kit::{ElementId, SharedString};
 use super::*;
 
 impl Settings {
-    /// A switch named `name` for a screen reader, showing `on`, with its state in words at its right. `change`
-    /// is given the value the person asked for; the model it writes is read
-    /// back on the next frame, so nothing is kept here. A disabled switch
-    /// does nothing. The word is the app's 13px text and takes the click too,
+    /// A switch showing `on`, with its state in words at its right and
+    /// `name` as what a screen reader announces. `change` is given the value
+    /// the person asked for; the model it writes is read back on the next
+    /// frame, so nothing is kept here. A disabled switch does nothing. The
+    /// word is the app's 13px text and takes the click too,
     /// as the switch's own label would, which draws at 14px.
     pub(super) fn switch(
         &self,
