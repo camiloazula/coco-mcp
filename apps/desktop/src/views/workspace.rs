@@ -33,6 +33,7 @@ use crate::views::{
 };
 
 mod render;
+mod title_bar;
 
 /// The log drawer's level dropdown.
 pub(crate) type LevelSelect = SelectState<SearchableVec<SharedString>>;

@@ -128,18 +128,18 @@ impl Settings {
                 |this, _, cx| this.state.update(cx, |s, cx| s.set_display_names(true, cx)),
             ),
         ];
-        let updates = vec![
-            self.choice("checks-on", "On", checks, !env_off, cx, |_, _, cx| {
-                if !update::checks(cx).0 {
+        let updates = vec![self.switch(
+            "update-checks",
+            "Update checks",
+            checks,
+            !env_off,
+            cx,
+            |next, _, cx| {
+                if next != update::checks(cx).0 {
                     update::toggle_checks(cx);
                 }
-            }),
-            self.choice("checks-off", "Off", !checks, !env_off, cx, |_, _, cx| {
-                if update::checks(cx).0 {
-                    update::toggle_checks(cx);
-                }
-            }),
-        ];
+            },
+        )];
         v_flex()
             .child(self.row("Theme", theme, None, cx))
             .child(self.row(

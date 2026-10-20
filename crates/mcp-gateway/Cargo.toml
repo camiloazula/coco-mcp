@@ -25,7 +25,7 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 mcp-mockserver.workspace = true
-rmcp = { workspace = true, features = ["server", "transport-io"] }
+rmcp = { workspace = true, features = ["server", "client", "transport-io", "transport-streamable-http-client-reqwest"] }
 anyhow.workspace = true
 
 [lints]

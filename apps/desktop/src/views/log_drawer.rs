@@ -75,7 +75,7 @@ pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
             .hover(move |s| s.text_color(t.fg))
             .cursor_pointer()
             .tooltip(move |window, cx| Tooltip::new(caption).build(window, cx))
-            .child(Icon::new(icon).with_size(px(12.)).text_color(t.muted))
+            .child(Icon::new(icon).with_size(px(12.)))
     };
     let (toggle_icon, toggle_caption) = if open {
         (gpui_kit::assets::IconName::PanelBottomClose, "Hide logs")

@@ -171,19 +171,10 @@ impl Settings {
         let t = *tokens(cx);
         let on = self.state.read(cx).gateway.settings.on;
         let (note, failed) = self.status_note(cx);
-        let switch = h_flex()
-            .gap(px(16.))
-            .child(
-                self.choice("gateway-on", "On", on, true, cx, |this, _, cx| {
-                    this.state.update(cx, |s, cx| s.gateway_set_on(true, cx))
-                }),
-            )
-            .child(
-                self.choice("gateway-off", "Off", !on, true, cx, |this, _, cx| {
-                    this.state.update(cx, |s, cx| s.gateway_set_on(false, cx))
-                }),
-            )
-            .into_any_element();
+        let state = self.state.clone();
+        let switch = self.switch("gateway", "Gateway", on, true, cx, move |next, _, cx| {
+            state.update(cx, |s, cx| s.gateway_set_on(next, cx))
+        });
         let status = v_flex()
             .gap(px(4.))
             .child(switch)
@@ -229,7 +220,7 @@ impl Settings {
                 .h(px(26.));
             let url = format!("http://127.0.0.1:{port}/{}", included.namespace);
             let copied = (included.namespace.clone(), url.clone());
-            let (on_id, off_id) = (id.clone(), id.clone());
+            let (state, included_id) = (self.state.clone(), id.clone());
             let error = self
                 .namespace_error
                 .clone()
@@ -245,29 +236,21 @@ impl Settings {
                         h_flex()
                             .gap(px(12.))
                             .items_center()
-                            .child(div().w(px(110.)).flex_none().truncate().child(name))
-                            .child(self.choice(
-                                SharedString::from(format!("on-{id}")),
-                                "On",
+                            .child(div().w(px(110.)).flex_none().truncate().child(name.clone()))
+                            .child(self.switch(
+                                SharedString::from(format!("included-{id}")),
+                                format!("Include {name}"),
                                 included.on,
                                 true,
                                 cx,
-                                move |this, _, cx| {
-                                    this.state.update(cx, |s, cx| {
-                                        let _ = s.gateway_set_server(&on_id, Some(true), None, cx);
-                                    })
-                                },
-                            ))
-                            .child(self.choice(
-                                SharedString::from(format!("off-{id}")),
-                                "Off",
-                                !included.on,
-                                true,
-                                cx,
-                                move |this, _, cx| {
-                                    this.state.update(cx, |s, cx| {
-                                        let _ =
-                                            s.gateway_set_server(&off_id, Some(false), None, cx);
+                                move |next, _, cx| {
+                                    state.update(cx, |s, cx| {
+                                        let _ = s.gateway_set_server(
+                                            &included_id,
+                                            Some(next),
+                                            None,
+                                            cx,
+                                        );
                                     })
                                 },
                             ))

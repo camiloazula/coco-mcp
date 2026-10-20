@@ -3733,7 +3733,13 @@ mod macos {
             })
             .unwrap();
         let before = cx.update(|cx| cx.windows().len());
-        cx.update(coco_mcp::views::settings::show);
+        // The way in from the main window's title bar.
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("open-settings").is_some(), "the button");
+            window.click("open-settings", cx);
+        })
+        .unwrap();
         assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "opened");
         cx.update(coco_mcp::views::settings::show);
         assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "raised");
@@ -3754,8 +3760,7 @@ mod macos {
                 "theme-light",
                 "names-identifiers",
                 "names-display",
-                "checks-on",
-                "checks-off",
+                "update-checks",
             ] {
                 assert!(window.try_find(id).is_some(), "{id} is drawn");
             }
@@ -3779,8 +3784,8 @@ mod macos {
             ("names-display", (false, true, false, true)),
             ("theme-dark", (true, true, true, true)),
             ("names-identifiers", (true, false, true, true)),
-            ("checks-off", (true, false, true, false)),
-            ("checks-on", (true, false, true, true)),
+            ("update-checks", (true, false, true, false)),
+            ("update-checks", (true, false, true, true)),
         ] {
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(id, cx);
@@ -3789,6 +3794,21 @@ mod macos {
             .unwrap();
             assert_eq!(read(&mut cx), want, "after {id}");
         }
+        // The word beside the switch asks for the same, and the switch has a
+        // name a screen reader announces.
+        for want in [false, true] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(read(&mut cx).3, want, "after the word");
+        }
+        cx.update_window(handle.into(), |_, window, _| {
+            let switch = window.find("update-checks");
+            assert_eq!(switch.label(), Some("Update checks"));
+        })
+        .unwrap();
         // The View menu's choices, from the Settings window.
         for (action, want) in [
             (
@@ -3824,16 +3844,92 @@ mod macos {
         let handle = cx
             .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
             .expect("Settings window opens");
+        let ids: Vec<String> = cx.update(|cx| {
+            let s = state.read(cx);
+            s.servers.iter().map(|s| s.record.id.clone()).collect()
+        });
+        assert!(!ids.is_empty(), "the demo has servers");
+        let included = |cx: &mut HeadlessAppContext, id: &str| {
+            cx.update(|cx| {
+                let s = state.read(cx);
+                let records: Vec<_> = s.servers.iter().map(|s| s.record.clone()).collect();
+                s.gateway
+                    .settings
+                    .plan(&records)
+                    .into_iter()
+                    .find(|(sid, _)| sid == id)
+                    .map(|(_, p)| p.on)
+            })
+        };
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
             window.click("section-gateway", cx);
             window.render_frame(cx);
-            for id in ["gateway-on", "gateway-off", "gateway-port"] {
+            for id in ["gateway", "gateway-port"] {
                 assert!(window.try_find(id).is_some(), "{id} is drawn");
+            }
+            for id in &ids {
+                let switch = format!("included-{id}");
+                assert!(
+                    window
+                        .try_find(gpui_kit::SharedString::from(switch.clone()))
+                        .is_some(),
+                    "{switch} is drawn"
+                );
             }
         })
         .unwrap();
+        // A server's switch asks for the opposite of what it shows, and is
+        // put back, so the render shows the defaults.
+        let first = ids[0].clone();
+        let was = included(&mut cx, &first).expect("the server is planned");
+        let others: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
+        for want in [!was, was] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(
+                    gpui_kit::SharedString::from(format!("included-{first}")),
+                    cx,
+                );
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(included(&mut cx, &first), Some(want), "after the click");
+            let now: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
+            assert_eq!(now, others, "no other server's switch moved");
+        }
         snap(&mut cx, handle, "75-settings-gateway");
+    }
+
+    /// Update checks that the environment turned off: neither the switch
+    /// nor the word beside it changes anything. The switch does not report
+    /// a disabled flag to the test support, so that is the proof.
+    fn settings_env_off_window() {
+        use coco_mcp::update::Update;
+        use coco_update::{Channel, State};
+
+        let mut cx = context();
+        let bridge = coco_mcp::bridge::Bridge::new().unwrap();
+        cx.update(|cx| {
+            cx.set_global(
+                Update::fixed(bridge.clone(), Channel::Homebrew, State::default())
+                    .with_env_off(true),
+            )
+        });
+        let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), None)));
+        let handle = cx
+            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
+            .expect("Settings window opens");
+        let checks = |cx: &mut HeadlessAppContext| cx.update(|cx| coco_mcp::update::checks(cx));
+        let (was, env_off) = checks(&mut cx);
+        assert!(env_off, "the environment turned them off");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("update-checks", cx);
+            window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        assert_eq!(checks(&mut cx), (was, true), "nothing changed");
     }
 
     /// An agent's traffic through the gateway, in the log, under its name.
@@ -4252,6 +4348,7 @@ mod macos {
         about_window(false, "25-about-light");
         settings_flow();
         settings_gateway_window();
+        settings_env_off_window();
         log_agent_rows();
         history_agent_calls();
         update_notice_flow();

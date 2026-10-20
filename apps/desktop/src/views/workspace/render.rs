@@ -4,18 +4,6 @@
 use super::*;
 
 impl Workspace {
-    pub(super) fn title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = *tokens(cx);
-        TitleBar::new().h(px(36.)).bg(t.sunk).child(
-            div()
-                .flex_1()
-                .text_center()
-                .text_size(px(12.))
-                .text_color(t.muted)
-                .child(crate::APP_NAME),
-        )
-    }
-
     pub(super) fn columns(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = *tokens(cx);
         let (has_servers, is_form) = {
