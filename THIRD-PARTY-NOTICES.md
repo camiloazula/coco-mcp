@@ -11,7 +11,7 @@ offers. A crate's own copy of its licence, with its copyright line, is in its
 source on crates.io, linked from its row.
 
 Generated from `Cargo.lock` by `just notices` for the targets the release
-builds; do not edit by hand. Inputs digest `f1b188671b54fc82` (what
+builds; do not edit by hand. Inputs digest `7324f60ccd4dcc5e` (what
 `just notices-check` compares).
 
 ## Crates
@@ -522,7 +522,7 @@ builds; do not edit by hand. Inputs digest `f1b188671b54fc82` (what
 | [rustls-native-certs](https://crates.io/crates/rustls-native-certs/0.8.4) | 0.8.4 | Apache-2.0 OR ISC OR MIT |
 | [rustls-pki-types](https://crates.io/crates/rustls-pki-types/1.15.1) | 1.15.1 | MIT OR Apache-2.0 |
 | [rustls-platform-verifier](https://crates.io/crates/rustls-platform-verifier/0.7.0) | 0.7.0 | MIT OR Apache-2.0 |
-| [rustls-webpki](https://crates.io/crates/rustls-webpki/0.103.15) | 0.103.15 | ISC |
+| [rustls-webpki](https://crates.io/crates/rustls-webpki/0.103.16) | 0.103.16 | ISC |
 | [rustversion](https://crates.io/crates/rustversion/1.0.23) | 1.0.23 | MIT OR Apache-2.0 |
 | [rustybuzz](https://crates.io/crates/rustybuzz/0.20.1) | 0.20.1 | MIT |
 | [ryu](https://crates.io/crates/ryu/1.0.23) | 1.0.23 | Apache-2.0 OR BSL-1.0 |
@@ -1630,7 +1630,7 @@ Crates under it:
 - inotify 0.10.2
 - inotify-sys 0.1.8
 - libloading 0.8.9
-- rustls-webpki 0.103.15
+- rustls-webpki 0.103.16
 - untrusted 0.9.0
 
 ```text
