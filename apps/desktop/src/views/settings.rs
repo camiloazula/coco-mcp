@@ -24,6 +24,7 @@ use crate::views::{muted, text_tab};
 
 mod gateway;
 mod general;
+mod switch;
 
 /// Window size.
 const WINDOW: (f32, f32) = (560., 720.);

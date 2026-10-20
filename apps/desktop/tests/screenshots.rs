@@ -3760,8 +3760,7 @@ mod macos {
                 "theme-light",
                 "names-identifiers",
                 "names-display",
-                "checks-on",
-                "checks-off",
+                "update-checks",
             ] {
                 assert!(window.try_find(id).is_some(), "{id} is drawn");
             }
@@ -3785,8 +3784,8 @@ mod macos {
             ("names-display", (false, true, false, true)),
             ("theme-dark", (true, true, true, true)),
             ("names-identifiers", (true, false, true, true)),
-            ("checks-off", (true, false, true, false)),
-            ("checks-on", (true, false, true, true)),
+            ("update-checks", (true, false, true, false)),
+            ("update-checks", (true, false, true, true)),
         ] {
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(id, cx);
@@ -3830,15 +3829,56 @@ mod macos {
         let handle = cx
             .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
             .expect("Settings window opens");
+        let ids: Vec<String> = cx.update(|cx| {
+            let s = state.read(cx);
+            s.servers.iter().map(|s| s.record.id.clone()).collect()
+        });
+        assert!(!ids.is_empty(), "the demo has servers");
+        let included = |cx: &mut HeadlessAppContext, id: &str| {
+            cx.update(|cx| {
+                let s = state.read(cx);
+                let records: Vec<_> = s.servers.iter().map(|s| s.record.clone()).collect();
+                s.gateway
+                    .settings
+                    .plan(&records)
+                    .into_iter()
+                    .find(|(sid, _)| sid == id)
+                    .map(|(_, p)| p.on)
+            })
+        };
         cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
             window.click("section-gateway", cx);
             window.render_frame(cx);
-            for id in ["gateway-on", "gateway-off", "gateway-port"] {
+            for id in ["gateway", "gateway-port"] {
                 assert!(window.try_find(id).is_some(), "{id} is drawn");
+            }
+            for id in &ids {
+                let switch = format!("included-{id}");
+                assert!(
+                    window
+                        .try_find(gpui_kit::SharedString::from(switch.clone()))
+                        .is_some(),
+                    "{switch} is drawn"
+                );
             }
         })
         .unwrap();
+        // A server's switch asks for the opposite of what it shows, and is
+        // put back, so the render shows the defaults.
+        let first = ids[0].clone();
+        let was = included(&mut cx, &first).expect("the server is planned");
+        for want in [!was, was] {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(
+                    gpui_kit::SharedString::from(format!("included-{first}")),
+                    cx,
+                );
+                window.render_frame(cx);
+            })
+            .unwrap();
+            assert_eq!(included(&mut cx, &first), Some(want), "after the click");
+        }
         snap(&mut cx, handle, "75-settings-gateway");
     }
 

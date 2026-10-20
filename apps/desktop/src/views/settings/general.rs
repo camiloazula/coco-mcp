@@ -129,13 +129,8 @@ impl Settings {
             ),
         ];
         let updates = vec![
-            self.choice("checks-on", "On", checks, !env_off, cx, |_, _, cx| {
-                if !update::checks(cx).0 {
-                    update::toggle_checks(cx);
-                }
-            }),
-            self.choice("checks-off", "Off", !checks, !env_off, cx, |_, _, cx| {
-                if update::checks(cx).0 {
+            self.switch("update-checks", checks, !env_off, cx, |next, _, cx| {
+                if next != update::checks(cx).0 {
                     update::toggle_checks(cx);
                 }
             }),
