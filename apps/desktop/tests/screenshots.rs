@@ -3733,7 +3733,13 @@ mod macos {
             })
             .unwrap();
         let before = cx.update(|cx| cx.windows().len());
-        cx.update(coco_mcp::views::settings::show);
+        // The way in from the main window's title bar.
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("open-settings").is_some(), "the button");
+            window.click("open-settings", cx);
+        })
+        .unwrap();
         assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "opened");
         cx.update(coco_mcp::views::settings::show);
         assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "raised");
