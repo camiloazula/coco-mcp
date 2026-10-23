@@ -11,7 +11,7 @@ offers. A crate's own copy of its licence, with its copyright line, is in its
 source on crates.io, linked from its row.
 
 Generated from `Cargo.lock` by `just notices` for the targets the release
-builds; do not edit by hand. Inputs digest `7324f60ccd4dcc5e` (what
+builds; do not edit by hand. Inputs digest `0255f93d244e6a0c` (what
 `just notices-check` compares).
 
 ## Crates
@@ -144,7 +144,7 @@ builds; do not edit by hand. Inputs digest `7324f60ccd4dcc5e` (what
 | [crypto-common](https://crates.io/crates/crypto-common/0.1.7) | 0.1.7 | MIT OR Apache-2.0 |
 | [crypto-common](https://crates.io/crates/crypto-common/0.2.2) | 0.2.2 | MIT OR Apache-2.0 |
 | [ctor](https://crates.io/crates/ctor/1.0.13) | 1.0.13 | Apache-2.0 OR MIT |
-| [ctutils](https://crates.io/crates/ctutils/0.4.2) | 0.4.2 | Apache-2.0 OR MIT |
+| [ctutils](https://crates.io/crates/ctutils/0.4.5) | 0.4.5 | Apache-2.0 OR MIT |
 | [data-encoding](https://crates.io/crates/data-encoding/2.11.1) | 2.11.1 | MIT |
 | [data-url](https://crates.io/crates/data-url/0.3.2) | 0.3.2 | MIT OR Apache-2.0 |
 | [deranged](https://crates.io/crates/deranged/0.5.8) | 0.5.8 | MIT OR Apache-2.0 |
@@ -613,7 +613,7 @@ builds; do not edit by hand. Inputs digest `7324f60ccd4dcc5e` (what
 | [tinystr](https://crates.io/crates/tinystr/0.8.4) | 0.8.4 | Unicode-3.0 |
 | [tinyvec](https://crates.io/crates/tinyvec/1.13.2) | 1.13.2 | Zlib OR Apache-2.0 OR MIT |
 | [tinyvec_macros](https://crates.io/crates/tinyvec_macros/0.1.1) | 0.1.1 | MIT OR Apache-2.0 OR Zlib |
-| [tokio](https://crates.io/crates/tokio/1.53.1) | 1.53.1 | MIT |
+| [tokio](https://crates.io/crates/tokio/1.54.1) | 1.54.1 | MIT |
 | [tokio-macros](https://crates.io/crates/tokio-macros/2.7.2) | 2.7.2 | MIT |
 | [tokio-rustls](https://crates.io/crates/tokio-rustls/0.26.5) | 0.26.5 | MIT OR Apache-2.0 |
 | [tokio-stream](https://crates.io/crates/tokio-stream/0.1.19) | 0.1.19 | MIT |
@@ -729,6 +729,7 @@ builds; do not edit by hand. Inputs digest `7324f60ccd4dcc5e` (what
 | [windows-strings](https://crates.io/crates/windows-strings/0.5.1) | 0.5.1 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.48.0) | 0.48.0 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.52.0) | 0.52.0 | MIT OR Apache-2.0 |
+| [windows-sys](https://crates.io/crates/windows-sys/0.59.0) | 0.59.0 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.61.2) | 0.61.2 | MIT OR Apache-2.0 |
 | [windows-targets](https://crates.io/crates/windows-targets/0.48.5) | 0.48.5 | MIT OR Apache-2.0 |
 | [windows-targets](https://crates.io/crates/windows-targets/0.52.6) | 0.52.6 | MIT OR Apache-2.0 |
@@ -916,7 +917,7 @@ Crates under it:
 - crypto-common 0.1.7
 - crypto-common 0.2.2
 - ctor 1.0.13
-- ctutils 0.4.2
+- ctutils 0.4.5
 - data-url 0.3.2
 - deranged 0.5.8
 - digest 0.10.7
@@ -1333,6 +1334,7 @@ Crates under it:
 - windows-strings 0.5.1
 - windows-sys 0.48.0
 - windows-sys 0.52.0
+- windows-sys 0.59.0
 - windows-sys 0.61.2
 - windows-targets 0.48.5
 - windows-targets 0.52.6
@@ -1792,7 +1794,7 @@ Crates under it:
 - synstructure 0.13.2
 - taffy 0.13.0
 - tiff 0.11.3
-- tokio 1.53.1
+- tokio 1.54.1
 - tokio-macros 2.7.2
 - tokio-stream 0.1.19
 - tokio-util 0.7.19
