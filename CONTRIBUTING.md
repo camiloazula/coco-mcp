@@ -91,8 +91,11 @@ two modes. These rules keep it that way.
   Do not invent visual values.
 - The native menu bar is built in `apps/desktop/src/menus.rs`; menu items
   dispatch the same actions as the key bindings, and `About` / `Quit` have
-  global handlers so they work from any window. The binary is run as the
-  release archive or Cargo leaves it; no platform packaging is assembled.
+  global handlers so they work from any window. Settings, the theme and the
+  list names have global handlers too, which reach the main window: the
+  Settings sheet opens over it whichever window is in front. The binary is
+  run as the release archive or Cargo leaves it; no platform packaging is
+  assembled.
 - Brand assets live in `apps/desktop/assets/`: `icon.svg`, the mark, and
   the four `icons/coco-*.svg` masks the About window draws. GPUI tints an
   SVG with the element's text colour, so the outline and the eyes are
@@ -135,7 +138,7 @@ two modes. These rules keep it that way.
   can carry the real value; it leaves only through "Copy Bearer Token",
   which reads it from the keyring and copies it alone.
 - Overlays are hand-written: the request dialog, the confirm dialog, the
-  palette card and the copy menu. gpui-component's `ContextMenu` keeps its
+  Settings sheet, the palette card and the copy menu. gpui-component's `ContextMenu` keeps its
   popup entity in a shared cell that its own dismiss subscription captures,
   so every open leaks one entity and the headless tests refuse to exit.
 - Every glyph drawn must exist in the bundled fonts (Inter covers the

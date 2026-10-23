@@ -57,8 +57,10 @@ impl Settings {
             })
             .child(thumb)
             .test_support();
+        // As wide as "off", so the track stays put at the row's right edge.
         let word = div()
             .id((id, "word"))
+            .w(px(22.))
             .text_size(px(13.))
             .text_color(if on { t.accent } else { t.muted })
             .when(!enabled, |el| el.opacity(0.5))

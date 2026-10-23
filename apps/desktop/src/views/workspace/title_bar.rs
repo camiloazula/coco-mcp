@@ -27,7 +27,7 @@ impl Workspace {
             .cursor_pointer()
             .tooltip(move |window, cx| Tooltip::new("Settings  ⌘,").build(window, cx))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(|_, _, cx| crate::views::settings::show(cx))
+            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
             .child(Icon::new(gpui_kit::assets::IconName::Settings).with_size(px(16.)))
             .test_support();
         TitleBar::new()

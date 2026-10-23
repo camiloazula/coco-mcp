@@ -98,16 +98,21 @@ impl Render for Workspace {
         self.decoded.end_frame();
         let overlay = request_dialog::render(self, window, cx);
         let confirm = confirm_dialog::render(self, window, cx);
-        // A dialog takes the keyboard while it is open, and gives it back to
-        // the list when it closes.
+        let sheet = self.settings.as_ref().map(|(s, _)| settings::overlay(s));
+        // A dialog takes the keyboard while it is open, over the Settings
+        // sheet too, and gives it back to the sheet, or else the list, when
+        // it closes. The sheet holds the keyboard the same way while open.
         let dialog_open = overlay.is_some() || confirm.is_some();
         let dialog_focused = self.dialog_focus.contains_focused(window, cx);
-        if dialog_open != dialog_focused {
-            let target = if dialog_open {
-                self.dialog_focus.clone()
-            } else {
-                self.list_focus.clone()
-            };
+        let sheet_focus = self.settings.as_ref().map(|(s, _)| s.focus_handle(cx));
+        let target = if dialog_open {
+            (!dialog_focused).then(|| self.dialog_focus.clone())
+        } else if let Some(focus) = sheet_focus {
+            (!focus.contains_focused(window, cx)).then_some(focus)
+        } else {
+            dialog_focused.then(|| self.home_focus(cx))
+        };
+        if let Some(target) = target {
             window.defer(cx, move |window, cx| window.focus(&target, cx));
         }
         let palette = palette::render(self, window, cx);
@@ -209,6 +214,7 @@ impl Render for Workspace {
                 this.state.update(cx, |s, cx| s.select_server(index, cx));
             }))
             .on_action(cx.listener(|this, _: &EditServer, window, cx| {
+                this.close_settings(window, cx);
                 // Where the pane already shows the server's settings, go to
                 // them rather than open a second copy over them.
                 if !this.focus_settings_pane(window, cx) {
@@ -250,6 +256,9 @@ impl Render for Workspace {
                 cx.listener(|this, _: &ExportConfig, _, cx| this.export_file(Export::Config, cx)),
             )
             .on_action(cx.listener(|this, _: &ImportConfig, _, cx| this.import_config_file(cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
                 if this.palette_open {
                     this.close_palette(window, cx);
@@ -267,6 +276,7 @@ impl Render for Workspace {
             .child(self.title_bar(cx))
             .child(div().flex_1().min_h_0().child(middle))
             .child(status_bar::render(self, cx))
+            .children(sheet)
             .children(overlay)
             .children(confirm)
             .children(palette)

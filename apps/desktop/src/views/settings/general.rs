@@ -1,6 +1,7 @@
-//! The General section: theme, list names and update checks.
+//! The General section: theme, list names and update checks, and the row
+//! every section is drawn with.
 
-use gpui_kit::ElementId;
+use gpui_kit::{ElementId, SharedString};
 
 use super::*;
 
@@ -27,64 +28,46 @@ impl Settings {
             .into_any_element()
     }
 
-    /// A labelled row around any content.
-    pub(super) fn row_with(
+    /// A row: its title with the description under it at the left, and the
+    /// control at the right.
+    pub(super) fn row(
         &self,
-        label: &'static str,
-        content: AnyElement,
+        title: impl Into<SharedString>,
+        description: Vec<AnyElement>,
+        control: AnyElement,
         cx: &App,
     ) -> AnyElement {
         let t = *tokens(cx);
         h_flex()
-            .py(px(10.))
+            .py(px(12.))
+            .gap(px(24.))
             .border_b_1()
             .border_color(t.hair)
-            .items_start()
-            .child(
-                div()
-                    .w(px(LABEL))
-                    .flex_none()
-                    .py(px(4.))
-                    .text_size(px(13.))
-                    .text_color(t.muted)
-                    .child(label),
-            )
-            .child(div().flex_1().min_w_0().child(content))
-            .into_any_element()
-    }
-
-    /// A labelled row: the label, the choices, and a note under them.
-    fn row(
-        &self,
-        label: &'static str,
-        choices: Vec<AnyElement>,
-        note: Option<&'static str>,
-        cx: &App,
-    ) -> AnyElement {
-        let t = *tokens(cx);
-        h_flex()
-            .py(px(10.))
-            .border_b_1()
-            .border_color(t.hair)
-            .items_start()
-            .child(
-                div()
-                    .w(px(LABEL))
-                    .flex_none()
-                    .py(px(4.))
-                    .text_size(px(13.))
-                    .text_color(t.muted)
-                    .child(label),
-            )
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(4.))
-                    .child(h_flex().gap(px(16.)).children(choices))
-                    .children(note.map(|n| muted(cx, 11., n).whitespace_normal())),
+                    .gap(px(3.))
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .text_color(t.fg)
+                            .child(title.into()),
+                    )
+                    .children(description),
             )
+            .child(div().flex_none().child(control))
             .into_any_element()
+    }
+
+    /// A description line under a row's title.
+    pub(super) fn note(cx: &App, text: impl Into<SharedString>) -> AnyElement {
+        muted(cx, 12., text).whitespace_normal().into_any_element()
+    }
+
+    /// Two or more options side by side, the row's control.
+    fn choices(options: Vec<AnyElement>) -> AnyElement {
+        h_flex().gap(px(16.)).children(options).into_any_element()
     }
 
     /// Theme, list names and update checks.
@@ -95,17 +78,12 @@ impl Settings {
         };
         let (checks, env_off) = update::checks(cx);
         let theme = vec![
-            self.choice("theme-dark", "Dark", dark, true, cx, |this, window, cx| {
-                this.set_dark(true, window, cx)
+            self.choice("theme-dark", "Dark", dark, true, cx, |this, _, cx| {
+                this.set_dark(true, cx)
             }),
-            self.choice(
-                "theme-light",
-                "Light",
-                !dark,
-                true,
-                cx,
-                |this, window, cx| this.set_dark(false, window, cx),
-            ),
+            self.choice("theme-light", "Light", !dark, true, cx, |this, _, cx| {
+                this.set_dark(false, cx)
+            }),
         ];
         let list_names = vec![
             self.choice(
@@ -128,7 +106,7 @@ impl Settings {
                 |this, _, cx| this.state.update(cx, |s, cx| s.set_display_names(true, cx)),
             ),
         ];
-        let updates = vec![self.switch(
+        let updates = self.switch(
             "update-checks",
             "Update checks",
             checks,
@@ -139,21 +117,34 @@ impl Settings {
                     update::toggle_checks(cx);
                 }
             },
+        );
+        let mut updates_note = vec![Self::note(
+            cx,
+            "Coco looks for a new release when it starts.",
         )];
+        if env_off {
+            updates_note.push(Self::note(
+                cx,
+                "Off in the environment (COCO_NO_UPDATE_CHECK or DO_NOT_TRACK).",
+            ));
+        }
         v_flex()
-            .child(self.row("Theme", theme, None, cx))
+            .child(self.row(
+                "Theme",
+                vec![Self::note(cx, "How every Coco window is drawn.")],
+                Self::choices(theme),
+                cx,
+            ))
             .child(self.row(
                 "List names",
-                list_names,
-                Some("What the Tools, Resources and Prompts lists show."),
+                vec![Self::note(
+                    cx,
+                    "What the Tools, Resources and Prompts lists show.",
+                )],
+                Self::choices(list_names),
                 cx,
             ))
-            .child(self.row(
-                "Update checks",
-                updates,
-                env_off.then_some("Off in the environment (COCO_NO_UPDATE_CHECK or DO_NOT_TRACK)."),
-                cx,
-            ))
+            .child(self.row("Update checks", updates_note, updates, cx))
             .into_any_element()
     }
 }

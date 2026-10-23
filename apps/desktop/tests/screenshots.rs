@@ -3699,14 +3699,66 @@ mod macos {
         eprintln!("wrote {}", path.display());
     }
 
-    /// The Settings window: each choice changes the model the main window
-    /// reads, what was chosen is drawn as chosen, a second request raises
-    /// the window instead of opening another, and the View menu's two
-    /// choices still work while it is in front.
+    /// The main window over `state`, for the Settings sheet to open in.
+    fn settings_main(
+        cx: &mut HeadlessAppContext,
+        state: &gpui_kit::Entity<AppState>,
+    ) -> gpui_kit::WindowHandle<Root> {
+        cx.open_window(size(px(1200.), px(760.)), |window, cx| {
+            let workspace = cx.new(|cx| Workspace::new(state.clone(), window, cx));
+            cx.new(|cx| Root::new(workspace, window, cx))
+        })
+        .unwrap()
+    }
+
+    /// Open the sheet from the title bar's button.
+    fn open_settings_sheet(cx: &mut HeadlessAppContext, main: gpui_kit::WindowHandle<Root>) {
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("open-settings").is_some(), "the button");
+            window.click("open-settings", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("settings").is_some(), "the sheet is open");
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+
+    /// Press `keys` in `main`, then let what it started run.
+    fn press_in(cx: &mut HeadlessAppContext, main: gpui_kit::WindowHandle<Root>, keys: &str) {
+        cx.update_window(main.into(), |_, window, cx| {
+            window.press(keys, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+
+    /// Whether the Settings sheet is drawn in `main`.
+    fn sheet_open(cx: &mut HeadlessAppContext, main: gpui_kit::WindowHandle<Root>) -> bool {
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find("settings").is_some()
+        })
+        .unwrap()
+    }
+
+    /// The Settings sheet: it opens over the main window rather than as a
+    /// window of its own, each choice changes the model the window reads,
+    /// what was chosen is drawn as chosen, a second request keeps the one
+    /// sheet, the window's shortcuts are inert while it is open, the View
+    /// menu's two choices still work, Esc or its × closes it and gives the
+    /// keyboard back, ⌘, and the menu reach it from a window with no servers
+    /// and from About, and the palette asked for over it takes its place.
     fn settings_flow() {
-        use coco_mcp::actions::{ToggleDisplayNames, ToggleTheme};
+        use coco_mcp::actions::{
+            Call, CommandPalette, OpenSettings, ShowResources, ToggleDisplayNames, ToggleResponse,
+            ToggleTheme,
+        };
+        use coco_mcp::state::Mode;
         use coco_mcp::update::Update;
         use coco_update::{Channel, State};
+        use gpui_kit::Action as _;
 
         let mut cx = context();
         let bridge = coco_mcp::bridge::Bridge::new().unwrap();
@@ -3724,38 +3776,31 @@ mod macos {
             coco_mcp::menus::install(cx);
         });
         let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), Some(store))));
-        cx.update(|cx| cx.set_global(coco_mcp::views::settings::Model(state.clone())));
-        // The main window beside it, which has to follow.
-        let main = cx
-            .open_window(size(px(1200.), px(760.)), |window, cx| {
-                let workspace = cx.new(|cx| Workspace::new(state.clone(), window, cx));
-                cx.new(|cx| Root::new(workspace, window, cx))
-            })
-            .unwrap();
+        let main = settings_main(&mut cx, &state);
         let before = cx.update(|cx| cx.windows().len());
-        // The way in from the main window's title bar.
+        // ⌘, before there is a server, so before there is a list to hold
+        // the keyboard.
+        press_in(&mut cx, main, "cmd-,");
+        assert!(sheet_open(&mut cx, main), "⌘, opened it");
+        press_in(&mut cx, main, "escape");
+        assert!(!sheet_open(&mut cx, main), "Esc closed it");
+        open_settings_sheet(&mut cx, main);
+        // The menu's way in, from wherever, keeps the one sheet.
+        cx.update(coco_mcp::menus::open_settings);
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| cx.windows().len()),
+            before,
+            "no window opened"
+        );
         cx.update_window(main.into(), |_, window, cx| {
-            window.render_frame(cx);
-            assert!(window.try_find("open-settings").is_some(), "the button");
-            window.click("open-settings", cx);
-        })
-        .unwrap();
-        assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "opened");
-        cx.update(coco_mcp::views::settings::show);
-        assert_eq!(cx.update(|cx| cx.windows().len()), before + 1, "raised");
-        let handle = cx
-            .update(|cx| {
-                cx.windows()
-                    .into_iter()
-                    .filter_map(|w| w.downcast::<Root>())
-                    .find(|w| w.window_id() != main.window_id())
-            })
-            .expect("the Settings window");
-        cx.update_window(handle.into(), |_, window, cx| {
             window.render_frame(cx);
             for id in [
                 "settings",
+                "settings-overlay",
+                "close-settings",
                 "section-general",
+                "section-gateway",
                 "theme-dark",
                 "theme-light",
                 "names-identifiers",
@@ -3787,7 +3832,7 @@ mod macos {
             ("update-checks", (true, false, true, false)),
             ("update-checks", (true, false, true, true)),
         ] {
-            cx.update_window(handle.into(), |_, window, cx| {
+            cx.update_window(main.into(), |_, window, cx| {
                 window.click(id, cx);
                 window.render_frame(cx);
             })
@@ -3797,19 +3842,19 @@ mod macos {
         // The word beside the switch asks for the same, and the switch has a
         // name a screen reader announces.
         for want in [false, true] {
-            cx.update_window(handle.into(), |_, window, cx| {
+            cx.update_window(main.into(), |_, window, cx| {
                 window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
                 window.render_frame(cx);
             })
             .unwrap();
             assert_eq!(read(&mut cx).3, want, "after the word");
         }
-        cx.update_window(handle.into(), |_, window, _| {
+        cx.update_window(main.into(), |_, window, _| {
             let switch = window.find("update-checks");
             assert_eq!(switch.label(), Some("Update checks"));
         })
         .unwrap();
-        // The View menu's choices, from the Settings window.
+        // The View menu's choices, while the sheet is open.
         for (action, want) in [
             (
                 Box::new(ToggleTheme) as Box<dyn gpui_kit::Action>,
@@ -3817,33 +3862,113 @@ mod macos {
             ),
             (Box::new(ToggleDisplayNames), (false, true, false, true)),
         ] {
-            cx.update_window(handle.into(), |_, window, cx| {
+            cx.update_window(main.into(), |_, window, cx| {
                 window.dispatch_action(action, cx)
             })
             .unwrap();
             cx.run_until_parked();
             assert_eq!(read(&mut cx), want);
         }
-        // The main window follows what was chosen here.
-        cx.update_window(main.into(), |_, window, cx| window.render_frame(cx))
+        let mode = |cx: &mut HeadlessAppContext| cx.update(|cx| state.read(cx).mode);
+        let was = mode(&mut cx);
+        // The window's shortcuts do nothing while the sheet is open, ⌘⏎ (a
+        // dialog's accept, which the sheet has none of) included: no action
+        // of theirs is what a key resolves to.
+        let resolved = std::rc::Rc::new(std::cell::RefCell::new(Vec::<&str>::new()));
+        let _watch = cx.update(|cx| {
+            let resolved = resolved.clone();
+            cx.observe_keystrokes(move |event, _, _| {
+                if let Some(action) = &event.action {
+                    resolved.borrow_mut().push(action.name());
+                }
+            })
+        });
+        let response = |cx: &mut HeadlessAppContext| cx.update(|cx| state.read(cx).response_open);
+        let response_was = response(&mut cx);
+        for keys in ["cmd-2", "cmd-enter", "cmd-shift-a"] {
+            press_in(&mut cx, main, keys);
+        }
+        assert_eq!(mode(&mut cx), was, "inert under the sheet");
+        assert_eq!(response(&mut cx), response_was, "⌘⇧A inert too");
+        for name in [ShowResources.name(), Call.name(), ToggleResponse.name()] {
+            assert!(
+                !resolved.borrow().contains(&name),
+                "{name} ran under the sheet: {:?}",
+                resolved.borrow()
+            );
+        }
+        // Esc closes it, and the same shortcut works again.
+        press_in(&mut cx, main, "escape");
+        assert!(!sheet_open(&mut cx, main), "Esc closed it");
+        press_in(&mut cx, main, "cmd-2");
+        assert_eq!(mode(&mut cx), Mode::Resources, "the keyboard is back");
+        // The × closes it too.
+        open_settings_sheet(&mut cx, main);
+        cx.update_window(main.into(), |_, window, cx| {
+            window.click("close-settings", cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("settings").is_none(), "the × closed it");
+        })
+        .unwrap();
+        // From About in front, Settings opens over the main window, and the
+        // View menu's theme still answers.
+        cx.update(coco_mcp::menus::open_about);
+        let about = cx
+            .update(|cx| {
+                cx.windows()
+                    .into_iter()
+                    .filter_map(|w| w.downcast::<Root>())
+                    .find(|w| w.window_id() != main.window_id())
+            })
+            .expect("the About window");
+        let dark = read(&mut cx).0;
+        for action in [
+            Box::new(ToggleTheme) as Box<dyn gpui_kit::Action>,
+            Box::new(OpenSettings),
+        ] {
+            cx.update_window(about.into(), |_, window, cx| {
+                window.dispatch_action(action, cx)
+            })
             .unwrap();
+            cx.run_until_parked();
+        }
+        assert_eq!(read(&mut cx).0, !dark, "the theme, from About");
+        assert!(sheet_open(&mut cx, main), "Settings, from About");
+        // The palette asked for over the sheet takes its place.
+        cx.update_window(main.into(), |_, window, cx| {
+            window.dispatch_action(Box::new(CommandPalette), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(!sheet_open(&mut cx, main), "the palette closed it");
+        cx.update_window(main.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("command-palette").is_some(), "the palette");
+        })
+        .unwrap();
+        press_in(&mut cx, main, "escape");
         cx.update(|cx| {
             state.update(cx, |s, cx| {
                 s.set_dark(true, cx);
-                s.set_display_names(true, cx)
+                s.set_display_names(true, cx);
+                s.set_mode(was, cx);
             });
             coco_mcp::theme::set_dark(true, None, cx);
         });
-        snap(&mut cx, handle, "74-settings");
+        open_settings_sheet(&mut cx, main);
+        snap(&mut cx, main, "74-settings");
     }
 
     /// The Gateway section, with the gateway off, over the demo's servers.
-    fn settings_gateway_window() {
+    fn settings_gateway_sheet() {
         let mut cx = context();
         let state = cx.update(|cx| cx.new(|_| demo_state(true)));
-        let handle = cx
-            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
-            .expect("Settings window opens");
+        let main = settings_main(&mut cx, &state);
+        open_settings_sheet(&mut cx, main);
         let ids: Vec<String> = cx.update(|cx| {
             let s = state.read(cx);
             s.servers.iter().map(|s| s.record.id.clone()).collect()
@@ -3861,8 +3986,7 @@ mod macos {
                     .map(|(_, p)| p.on)
             })
         };
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.render_frame(cx);
+        cx.update_window(main.into(), |_, window, cx| {
             window.click("section-gateway", cx);
             window.render_frame(cx);
             for id in ["gateway", "gateway-port"] {
@@ -3885,7 +4009,7 @@ mod macos {
         let was = included(&mut cx, &first).expect("the server is planned");
         let others: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
         for want in [!was, was] {
-            cx.update_window(handle.into(), |_, window, cx| {
+            cx.update_window(main.into(), |_, window, cx| {
                 window.click(
                     gpui_kit::SharedString::from(format!("included-{first}")),
                     cx,
@@ -3897,13 +4021,34 @@ mod macos {
             let now: Vec<_> = ids[1..].iter().map(|id| included(&mut cx, id)).collect();
             assert_eq!(now, others, "no other server's switch moved");
         }
-        snap(&mut cx, handle, "75-settings-gateway");
+        snap(&mut cx, main, "75-settings-gateway");
+        // Closed, the keyboard goes back to the list.
+        press_in(&mut cx, main, "escape");
+        press_in(&mut cx, main, "cmd-2");
+        let mode = cx.update(|cx| state.read(cx).mode);
+        assert_eq!(mode, coco_mcp::state::Mode::Resources, "the list has it");
+        // With the log zoomed over the columns there is no list: the
+        // window takes the keyboard, and ⌘⇧J still answers.
+        cx.update(|cx| {
+            state.update(cx, |s, cx| {
+                s.drawer_open = true;
+                s.drawer_zoomed = true;
+                cx.notify();
+            })
+        });
+        open_settings_sheet(&mut cx, main);
+        press_in(&mut cx, main, "escape");
+        press_in(&mut cx, main, "cmd-shift-j");
+        assert!(
+            !cx.update(|cx| state.read(cx).drawer_zoomed),
+            "⌘⇧J answered"
+        );
     }
 
     /// Update checks that the environment turned off: neither the switch
     /// nor the word beside it changes anything. The switch does not report
     /// a disabled flag to the test support, so that is the proof.
-    fn settings_env_off_window() {
+    fn settings_env_off_sheet() {
         use coco_mcp::update::Update;
         use coco_update::{Channel, State};
 
@@ -3916,14 +4061,12 @@ mod macos {
             )
         });
         let state = cx.update(|cx| cx.new(|_| AppState::new(Some(bridge), None)));
-        let handle = cx
-            .update(|cx| coco_mcp::views::settings::open(&state, None, cx))
-            .expect("Settings window opens");
+        let main = settings_main(&mut cx, &state);
+        open_settings_sheet(&mut cx, main);
         let checks = |cx: &mut HeadlessAppContext| cx.update(|cx| coco_mcp::update::checks(cx));
         let (was, env_off) = checks(&mut cx);
         assert!(env_off, "the environment turned them off");
-        cx.update_window(handle.into(), |_, window, cx| {
-            window.render_frame(cx);
+        cx.update_window(main.into(), |_, window, cx| {
             window.click("update-checks", cx);
             window.click((gpui_kit::ElementId::from("update-checks"), "word"), cx);
             window.render_frame(cx);
@@ -4347,8 +4490,8 @@ mod macos {
         about_window(true, "24-about");
         about_window(false, "25-about-light");
         settings_flow();
-        settings_gateway_window();
-        settings_env_off_window();
+        settings_gateway_sheet();
+        settings_env_off_sheet();
         log_agent_rows();
         history_agent_calls();
         update_notice_flow();

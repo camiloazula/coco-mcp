@@ -98,7 +98,6 @@ pub fn run() -> anyhow::Result<()> {
                 state.secrets = std::sync::Arc::new(mcp_auth::KeyringStore::default());
                 state
             });
-            cx.set_global(views::settings::Model(state.clone()));
             // The gateway runs while the app is open, when it was left on.
             state.update(cx, |s, cx| {
                 if s.gateway_wanted() {

@@ -23,6 +23,8 @@ use crate::views::Workspace;
 impl Workspace {
     /// Open the palette (creating its state on first use) and focus its query.
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Asked for over the Settings sheet (from the menu), it takes its place.
+        self.close_settings(window, cx);
         let state = match &self.palette {
             Some(state) => state.clone(),
             None => {
@@ -45,7 +47,7 @@ impl Workspace {
     pub fn close_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette_open {
             self.palette_open = false;
-            window.focus(&self.list_focus, cx);
+            window.focus(&self.home_focus(cx), cx);
             cx.notify();
         }
     }
