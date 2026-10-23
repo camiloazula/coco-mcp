@@ -8,7 +8,7 @@
 
 use gpui_kit::component::Root;
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
-use gpui_kit::{App, Global, Menu, MenuItem, OsAction, WindowHandle};
+use gpui_kit::{App, Context, Entity, Global, Menu, MenuItem, OsAction, WindowHandle};
 use mcp_core::{AuthRef, ServerSpec};
 
 use crate::APP_NAME;
@@ -21,7 +21,7 @@ use crate::actions::{
     ToggleResponse, ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{AppState, Status};
-use crate::views::about;
+use crate::views::{Workspace, about};
 
 /// The About window, while one is open.
 #[derive(Debug, Default)]
@@ -34,6 +34,37 @@ pub fn open_about(cx: &mut App) {
     let existing = cx.try_global::<AboutWindow>().and_then(|w| w.0);
     if let Some(handle) = about::open(existing.as_ref(), cx) {
         cx.global_mut::<AboutWindow>().0 = Some(handle);
+    }
+}
+
+/// The main window and its workspace. Not found while that window is the
+/// one being updated: GPUI takes it out meanwhile.
+fn main_window(cx: &App) -> Option<(WindowHandle<Root>, Entity<Workspace>)> {
+    cx.windows()
+        .into_iter()
+        .filter_map(|w| w.downcast::<Root>())
+        .find_map(|w| {
+            let view = w.read(cx).ok()?.view().clone();
+            Some((w, view.downcast::<Workspace>().ok()?))
+        })
+}
+
+/// Change the main window's model, which every window reads.
+fn with_model(cx: &mut App, change: impl FnOnce(&mut AppState, &mut Context<AppState>)) {
+    if let Some((_, workspace)) = main_window(cx) {
+        let state = workspace.read(cx).state.clone();
+        state.update(cx, change);
+    }
+}
+
+/// Settings asked for from a window that does not answer it, such as About:
+/// the sheet opens over the main window, which comes to the front.
+pub fn open_settings(cx: &mut App) {
+    if let Some((handle, workspace)) = main_window(cx) {
+        let _ = handle.update(cx, |_, window, cx| {
+            window.activate_window();
+            workspace.update(cx, |ws, cx| ws.open_settings(window, cx));
+        });
     }
 }
 
@@ -88,8 +119,26 @@ impl Global for Installed {}
 pub fn install(cx: &mut App) {
     cx.set_global(AboutWindow::default());
     cx.on_action(|_: &About, cx| open_about(cx));
-    cx.on_action(|_: &OpenSettings, cx| crate::views::settings::show(cx));
-    crate::views::settings::install(cx);
+    // Reached when the window in front does not answer these, such as
+    // About, or the main window before anything in it holds the keyboard.
+    // GPUI takes that window out while it dispatches, so they run after.
+    cx.on_action(|_: &OpenSettings, cx| cx.defer(open_settings));
+    cx.on_action(|_: &ToggleTheme, cx| {
+        cx.defer(|cx| {
+            with_model(cx, |s, cx| {
+                let dark = !s.dark;
+                s.set_dark(dark, cx)
+            })
+        })
+    });
+    cx.on_action(|_: &ToggleDisplayNames, cx| {
+        cx.defer(|cx| {
+            with_model(cx, |s, cx| {
+                let on = !s.display_names;
+                s.set_display_names(on, cx)
+            })
+        })
+    });
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::check(true, cx));
     cx.on_action(|_: &ToggleUpdateChecks, cx| crate::update::toggle_checks(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());

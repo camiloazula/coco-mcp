@@ -19,8 +19,8 @@ use crate::actions::{
     AddServer, Call, Cancel, CancelCall, ClearHistory, ClearLog, CommandPalette,
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
-    ExportSnapshot, ForgetCredentials, ImportConfig, Quit, Reconnect, SelectServer, ShowHistory,
-    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
+    ExportSnapshot, ForgetCredentials, ImportConfig, OpenSettings, Quit, Reconnect, SelectServer,
+    ShowHistory, ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
     ToggleResponse, ToggleTheme, WORKSPACE, ZoomLog,
 };
 use crate::state::{AppState, Changed, Gone, Mode, Screen, Status};
@@ -29,10 +29,11 @@ use crate::views::copy::Export;
 use crate::views::kept::Decoded;
 use crate::views::{
     AddServerForm, LogList, RequestUi, banner, confirm_dialog, copy_menu, detail, item_list,
-    log_drawer, palette, request_dialog, sidebar, status_bar, update_notice,
+    log_drawer, palette, request_dialog, settings, sidebar, status_bar, update_notice,
 };
 
 mod render;
+mod sheet;
 mod title_bar;
 
 /// The log drawer's level dropdown.
@@ -74,6 +75,8 @@ pub struct Workspace {
     pub(crate) server_scroll: ScrollHandle,
     /// Focus of the open dialog, which takes the window's keys while open.
     pub(crate) dialog_focus: FocusHandle,
+    /// The Settings sheet while it is open, and what closes it.
+    pub(crate) settings: Option<(Entity<settings::Settings>, Subscription)>,
     /// The server and item last scrolled into view, so a selection moved from
     /// anywhere (a key, the palette, a history row) is followed once.
     followed: (Option<usize>, Option<usize>),
@@ -176,6 +179,7 @@ impl Workspace {
             tree_scrolls: Default::default(),
             server_scroll: ScrollHandle::new(),
             dialog_focus: cx.focus_handle(),
+            settings: None,
             followed: (None, None),
             log_list: LogList::default(),
             collapsed: HashSet::new(),
@@ -302,7 +306,8 @@ impl Workspace {
     }
 
     /// Show the add-server form; render creates and focuses it.
-    pub fn open_add_server(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_settings(window, cx);
         self.state.update(cx, |s, cx| s.show_add_server(cx));
         cx.notify();
     }

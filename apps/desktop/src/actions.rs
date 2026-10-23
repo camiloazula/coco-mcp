@@ -86,7 +86,7 @@ gpui_kit::actions!(
         ExportConfig,
         /// Open the About window (application menu).
         About,
-        /// Open the Settings window (⌘,).
+        /// Open the Settings sheet over the main window (⌘,).
         OpenSettings,
         /// Ask now whether a newer release is out.
         CheckForUpdates,
@@ -115,11 +115,12 @@ pub const ITEM_LIST: &str = "ItemList";
 pub const DIALOG: &str = "Dialog";
 
 /// The window's shortcuts, inert while a dialog is open.
-const WINDOW_SHORTCUTS: [&str; 16] = [
+const WINDOW_SHORTCUTS: [&str; 17] = [
     "cmd-n",
     "cmd-.",
     "cmd-j",
     "cmd-shift-j",
+    "cmd-shift-a",
     "cmd-k",
     "cmd-1",
     "cmd-2",
