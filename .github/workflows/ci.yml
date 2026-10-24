@@ -15,6 +15,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The token only reads the repository; neither job writes to it.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
