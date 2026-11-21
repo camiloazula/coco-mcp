@@ -17,6 +17,7 @@
 mod credentials;
 mod loopback;
 mod oauth;
+mod parts;
 mod secrets;
 
 use std::sync::Arc;

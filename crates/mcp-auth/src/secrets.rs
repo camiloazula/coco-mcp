@@ -1,7 +1,9 @@
 //! Secret storage: the OS keyring in the app, memory in tests.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
+
+use crate::parts;
 
 /// A fresh keyring entry name for one server's credential.
 ///
@@ -22,23 +24,37 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, key: &str) -> std::result::Result<(), String>;
 }
 
+/// How many UTF-16 code units one keyring entry holds. The Windows
+/// Credential Manager takes 2560 bytes (`CRED_MAX_CREDENTIAL_BLOB_SIZE`) and
+/// `keyring` writes text there as UTF-16. The other keyrings have no limit a
+/// credential reaches.
+#[cfg(windows)]
+const ENTRY_UNITS: usize = 1280;
+#[cfg(not(windows))]
+const ENTRY_UNITS: usize = usize::MAX;
+
+/// One keyring operation at a time in this process: a secret kept in parts
+/// is several entries, and a read must not see half of a write.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
 /// The platform keyring (macOS Keychain, Windows Credential Manager,
 /// Secret Service on Linux) through the `keyring` crate.
+///
+/// A secret longer than one entry holds is kept in several (see the `parts`
+/// module), so its length is never why a write fails.
 #[derive(Debug, Clone)]
 pub struct KeyringStore {
-    service: String,
+    entries: Entries,
 }
 
 impl KeyringStore {
     /// Secrets are stored under `service` with the key as the account name.
     pub fn new(service: impl Into<String>) -> Self {
         Self {
-            service: service.into(),
+            entries: Entries {
+                service: service.into(),
+            },
         }
-    }
-
-    fn entry(&self, key: &str) -> std::result::Result<keyring::Entry, String> {
-        keyring::Entry::new(&self.service, key).map_err(|e| e.to_string())
     }
 }
 
@@ -49,6 +65,36 @@ impl Default for KeyringStore {
 }
 
 impl SecretStore for KeyringStore {
+    fn get(&self, key: &str) -> std::result::Result<Option<String>, String> {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        parts::get(&self.entries, key)
+    }
+
+    fn set(&self, key: &str, value: &str) -> std::result::Result<(), String> {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        parts::set(&self.entries, ENTRY_UNITS, key, value)
+    }
+
+    fn delete(&self, key: &str) -> std::result::Result<(), String> {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        parts::delete(&self.entries, key)
+    }
+}
+
+/// The keyring's entries as they are: one secret each, refused when the
+/// platform finds it too long.
+#[derive(Debug, Clone)]
+struct Entries {
+    service: String,
+}
+
+impl Entries {
+    fn entry(&self, key: &str) -> std::result::Result<keyring::Entry, String> {
+        keyring::Entry::new(&self.service, key).map_err(|e| e.to_string())
+    }
+}
+
+impl SecretStore for Entries {
     fn get(&self, key: &str) -> std::result::Result<Option<String>, String> {
         match self.entry(key)?.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -132,5 +178,26 @@ mod tests {
         store.delete("a").unwrap();
         store.delete("a").unwrap();
         assert!(store.is_empty());
+    }
+
+    /// The Credential Manager itself, which is where a long token was lost:
+    /// it refuses an entry over 1280 characters.
+    #[cfg(windows)]
+    #[test]
+    fn the_windows_keyring_holds_a_token_longer_than_one_entry() {
+        let store = KeyringStore::new(format!("coco-mcp-test-{}", uuid::Uuid::now_v7()));
+        let token = "eyJ0b2tlbiI6IvCflJEifQ.".repeat(250);
+        assert!(token.len() > 4 * ENTRY_UNITS);
+        assert!(
+            store.entries.set("refused", &token).is_err(),
+            "one entry still cannot hold it"
+        );
+
+        store.set("server:long", &token).unwrap();
+        assert_eq!(store.get("server:long").unwrap(), Some(token));
+        store.set("server:long", "short").unwrap();
+        assert_eq!(store.get("server:long").unwrap().as_deref(), Some("short"));
+        store.delete("server:long").unwrap();
+        assert_eq!(store.get("server:long").unwrap(), None);
     }
 }

@@ -328,6 +328,12 @@ artifacts, publishing nothing.
 - rmcp's `auth` module covers discovery, RFC 8414 metadata, dynamic client
   registration, PKCE and refresh; `mcp-auth` adds the keyring store, the
   loopback listener and orchestration. `auth_header` takes the bare token.
+- The Windows Credential Manager refuses a secret over 2560 bytes, and
+  `keyring` writes text there as UTF-16: 1280 characters, fewer than many
+  JWTs and OAuth credential sets. `KeyringStore` keeps a longer secret in
+  several entries (`mcp-auth/src/parts.rs`): the entry under the key holds a
+  header naming the parts, `{key}:part:{id}:{n}`. Go through `KeyringStore`,
+  never `keyring::Entry`, or long secrets fail on Windows alone.
 
 ### GPUI / gpui-kit
 
