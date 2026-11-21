@@ -11,7 +11,7 @@ offers. A crate's own copy of its licence, with its copyright line, is in its
 source on crates.io, linked from its row.
 
 Generated from `Cargo.lock` by `just notices` for the targets the release
-builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
+builds; do not edit by hand. Inputs digest `716e45db2aad1939` (what
 `just notices-check` compares).
 
 ## Crates
@@ -49,7 +49,7 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [async-broadcast](https://crates.io/crates/async-broadcast/0.7.2) | 0.7.2 | MIT OR Apache-2.0 |
 | [async-channel](https://crates.io/crates/async-channel/2.5.0) | 2.5.0 | Apache-2.0 OR MIT |
 | [async-compression](https://crates.io/crates/async-compression/0.4.46) | 0.4.46 | MIT OR Apache-2.0 |
-| [async-executor](https://crates.io/crates/async-executor/1.14.0) | 1.14.0 | Apache-2.0 OR MIT |
+| [async-executor](https://crates.io/crates/async-executor/1.14.1) | 1.14.1 | Apache-2.0 OR MIT |
 | [async-fs](https://crates.io/crates/async-fs/2.2.0) | 2.2.0 | Apache-2.0 OR MIT |
 | [async-io](https://crates.io/crates/async-io/2.6.0) | 2.6.0 | Apache-2.0 OR MIT |
 | [async-lock](https://crates.io/crates/async-lock/3.4.2) | 3.4.2 | Apache-2.0 OR MIT |
@@ -341,7 +341,7 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [libc](https://crates.io/crates/libc/0.2.189) | 0.2.189 | MIT OR Apache-2.0 |
 | [libloading](https://crates.io/crates/libloading/0.8.9) | 0.8.9 | ISC |
 | [libm](https://crates.io/crates/libm/0.2.16) | 0.2.16 | MIT |
-| [libsqlite3-sys](https://crates.io/crates/libsqlite3-sys/0.38.2) | 0.38.2 | MIT |
+| [libsqlite3-sys](https://crates.io/crates/libsqlite3-sys/0.39.1) | 0.39.1 | MIT |
 | [linebender_resource_handle](https://crates.io/crates/linebender_resource_handle/0.1.1) | 0.1.1 | Apache-2.0 OR MIT |
 | [link-section](https://crates.io/crates/link-section/0.19.3) | 0.19.3 | Apache-2.0 OR MIT |
 | [linktime-proc-macro](https://crates.io/crates/linktime-proc-macro/0.2.3) | 0.2.3 | Apache-2.0 OR MIT |
@@ -502,12 +502,12 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [resvg](https://crates.io/crates/resvg/0.45.1) | 0.45.1 | Apache-2.0 OR MIT |
 | [resvg](https://crates.io/crates/resvg/0.46.0) | 0.46.0 | Apache-2.0 OR MIT |
 | [rgb](https://crates.io/crates/rgb/0.8.53) | 0.8.53 | MIT |
-| [rmcp](https://crates.io/crates/rmcp/3.4.0) | 3.4.0 | Apache-2.0 |
+| [rmcp](https://crates.io/crates/rmcp/3.11.0) | 3.11.0 | Apache-2.0 |
 | [ropey](https://crates.io/crates/ropey/2.0.0-beta.1) | 2.0.0-beta.1 | MIT OR Apache-2.0 |
 | [roxmltree](https://crates.io/crates/roxmltree/0.20.0) | 0.20.0 | MIT OR Apache-2.0 |
 | [roxmltree](https://crates.io/crates/roxmltree/0.21.1) | 0.21.1 | MIT OR Apache-2.0 |
-| [rusqlite](https://crates.io/crates/rusqlite/0.40.2) | 0.40.2 | MIT |
-| [rusqlite_migration](https://crates.io/crates/rusqlite_migration/2.6.0) | 2.6.0 | Apache-2.0 |
+| [rusqlite](https://crates.io/crates/rusqlite/0.41.1) | 0.41.1 | MIT |
+| [rusqlite_migration](https://crates.io/crates/rusqlite_migration/2.7.0) | 2.7.0 | Apache-2.0 |
 | [rust-embed](https://crates.io/crates/rust-embed/8.12.0) | 8.12.0 | MIT |
 | [rust-embed-impl](https://crates.io/crates/rust-embed-impl/8.12.0) | 8.12.0 | MIT |
 | [rust-embed-utils](https://crates.io/crates/rust-embed-utils/8.12.0) | 8.12.0 | MIT |
@@ -655,6 +655,7 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [unicode-id](https://crates.io/crates/unicode-id/0.3.6) | 0.3.6 | MIT OR Apache-2.0 |
 | [unicode-ident](https://crates.io/crates/unicode-ident/1.0.24) | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | [unicode-linebreak](https://crates.io/crates/unicode-linebreak/0.1.5) | 0.1.5 | Apache-2.0 |
+| [unicode-normalization](https://crates.io/crates/unicode-normalization/0.1.26) | 0.1.26 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | [unicode-properties](https://crates.io/crates/unicode-properties/0.1.4) | 0.1.4 | MIT OR Apache-2.0 |
 | [unicode-script](https://crates.io/crates/unicode-script/0.5.8) | 0.5.8 | MIT OR Apache-2.0 |
 | [unicode-segmentation](https://crates.io/crates/unicode-segmentation/1.13.3) | 1.13.3 | MIT OR Apache-2.0 |
@@ -696,22 +697,18 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [which](https://crates.io/crates/which/8.0.6) | 8.0.6 | MIT |
 | [winapi](https://crates.io/crates/winapi/0.3.9) | 0.3.9 | MIT OR Apache-2.0 |
 | [winapi-util](https://crates.io/crates/winapi-util/0.1.11) | 0.1.11 | Unlicense OR MIT |
-| [windows](https://crates.io/crates/windows/0.57.0) | 0.57.0 | MIT OR Apache-2.0 |
 | [windows](https://crates.io/crates/windows/0.58.0) | 0.58.0 | MIT OR Apache-2.0 |
 | [windows](https://crates.io/crates/windows/0.61.3) | 0.61.3 | MIT OR Apache-2.0 |
 | [windows](https://crates.io/crates/windows/0.62.2) | 0.62.2 | MIT OR Apache-2.0 |
 | [windows-collections](https://crates.io/crates/windows-collections/0.2.0) | 0.2.0 | MIT OR Apache-2.0 |
 | [windows-collections](https://crates.io/crates/windows-collections/0.3.2) | 0.3.2 | MIT OR Apache-2.0 |
-| [windows-core](https://crates.io/crates/windows-core/0.57.0) | 0.57.0 | MIT OR Apache-2.0 |
 | [windows-core](https://crates.io/crates/windows-core/0.58.0) | 0.58.0 | MIT OR Apache-2.0 |
 | [windows-core](https://crates.io/crates/windows-core/0.61.2) | 0.61.2 | MIT OR Apache-2.0 |
 | [windows-core](https://crates.io/crates/windows-core/0.62.2) | 0.62.2 | MIT OR Apache-2.0 |
 | [windows-future](https://crates.io/crates/windows-future/0.2.1) | 0.2.1 | MIT OR Apache-2.0 |
 | [windows-future](https://crates.io/crates/windows-future/0.3.2) | 0.3.2 | MIT OR Apache-2.0 |
-| [windows-implement](https://crates.io/crates/windows-implement/0.57.0) | 0.57.0 | MIT OR Apache-2.0 |
 | [windows-implement](https://crates.io/crates/windows-implement/0.58.0) | 0.58.0 | MIT OR Apache-2.0 |
 | [windows-implement](https://crates.io/crates/windows-implement/0.60.2) | 0.60.2 | MIT OR Apache-2.0 |
-| [windows-interface](https://crates.io/crates/windows-interface/0.57.0) | 0.57.0 | MIT OR Apache-2.0 |
 | [windows-interface](https://crates.io/crates/windows-interface/0.58.0) | 0.58.0 | MIT OR Apache-2.0 |
 | [windows-interface](https://crates.io/crates/windows-interface/0.59.3) | 0.59.3 | MIT OR Apache-2.0 |
 | [windows-link](https://crates.io/crates/windows-link/0.1.3) | 0.1.3 | MIT OR Apache-2.0 |
@@ -720,7 +717,6 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [windows-numerics](https://crates.io/crates/windows-numerics/0.2.0) | 0.2.0 | MIT OR Apache-2.0 |
 | [windows-numerics](https://crates.io/crates/windows-numerics/0.3.1) | 0.3.1 | MIT OR Apache-2.0 |
 | [windows-registry](https://crates.io/crates/windows-registry/0.6.1) | 0.6.1 | MIT OR Apache-2.0 |
-| [windows-result](https://crates.io/crates/windows-result/0.1.2) | 0.1.2 | MIT OR Apache-2.0 |
 | [windows-result](https://crates.io/crates/windows-result/0.2.0) | 0.2.0 | MIT OR Apache-2.0 |
 | [windows-result](https://crates.io/crates/windows-result/0.3.4) | 0.3.4 | MIT OR Apache-2.0 |
 | [windows-result](https://crates.io/crates/windows-result/0.4.1) | 0.4.1 | MIT OR Apache-2.0 |
@@ -729,7 +725,6 @@ builds; do not edit by hand. Inputs digest `a1dbdfdfb5c4e5dd` (what
 | [windows-strings](https://crates.io/crates/windows-strings/0.5.1) | 0.5.1 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.48.0) | 0.48.0 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.52.0) | 0.52.0 | MIT OR Apache-2.0 |
-| [windows-sys](https://crates.io/crates/windows-sys/0.59.0) | 0.59.0 | MIT OR Apache-2.0 |
 | [windows-sys](https://crates.io/crates/windows-sys/0.61.2) | 0.61.2 | MIT OR Apache-2.0 |
 | [windows-targets](https://crates.io/crates/windows-targets/0.48.5) | 0.48.5 | MIT OR Apache-2.0 |
 | [windows-targets](https://crates.io/crates/windows-targets/0.52.6) | 0.52.6 | MIT OR Apache-2.0 |
@@ -838,7 +833,7 @@ Crates under it:
 - async-broadcast 0.7.2
 - async-channel 2.5.0
 - async-compression 0.4.46
-- async-executor 1.14.0
+- async-executor 1.14.1
 - async-fs 2.2.0
 - async-io 2.6.0
 - async-lock 3.4.2
@@ -1175,11 +1170,11 @@ Crates under it:
 - reqwest 0.13.5
 - resvg 0.45.1
 - resvg 0.46.0
-- rmcp 3.4.0
+- rmcp 3.11.0
 - ropey 2.0.0-beta.1
 - roxmltree 0.20.0
 - roxmltree 0.21.1
-- rusqlite_migration 2.6.0
+- rusqlite_migration 2.7.0
 - rustc-demangle 0.1.28
 - rustc-hash 1.1.0
 - rustc-hash 2.1.3
@@ -1275,6 +1270,7 @@ Crates under it:
 - unicode-id 0.3.6
 - unicode-ident 1.0.24
 - unicode-linebreak 0.1.5
+- unicode-normalization 0.1.26
 - unicode-properties 0.1.4
 - unicode-script 0.5.8
 - unicode-segmentation 1.13.3
@@ -1301,22 +1297,18 @@ Crates under it:
 - wgpu-naga-bridge 29.0.4
 - wgpu-types 29.0.4
 - winapi 0.3.9
-- windows 0.57.0
 - windows 0.58.0
 - windows 0.61.3
 - windows 0.62.2
 - windows-collections 0.2.0
 - windows-collections 0.3.2
-- windows-core 0.57.0
 - windows-core 0.58.0
 - windows-core 0.61.2
 - windows-core 0.62.2
 - windows-future 0.2.1
 - windows-future 0.3.2
-- windows-implement 0.57.0
 - windows-implement 0.58.0
 - windows-implement 0.60.2
-- windows-interface 0.57.0
 - windows-interface 0.58.0
 - windows-interface 0.59.3
 - windows-link 0.1.3
@@ -1325,7 +1317,6 @@ Crates under it:
 - windows-numerics 0.2.0
 - windows-numerics 0.3.1
 - windows-registry 0.6.1
-- windows-result 0.1.2
 - windows-result 0.2.0
 - windows-result 0.3.4
 - windows-result 0.4.1
@@ -1334,7 +1325,6 @@ Crates under it:
 - windows-strings 0.5.1
 - windows-sys 0.48.0
 - windows-sys 0.52.0
-- windows-sys 0.59.0
 - windows-sys 0.61.2
 - windows-targets 0.48.5
 - windows-targets 0.52.6
@@ -1727,7 +1717,7 @@ Crates under it:
 - jsonschema-regex 0.56.0
 - jsonschema-value 0.56.0
 - libm 0.2.16
-- libsqlite3-sys 0.38.2
+- libsqlite3-sys 0.39.1
 - lsp-types 0.97.0
 - malloc_buf 0.0.6
 - markdown 1.0.0
@@ -1769,7 +1759,7 @@ Crates under it:
 - reborrow 0.5.5
 - referencing 0.56.0
 - rgb 0.8.53
-- rusqlite 0.40.2
+- rusqlite 0.41.1
 - rust-embed 8.12.0
 - rust-embed-impl 8.12.0
 - rust-embed-utils 8.12.0
@@ -2271,6 +2261,7 @@ Crates under it:
 - potential_utf 0.1.6
 - tinystr 0.8.4
 - unicode-ident 1.0.24
+- unicode-normalization 0.1.26
 - writeable 0.6.4
 - yoke 0.8.3
 - yoke-derive 0.8.2

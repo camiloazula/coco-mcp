@@ -27,7 +27,7 @@ gpui-kit = { version = "=0.6.1", default-features = false, features = ["componen
 gpui = { package = "gpui-pre", version = "=0.3.2", default-features = false }
 
 # --- MCP ---
-rmcp = { version = "3.4", default-features = false }
+rmcp = { version = "3.9", default-features = false }
 
 # --- async ---
 tokio = { version = "1.53", default-features = false }
@@ -40,8 +40,8 @@ schemars = "1.2"
 jsonschema = { version = "0.56", default-features = false }
 
 # --- storage / secrets ---
-rusqlite = { version = "0.40", features = ["bundled"] }
-rusqlite_migration = "2.6"
+rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite_migration = "2.7"
 keyring = "4.2"
 
 # --- auth / http ---
