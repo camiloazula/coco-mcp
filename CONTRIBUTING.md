@@ -151,13 +151,13 @@ two modes. These rules keep it that way.
 
 | Concern | Crate | Version | Licence | Notes |
 |---|---|---|---|---|
-| MCP protocol, transports | `rmcp` | 3.3 | Apache-2.0 | Client (`mcp-core`): `client`, `transport-child-process`, `transport-streamable-http-client-reqwest`, `reqwest`, `auth`, `elicitation`; `mcp-auth` uses `client`, `auth`, `reqwest`, `transport-streamable-http-client-reqwest`. Mock server: `server`, `macros`, `schemars`, `transport-io`, `elicitation`, `transport-streamable-http-server`. |
+| MCP protocol, transports | `rmcp` | 3.9 | Apache-2.0 | Client (`mcp-core`): `client`, `transport-child-process`, `transport-streamable-http-client-reqwest`, `reqwest`, `auth`, `elicitation`; `mcp-auth` uses `client`, `auth`, `reqwest`, `transport-streamable-http-client-reqwest`. Mock server: `server`, `macros`, `schemars`, `transport-io`, `elicitation`, `transport-streamable-http-server`. |
 | UI engine | `gpui` = `gpui-pre` | **=0.3.2** | Apache-2.0 | The revision gpui-kit 0.6.1 resolves. Never float. |
 | Widgets | `gpui-kit` | **=0.6.1** | Apache-2.0 | Features `component`, `assets`, `tree-sitter`. `gpui_kit::*` is GPUI; `gpui_kit::component::*` the widget layer. |
 | Async runtime | `tokio` | 1.53 | MIT | Multi-thread runtime on a background thread; bridged to GPUI via channels. |
 | Serialization | `serde`, `serde_json` | 1 | MIT/Apache-2.0 | `preserve_order` so unknown spec fields survive. |
 | JSON Schema | `jsonschema` | 0.56 | MIT | Validation only. `schemars` 1.2 for our own types. |
-| Storage | `rusqlite` (`bundled`) | 0.40 | MIT | `rusqlite_migration` 2.6. |
+| Storage | `rusqlite` (`bundled`) | 0.41 | MIT | `rusqlite_migration` 2.7. |
 | Secrets | `keyring` | 4.2 | MIT/Apache-2.0 | Never write secrets to SQLite or logs. |
 | OAuth 2.1 | via `rmcp` `auth` | | | `axum` 0.8 loopback listener, `open` 5.4 opens the browser. |
 | HTTP client | `reqwest` | 0.13 | MIT/Apache-2.0 | rustls only; `openssl-sys`/`native-tls` banned. |
