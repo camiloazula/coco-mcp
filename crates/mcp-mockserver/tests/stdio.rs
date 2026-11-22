@@ -177,23 +177,75 @@ async fn schema_flag_accepts_an_equals_sign() {
     assert!(snap.instructions.as_deref().unwrap().contains("schema v2"));
 }
 
-#[tokio::test]
-async fn bad_arguments_fail_initialize_with_failed_state() {
+/// The mock server started with an argument it refuses: it says why on
+/// stderr and exits.
+fn refused() -> ServerSpec {
     let ServerSpec::Stdio { command, .. } = spec("v1") else {
         unreachable!()
     };
-    let err = Session::connect(
-        ServerSpec::Stdio {
-            command,
-            args: vec!["--bogus".into()],
-            env: Default::default(),
-            cwd: None,
-        },
-        SessionOptions::default(),
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(err, mcp_core::Error::Initialize(_)), "{err}");
+    ServerSpec::Stdio {
+        command,
+        args: vec!["--bogus".into()],
+        env: Default::default(),
+        cwd: None,
+    }
+}
+
+/// What a connect with the handshake says of a server that exited while
+/// starting.
+const EXITED_WHILE_STARTING: &str =
+    "the server closed the connection before answering the initialize request";
+
+#[tokio::test]
+async fn bad_arguments_fail_initialize_with_failed_state() {
+    // The process exits before or after the first request is written, as
+    // timing has it: either way the start failed, in the same words.
+    let err = Session::connect(refused(), SessionOptions::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, mcp_core::Error::Initialize(why) if why == EXITED_WHILE_STARTING),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_server_gone_before_the_first_request_failed_its_start() {
+    use tokio::io::AsyncReadExt;
+    let ServerSpec::Stdio { command, args, .. } = refused() else {
+        unreachable!()
+    };
+    for (protocol, words) in [
+        (ProtocolMode::Legacy, EXITED_WHILE_STARTING),
+        (
+            ProtocolMode::Modern,
+            "the server closed the connection before answering server/discover",
+        ),
+        (
+            ProtocolMode::Auto,
+            "the server closed the connection before answering server/discover",
+        ),
+    ] {
+        let (transport, stderr) =
+            mcp_core::transport::spawn_stdio(&command, &args, &Default::default(), None).unwrap();
+        // Its stderr ends as the process exits, so the first request is
+        // written once the server is gone, or all but: the order
+        // `Session::connect` only meets on a busy machine.
+        let mut said = String::new();
+        stderr.unwrap().read_to_string(&mut said).await.unwrap();
+        assert!(said.contains("--bogus"), "{said}");
+        let options = SessionOptions {
+            protocol,
+            ..SessionOptions::default()
+        };
+        let err = Session::connect_with_transport(refused(), transport, options)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, mcp_core::Error::Initialize(why) if why == words),
+            "{protocol:?}: {err}"
+        );
+    }
 }
 
 #[tokio::test]

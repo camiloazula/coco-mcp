@@ -451,9 +451,9 @@ impl Session {
                     // reason for the failure reaches the log.
                     let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
                 }
-                // A transport that never carried the first request is a
-                // server that could not be reached, not one that answered
-                // the start badly or went away during it.
+                // Only a server that could not be reached is a transport
+                // error. One that answered the start badly, or went away
+                // during it, was there and did not start.
                 return Err(match auth {
                     Some(challenge) => Error::AuthRequired { challenge },
                     None if lifecycle::reached(&error) => Error::Initialize(detail),
