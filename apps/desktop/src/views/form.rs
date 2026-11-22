@@ -170,6 +170,8 @@ impl ToolForm {
     pub fn render_raw(&self, cx: &Context<Self>) -> AnyElement {
         let t = *tokens(cx);
         div()
+            .id("raw-editor")
+            .key_context(crate::actions::CODE_EDITOR)
             .flex_1()
             .min_h_0()
             .rounded(px(3.))
@@ -184,6 +186,7 @@ impl ToolForm {
                     .appearance(false)
                     .bordered(false),
             )
+            .test_support()
             .into_any_element()
     }
 

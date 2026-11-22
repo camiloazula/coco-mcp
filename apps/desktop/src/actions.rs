@@ -26,6 +26,9 @@ gpui_kit::actions!(
         ZoomLog,
         /// Clear the log drawer.
         ClearLog,
+        /// Put the keyboard in the log drawer's text filter, showing the
+        /// drawer first when it is hidden (⌘F).
+        FilterLog,
         /// Show or hide the response panel's body (⌘⇧A).
         ToggleResponse,
         /// Open the command palette (⌘K).
@@ -113,13 +116,21 @@ pub const SERVER_LIST: &str = "ServerList";
 pub const ITEM_LIST: &str = "ItemList";
 /// Key context of an open dialog, which takes the keyboard from the window.
 pub const DIALOG: &str = "Dialog";
+/// Key context around a code editor, which has a search of its own on ⌘F.
+pub const CODE_EDITOR: &str = "CodeEditor";
+/// Where ⌘F is the log's filter although a text field has the keyboard:
+/// gpui-kit binds the key to a field's own search and a field without one
+/// keeps it, so the window's binding is never reached from inside a field.
+/// A code editor keeps its search, and a dialog's field gets nothing.
+const FIELD_OUTSIDE_EDITOR_AND_DIALOG: &str = "Input && !CodeEditor && !Dialog";
 
 /// The window's shortcuts, inert while a dialog is open.
-const WINDOW_SHORTCUTS: [&str; 17] = [
+const WINDOW_SHORTCUTS: [&str; 18] = [
     "cmd-n",
     "cmd-.",
     "cmd-j",
     "cmd-shift-j",
+    "cmd-f",
     "cmd-shift-a",
     "cmd-k",
     "cmd-1",
@@ -152,6 +163,8 @@ pub fn bind(cx: &mut App) {
             KeyBinding::new("escape", Cancel, Some(WORKSPACE)),
             KeyBinding::new("cmd-j", ToggleLog, Some(WORKSPACE)),
             KeyBinding::new("cmd-shift-j", ZoomLog, Some(WORKSPACE)),
+            KeyBinding::new("cmd-f", FilterLog, Some(WORKSPACE)),
+            KeyBinding::new("cmd-f", FilterLog, Some(FIELD_OUTSIDE_EDITOR_AND_DIALOG)),
             KeyBinding::new("cmd-shift-a", ToggleResponse, Some(WORKSPACE)),
             KeyBinding::new("cmd-k", CommandPalette, Some(WORKSPACE)),
             KeyBinding::new("cmd-1", ShowTools, Some(WORKSPACE)),

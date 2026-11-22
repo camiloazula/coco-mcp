@@ -18,15 +18,17 @@ use gpui_kit::{
 use crate::clip;
 use crate::features::{Availability, DEPRECATED, Feature};
 use crate::state::{Dir, LogFilter, LogRow};
-use crate::theme::tokens;
+use crate::theme::{Tokens, tokens};
 use crate::views::json::{Fit, json_tree};
 use crate::views::log_list::{LogView, fold_prefix};
 use crate::views::log_menu::row_entries;
 use crate::views::{Workspace, mono};
 
 mod row;
+mod search;
 
 use row::*;
+pub(crate) use search::Hits;
 
 /// The levels the header's dropdown offers. The protocol has eight; these four are the
 /// ones a person switches between while watching a server.
@@ -34,30 +36,19 @@ pub(crate) const LEVEL_CHOICES: [&str; 4] = ["debug", "info", "warning", "error"
 
 /// The 28px header row: chevron, "Log", count, and at the right the zoom and
 /// show/hide buttons, with the filters, the level and Clear while open.
-pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+pub fn header(ws: &Workspace, window: &Window, cx: &mut Context<Workspace>) -> AnyElement {
     let t = *tokens(cx);
     let state = ws.state.read(cx);
     let open = state.drawer_open;
     let zoomed = state.drawer_zoomed;
     let active = state.log_filter;
     let level = state.features().get(Feature::LogLevel);
-    // Messages, not rows: a reconnect's separator was never on the wire.
-    // With a filter on, how many of them pass it.
-    let (shown, total) = state
-        .server()
-        .map(|s| {
-            s.log()
-                .iter()
-                .filter(|row| !row.session_break)
-                .fold((0, 0), |(shown, total), row| {
-                    (shown + usize::from(state.log_row_passes(row)), total + 1)
-                })
-        })
-        .unwrap_or((0, 0));
-    let count = if active == LogFilter::All && state.log_min_level.is_none() {
-        format!("{total} messages")
-    } else {
+    // With a filter on, how many of the messages pass it.
+    let (shown, total) = state.log_counts();
+    let count = if state.log_is_filtered() {
         format!("{shown}/{total} messages")
+    } else {
+        format!("{total} messages")
     };
     let entity = ws.state.clone();
     let clear = ws.state.clone();
@@ -107,7 +98,10 @@ pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
         .tooltip(move |window, cx| Tooltip::new(caption.clone()).build(window, cx))
         .child(Select::new(&ws.log_level).xsmall())
         .test_support();
-    let deprecated = level.is_deprecated().then(|| {
+    // In a window too narrow for it beside the text filter, the note gives
+    // way: the dropdown's caption says the same.
+    let roomy = window.viewport_size().width >= px(search::ROOMY);
+    let deprecated = (level.is_deprecated() && roomy).then(|| {
         div()
             .id("log-level-deprecated")
             .text_size(px(11.))
@@ -161,8 +155,14 @@ pub fn header(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
             ),
         )
         .child("Log")
-        .child(mono(cx, 11., count).text_color(t.muted))
+        .child(
+            mono(cx, 11., count)
+                .id("log-count")
+                .text_color(t.muted)
+                .test_support(),
+        )
         .child(div().flex_1())
+        .when(open, |el| el.child(search::field(ws, cx)))
         .child(
             // One group for the filters, the level, Clear and the two
             // buttons: a click anywhere inside it, including the gaps, must
@@ -213,18 +213,12 @@ pub fn body(ws: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace
     let t = *tokens(cx);
     let state = ws.state.read(cx);
     let server: Option<SharedString> = state.server().map(|s| s.record.id.clone().into());
-    let filter = state.log_filter;
-    let min_level = state.log_min_level;
     ws.log_list.sync(LogView::of(state), ws.collapse_rev);
     if ws.log_list.is_empty() {
-        let text = match (server.is_some(), filter, min_level) {
-            (false, _, _) => "No server selected".to_owned(),
-            (true, LogFilter::All, None) => "No messages yet".to_owned(),
-            (true, filter, None) => format!("No {} messages", filter.label()),
-            (true, LogFilter::All, Some(level)) => format!("No messages at {level} or above"),
-            (true, filter, Some(level)) => {
-                format!("No {} messages at {level} or above", filter.label())
-            }
+        let text = if server.is_some() {
+            search::empty_text(state.log_filter, state.log_min_level, state.log_query())
+        } else {
+            "No server selected".to_owned()
         };
         return v_flex()
             .id("log-body")
@@ -257,9 +251,16 @@ pub fn body(ws: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace
                     });
             match drawn {
                 Some((server, log_ix, r)) => {
-                    let expanded = state.expanded_log.contains(&r.row_id);
-                    let with_agent = state.server().is_some_and(|s| s.log_has_agents());
-                    row(log_ix, r, expanded, server, with_agent, this, cx)
+                    let needle = state.log_needle();
+                    let drawn = Drawn {
+                        ix: log_ix,
+                        row: r,
+                        expanded: state.expanded_log.contains(&r.row_id),
+                        with_agent: state.server().is_some_and(|s| s.log_has_agents()),
+                        needle,
+                        body: this.log_hits.body(server, needle, r),
+                    };
+                    row(drawn, server, this, cx)
                 }
                 None => div().into_any_element(),
             }

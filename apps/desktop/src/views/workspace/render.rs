@@ -118,7 +118,7 @@ impl Render for Workspace {
         let palette = palette::render(self, window, cx);
         let copy_menu = copy_menu::render(cx);
         let update_popover = update_notice::render(cx);
-        let header = log_drawer::header(self, cx);
+        let header = log_drawer::header(self, window, cx);
         let middle: AnyElement = if drawer_open && drawer_zoomed {
             // The drawer alone between the title bar and the status bar; the
             // columns keep their state and come back at the same sizes.
@@ -175,6 +175,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ClearLog, _, cx| {
                 this.state.update(cx, |s, cx| s.clear_log(cx));
             }))
+            .on_action(cx.listener(Self::on_filter_log))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
                 let dark = !this.state.read(cx).dark;
                 this.state.update(cx, |s, cx| s.set_dark(dark, cx));

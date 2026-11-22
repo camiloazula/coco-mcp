@@ -425,7 +425,7 @@ pub fn log_level_filter_flow() {
     live.wait("both messages are logged", move |s| {
         shown(s, "chatty") && shown(s, "disk full")
     });
-    live.ui(|window, cx| window.click("log-header", cx));
+    live.ui(|window, cx| window.click("toggle-log", cx));
     live.cx.update(|cx| {
         live.state
             .update(cx, |s, cx| s.choose_log_level(Some("error"), cx))
@@ -563,6 +563,106 @@ pub fn log_zoom_flow() {
     live.ui(|window, cx| window.click("toggle-log", cx));
     live.wait("shown at its height", |s| s.drawer_open && !s.drawer_zoomed);
     live.ui(|window, _| assert!(window.try_find("add-server").is_some()));
+}
+
+/// The drawer's text filter: ⌘F shows the drawer and takes the keyboard to
+/// the field, typing hides the rows without the text and marks it in the
+/// ones left, the field's button shows every row again, Esc neither empties
+/// the field nor hides the drawer, and a narrow window keeps the header's
+/// buttons.
+pub fn log_text_filter_flow() {
+    let mut live = live(&["--schema", "v1"], None);
+    live.call("echo", json!({"text": "Find Me in the log"}));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
+    let total = live.cx.update(|cx| live.state.read(cx).visible_log().len());
+
+    // ⌘F on a hidden drawer shows it and puts the keyboard in the field.
+    live.ui(|window, cx| window.press("cmd-f", cx));
+    live.wait("shown", |s| s.drawer_open);
+    live.ui(|window, cx| window.input("find me", cx));
+    live.wait("filtered", |s| s.log_query() == "find me");
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        let log = s.servers[0].log();
+        let shown = s.visible_log();
+        assert!(!shown.is_empty() && shown.len() < total, "{shown:?}");
+        assert!(
+            shown.iter().all(|&ix| log[ix].method == "tools/call"),
+            "the call and its answer carry the text"
+        );
+        assert_eq!(s.log_counts(), (shown.len(), total));
+    });
+    snap(&mut live.cx, live.handle, "78-log-text-filter");
+
+    // Esc leaves the text and the drawer.
+    live.ui(|window, cx| window.press("escape", cx));
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert!(s.drawer_open, "Esc leaves the drawer");
+        assert_eq!(s.log_query(), "find me", "and the filter");
+    });
+
+    // ⌘F takes the keyboard from another field, which would keep the key
+    // for a search it does not have; text no row has empties the drawer,
+    // which says what it looked for.
+    live.ui(|window, cx| window.click("filter", cx));
+    live.ui(|window, cx| window.press("cmd-f", cx));
+    live.ui(|window, cx| window.input(" nowhere", cx));
+    live.wait("nothing matches", |s| s.log_query() == "find me nowhere");
+    live.cx.update(|cx| {
+        assert_eq!(live.state.read(cx).filter, "", "the list's filter is left");
+    });
+    live.ui(|window, _| assert!(window.try_find("log-empty").is_some()));
+
+    // The field's button empties it, and every row is back.
+    live.ui(|window, cx| window.within("log-filter").click("clean", cx));
+    live.wait("emptied", |s| s.log_query().is_empty());
+    live.cx.update(|cx| {
+        let s = live.state.read(cx);
+        assert!(s.visible_log().len() >= total);
+        assert!(!s.log_is_filtered());
+    });
+
+    // A click on the header beside the field still hides the drawer, and one
+    // in the field does not.
+    live.ui(|window, cx| window.click("log-filter", cx));
+    live.cx.update(|cx| {
+        assert!(
+            live.state.read(cx).drawer_open,
+            "the field is not the toggle"
+        )
+    });
+    live.ui(|window, cx| window.click_at("log-header", gpui_kit::point(px(60.), px(14.)), cx));
+    live.wait("hidden", |s| !s.drawer_open);
+    live.ui(|window, _| assert!(window.try_find("log-filter").is_none()));
+    // Hidden, the header has no field, and a click anywhere on it shows the
+    // drawer, the filter as it was left.
+    live.ui(|window, cx| window.click("log-header", cx));
+    live.wait("shown again", |s| s.drawer_open);
+    live.ui(|window, _| assert!(window.try_find("log-filter").is_some()));
+
+    // The raw editor has a search of its own on ⌘F and keeps it.
+    live.ui(|window, cx| window.click("toggle-log", cx));
+    live.wait("hidden", |s| !s.drawer_open);
+    live.ui(|window, cx| window.click("tab-raw", cx));
+    live.ui(|window, cx| window.click("raw-editor", cx));
+    live.ui(|window, cx| window.press("cmd-f", cx));
+    live.cx.update(|cx| {
+        assert!(!live.state.read(cx).drawer_open, "the editor's own search");
+    });
+    live.ui(|window, cx| window.press("escape", cx));
+    live.ui(|window, cx| window.click("tab-form", cx));
+
+    // A dialog holds the key back, from its fields too.
+    live.call("roots", json!({}));
+    wait_for_request(&mut live.cx, live.handle, &live.state);
+    live.ui(|window, cx| window.click("req-roots", cx));
+    live.ui(|window, cx| window.press("cmd-f", cx));
+    live.cx.update(|cx| {
+        assert!(!live.state.read(cx).drawer_open, "held back by the dialog");
+    });
+    live.ui(|window, cx| window.click("req-accept", cx));
+    assert_eq!(live.answered().0, ResponseStatus::Ok);
 }
 
 /// Double-clicking a server disconnects it when connected and connects it

@@ -16,8 +16,8 @@ use crate::actions::{
     About, AddServer, CancelCall, CheckForUpdates, ClearHistory, CommandPalette,
     CompareSnapshotFile, CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse,
     CopyServerConfig, DeleteServer, Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog,
-    ExportSnapshot, ForgetCredentials, ImportConfig, OpenSettings, Quit, Reconnect, ShowHistory,
-    ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
+    ExportSnapshot, FilterLog, ForgetCredentials, ImportConfig, OpenSettings, Quit, Reconnect,
+    ShowHistory, ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
     ToggleResponse, ToggleTheme, ToggleUpdateChecks, ZoomLog,
 };
 use crate::state::{AppState, Status};
@@ -242,6 +242,7 @@ fn menu_bar(a: Available) -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("Toggle Log", ToggleLog),
                 MenuItem::action("Zoom Log", ZoomLog),
+                MenuItem::action("Filter Log", FilterLog),
                 MenuItem::action("Toggle Response", ToggleResponse),
                 MenuItem::action("Toggle Theme", ToggleTheme),
                 MenuItem::action("Command Palette", CommandPalette),

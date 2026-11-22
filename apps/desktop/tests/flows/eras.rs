@@ -83,7 +83,7 @@ pub fn modern_session_flow() {
     assert!(!live.logged("resources/subscribe"));
 
     // The level travels with each request; nothing sets it on the server.
-    live.ui(|window, cx| window.click("log-header", cx));
+    live.ui(|window, cx| window.click("toggle-log", cx));
     live.ui(|window, _| {
         assert!(window.try_find("log-level-deprecated").is_some());
     });
@@ -100,7 +100,7 @@ pub fn modern_session_flow() {
     assert_eq!(live.text(), "logged=true");
     assert!(!live.logged("logging/setLevel"));
     snap(&mut live.cx, live.handle, "58-modern-log-level");
-    live.ui(|window, cx| window.click("log-header", cx));
+    live.ui(|window, cx| window.click("toggle-log", cx));
 
     // Roots are kept and reach the server when it asks; no notice goes out.
     live.select(Mode::Server, "Roots");
