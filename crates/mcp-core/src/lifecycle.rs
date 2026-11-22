@@ -99,10 +99,26 @@ pub(crate) fn describe(error: &ClientInitializeError, mode: ProtocolMode) -> Str
             describe(discover, ProtocolMode::Auto),
             describe(fallback, ProtocolMode::Legacy)
         ),
-        ClientInitializeError::TransportError { error, context } => {
-            let cause = crate::error::transport_cause(error);
-            if first_send(context) {
-                return cause;
+        ClientInitializeError::ConnectionClosed(awaited) => match awaited_answer(awaited) {
+            Some(request) => went_away(request),
+            None => error.to_string(),
+        },
+        ClientInitializeError::TransportError {
+            error: failure,
+            context,
+        } => {
+            let cause = crate::error::transport_cause(failure);
+            if let Some(request) = first_send(context) {
+                // A pipe that broke under the first request is a server that
+                // went away before it read it, which a server that goes away
+                // just after reading it is told as too: which of the two a
+                // process that exits while starting meets is a matter of
+                // timing.
+                return if crate::error::broken_pipe(failure) {
+                    went_away(request)
+                } else {
+                    cause
+                };
             }
             // The step names what failed after the server answered, which
             // the cause alone (`broken pipe`) does not.
@@ -120,20 +136,49 @@ pub(crate) fn describe(error: &ClientInitializeError, mode: ProtocolMode) -> Str
     }
 }
 
-/// Whether a start that failed with `error` got an answer from the server.
-/// A transport that failed to carry the first request met a server that
-/// could not be reached; one that failed later met a server that answered.
+/// Whether a start that failed with `error` met a server. A transport that
+/// failed to carry the first request met a server that could not be reached,
+/// unless the failure is a broken pipe: that had a server at its other end,
+/// which went away. One that failed later met a server that answered.
 pub(crate) fn reached(error: &ClientInitializeError) -> bool {
     match error {
-        ClientInitializeError::TransportError { context, .. } => !first_send(context),
+        ClientInitializeError::TransportError { error, context } => {
+            first_send(context).is_none() || crate::error::broken_pipe(error)
+        }
         _ => true,
     }
 }
 
-/// Whether `context`, where `rmcp` says a transport failed during a start,
-/// is the sending of the start's first request, before any answer.
-fn first_send(context: &str) -> bool {
-    matches!(context, "send initialize request" | "send discover request")
+/// The start's first request, when `context`, where `rmcp` says a transport
+/// failed during a start, is the sending of it, before any answer.
+fn first_send(context: &str) -> Option<&'static str> {
+    match context {
+        "send initialize request" => Some(INITIALIZE),
+        "send discover request" => Some(DISCOVER),
+        _ => None,
+    }
+}
+
+/// The start's first request, when `awaited`, the answer `rmcp` says a
+/// start was waiting for as the connection closed, is the answer to it.
+fn awaited_answer(awaited: &str) -> Option<&'static str> {
+    match awaited {
+        "initialize response" => Some(INITIALIZE),
+        "discover response" => Some(DISCOVER),
+        _ => None,
+    }
+}
+
+/// The handshake's first request, as a failed start names it.
+const INITIALIZE: &str = "the initialize request";
+
+/// The modern start's first request, as a failed start names it.
+const DISCOVER: &str = "server/discover";
+
+/// A server that went away before it answered `request`, the first of the
+/// start: over stdio, a process that exited while starting.
+fn went_away(request: &str) -> String {
+    format!("the server closed the connection before answering {request}")
 }
 
 fn describe_rpc(data: &ErrorData, mode: ProtocolMode) -> String {
@@ -306,6 +351,35 @@ mod tests {
                 "{context}"
             );
         }
+    }
+
+    #[test]
+    fn a_server_that_went_away_is_told_alike_before_and_after_the_first_write() {
+        for (send, awaited, words) in [
+            (
+                "send initialize request",
+                "initialize response",
+                "the server closed the connection before answering the initialize request",
+            ),
+            (
+                "send discover request",
+                "discover response",
+                "the server closed the connection before answering server/discover",
+            ),
+        ] {
+            // The server went away before the request was written, or after.
+            let before = transport(std::io::ErrorKind::BrokenPipe, send);
+            let after = ClientInitializeError::ConnectionClosed(awaited.into());
+            for error in [&before, &after] {
+                assert!(reached(error), "{error}");
+                assert_eq!(describe(error, ProtocolMode::Auto), words, "{error}");
+            }
+        }
+        let later = ClientInitializeError::ConnectionClosed("something else".into());
+        assert_eq!(
+            describe(&later, ProtocolMode::Legacy),
+            "connection closed: something else"
+        );
     }
 
     #[test]

@@ -185,6 +185,63 @@ async fn auto_opens_a_second_transport_when_discovery_shares_no_version() {
     assert!(err.contains("not 2026-07-28"), "{err}");
 }
 
+/// A transport that cannot send, for the reason given, and hears nothing.
+struct Unsendable(std::io::ErrorKind);
+
+impl rmcp::transport::Transport<rmcp::RoleClient> for Unsendable {
+    type Error = std::io::Error;
+
+    fn send(
+        &mut self,
+        _: rmcp::service::TxJsonRpcMessage<rmcp::RoleClient>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        std::future::ready(Err(self.0.into()))
+    }
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<Output = Option<rmcp::service::RxJsonRpcMessage<rmcp::RoleClient>>> + Send
+    {
+        std::future::ready(None)
+    }
+
+    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        std::future::ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn a_pipe_broken_under_the_first_request_is_a_start_that_failed() {
+    use std::io::ErrorKind;
+    for (protocol, request) in [
+        (ProtocolMode::Legacy, "the initialize request"),
+        (ProtocolMode::Modern, "server/discover"),
+        (ProtocolMode::Auto, "server/discover"),
+    ] {
+        // The server was there and went away: a process that exited before
+        // its first request was written.
+        let gone = Unsendable(ErrorKind::BrokenPipe);
+        let err = Session::connect_with_transport(spec(), gone, options(protocol))
+            .await
+            .unwrap_err();
+        let words = format!("the server closed the connection before answering {request}");
+        assert!(
+            matches!(&err, mcp_core::Error::Initialize(why) if *why == words),
+            "{protocol:?}: {err}"
+        );
+
+        // No server was there.
+        let refused = Unsendable(ErrorKind::ConnectionRefused);
+        let err = Session::connect_with_transport(spec(), refused, options(protocol))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, mcp_core::Error::Transport(why) if why == "connection refused"),
+            "{protocol:?}: {err}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn modern_explains_a_server_that_only_knows_the_handshake() {
     let faults = Faults {

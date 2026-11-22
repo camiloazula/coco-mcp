@@ -124,6 +124,16 @@ pub(crate) fn transport_cause(error: &(dyn std::error::Error + 'static)) -> Stri
     plain(&causes(error).last().unwrap_or(error).to_string())
 }
 
+/// Whether a broken pipe is behind a transport's failure: the other end of
+/// the transport was there and has closed it, as a child process that exited
+/// closes its stdin. Windows' two errors for it are the same kind.
+pub(crate) fn broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
+    causes(error).any(|e| {
+        e.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
+}
+
 /// `error` and its causes, outermost first. The HTTP transport does not
 /// chain its client's error as a cause, so the walk steps into it by hand.
 fn causes<'a>(
@@ -239,6 +249,18 @@ mod tests {
             plain("unexpected end of stream"),
             "unexpected end of stream"
         );
+    }
+
+    #[test]
+    fn a_broken_pipe_is_found_down_the_chain() {
+        use std::io::{Error, ErrorKind};
+        assert!(broken_pipe(&transport(Error::from(ErrorKind::BrokenPipe))));
+        let wrapped = Error::other(transport(Error::from(ErrorKind::BrokenPipe)));
+        assert!(broken_pipe(&transport(wrapped)));
+        assert!(!broken_pipe(&transport(Error::from(
+            ErrorKind::ConnectionRefused
+        ))));
+        assert!(!broken_pipe(&transport(Error::other("broken pipe"))));
     }
 
     #[tokio::test]
