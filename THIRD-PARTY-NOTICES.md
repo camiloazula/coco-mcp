@@ -11,7 +11,7 @@ offers. A crate's own copy of its licence, with its copyright line, is in its
 source on crates.io, linked from its row.
 
 Generated from `Cargo.lock` by `just notices` for the targets the release
-builds; do not edit by hand. Inputs digest `56114af09c1f81c9` (what
+builds; do not edit by hand. Inputs digest `ca9f5ca30a846617` (what
 `just notices-check` compares).
 
 ## Crates
