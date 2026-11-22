@@ -11,7 +11,7 @@ offers. A crate's own copy of its licence, with its copyright line, is in its
 source on crates.io, linked from its row.
 
 Generated from `Cargo.lock` by `just notices` for the targets the release
-builds; do not edit by hand. Inputs digest `716e45db2aad1939` (what
+builds; do not edit by hand. Inputs digest `56114af09c1f81c9` (what
 `just notices-check` compares).
 
 ## Crates
@@ -208,7 +208,7 @@ builds; do not edit by hand. Inputs digest `716e45db2aad1939` (what
 | [foreign-types](https://crates.io/crates/foreign-types/0.5.0) | 0.5.0 | MIT OR Apache-2.0 |
 | [foreign-types-macros](https://crates.io/crates/foreign-types-macros/0.2.4) | 0.2.4 | MIT OR Apache-2.0 |
 | [foreign-types-shared](https://crates.io/crates/foreign-types-shared/0.3.1) | 0.3.1 | MIT OR Apache-2.0 |
-| [form_urlencoded](https://crates.io/crates/form_urlencoded/1.2.2) | 1.2.2 | MIT OR Apache-2.0 |
+| [form_urlencoded](https://crates.io/crates/form_urlencoded/1.2.3) | 1.2.3 | MIT OR Apache-2.0 |
 | [fraction](https://crates.io/crates/fraction/0.17.0) | 0.17.0 | MIT OR Apache-2.0 |
 | [freetype-sys](https://crates.io/crates/freetype-sys/0.20.1) | 0.20.1 | MIT |
 | [fsevent-sys](https://crates.io/crates/fsevent-sys/4.1.0) | 4.1.0 | MIT |
@@ -663,7 +663,7 @@ builds; do not edit by hand. Inputs digest `716e45db2aad1939` (what
 | [unicode-width](https://crates.io/crates/unicode-width/0.2.2) | 0.2.2 | MIT OR Apache-2.0 |
 | [unicode-xid](https://crates.io/crates/unicode-xid/0.2.6) | 0.2.6 | MIT OR Apache-2.0 |
 | [untrusted](https://crates.io/crates/untrusted/0.9.0) | 0.9.0 | ISC |
-| [url](https://crates.io/crates/url/2.5.8) | 2.5.8 | MIT OR Apache-2.0 |
+| [url](https://crates.io/crates/url/2.5.9) | 2.5.9 | MIT OR Apache-2.0 |
 | [usvg](https://crates.io/crates/usvg/0.45.1) | 0.45.1 | Apache-2.0 OR MIT |
 | [usvg](https://crates.io/crates/usvg/0.46.0) | 0.46.0 | Apache-2.0 OR MIT |
 | [utf-8](https://crates.io/crates/utf-8/0.7.6) | 0.7.6 | MIT OR Apache-2.0 |
@@ -955,7 +955,7 @@ Crates under it:
 - foreign-types 0.5.0
 - foreign-types-macros 0.2.4
 - foreign-types-shared 0.3.1
-- form_urlencoded 1.2.2
+- form_urlencoded 1.2.3
 - fraction 0.17.0
 - futf 0.1.5
 - futures 0.3.34
@@ -1277,7 +1277,7 @@ Crates under it:
 - unicode-vo 0.1.0
 - unicode-width 0.2.2
 - unicode-xid 0.2.6
-- url 2.5.8
+- url 2.5.9
 - usvg 0.45.1
 - usvg 0.46.0
 - utf-8 0.7.6
