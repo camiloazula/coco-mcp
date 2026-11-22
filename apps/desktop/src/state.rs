@@ -2,7 +2,7 @@
 //! log rows and the current screen live here; views are thin renderers over
 //! it and mutate it through its methods.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
 use futures::StreamExt as _;
@@ -172,6 +172,11 @@ pub struct LogRow {
     /// The agent whose traffic through the gateway this row is, by the name
     /// it gave; `None` for what Coco itself sent and heard.
     pub agent: Option<String>,
+    /// [`Self::text`] lowercased ([`crate::find::lower`]), which the
+    /// drawer's text filter is looked for in: built once with the row, so a
+    /// keystroke costs one pass over strings already made. Not counted in
+    /// `bytes`.
+    pub(crate) search: String,
     /// The row's id in its server's log, handed out in order by
     /// [`ServerEntry::push_log`] (not the JSON-RPC `id`). An index shifts when
     /// older rows leave; this does not, so folds, list measurements, the copy
@@ -194,6 +199,11 @@ impl LogRow {
     ) -> Self {
         let (head, total) = mcp_exchange::json_head(&payload, LOG_PAYLOAD_LIMIT);
         let body = preview(&payload, &head);
+        let search = match &payload {
+            Value::Null => String::new(),
+            Value::String(text) if total <= LOG_PAYLOAD_LIMIT => crate::find::lower(text),
+            _ => crate::find::lower(&head),
+        };
         let (payload, body, kept, truncated) = if total > LOG_PAYLOAD_LIMIT {
             let note = format!(
                 "{} payload, first {} kept",
@@ -228,8 +238,33 @@ impl LogRow {
             truncated,
             bytes,
             agent: None,
+            search,
             row_id: 0,
         }
+    }
+
+    /// The payload as the text filter reads it, in its own case: a string's
+    /// own text, the kept head of a payload over [`LOG_PAYLOAD_LIMIT`], and
+    /// anything else as the compact JSON the row's preview starts.
+    pub(crate) fn text(&self) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
+        match &self.payload {
+            marker if self.truncated.is_some() => {
+                Cow::Borrowed(marker["head"].as_str().unwrap_or_default())
+            }
+            Value::Null => Cow::Borrowed(""),
+            Value::String(text) => Cow::Borrowed(text),
+            other => Cow::Owned(mcp_exchange::json_head(other, LOG_PAYLOAD_LIMIT).0),
+        }
+    }
+
+    /// Whether the text filter `needle`, lowercase, is in the row's method,
+    /// its agent's name or its payload, whatever their case.
+    pub(crate) fn matches(&self, needle: &str) -> bool {
+        let named = |text: &str| crate::find::find(text, needle).is_some();
+        named(&self.method)
+            || self.agent.as_deref().is_some_and(named)
+            || self.search.contains(needle)
     }
 
     /// The separator a reconnect leaves between the previous session's rows
@@ -723,6 +758,55 @@ struct ItemsCache {
     total: usize,
 }
 
+/// Which rows of a log the drawer's text filter matches, found once per row
+/// rather than on every frame: the header counts the rows that pass and the
+/// drawer lists them, each on every render.
+#[derive(Debug, Default)]
+struct LogHits {
+    /// The server whose log this is of.
+    server: Option<String>,
+    /// The filter the rows were matched against, lowercase.
+    needle: String,
+    /// Id of the row `hits[0]` is of.
+    first: u64,
+    /// Whether each row matched, in log order from `first`.
+    hits: VecDeque<bool>,
+}
+
+impl LogHits {
+    /// Bring the hits in step with `entry`'s log under `needle`: forget the
+    /// rows that left it and match the ones added since. Another server or
+    /// another filter starts over.
+    fn sync(&mut self, entry: &ServerEntry, needle: &str) {
+        if self.server.as_deref() != Some(entry.record.id.as_str()) || self.needle != needle {
+            *self = Self {
+                server: Some(entry.record.id.clone()),
+                needle: needle.to_owned(),
+                first: entry.first_log_id(),
+                hits: VecDeque::new(),
+            };
+        }
+        // Rows leave a log from the front only, and ids are never reused.
+        let first = entry.first_log_id();
+        let gone = usize::try_from(first.saturating_sub(self.first)).unwrap_or(usize::MAX);
+        self.hits.drain(..gone.min(self.hits.len()));
+        self.first = first;
+        let known = self.hits.len().min(entry.log.len());
+        self.hits
+            .extend(entry.log[known..].iter().map(|row| row.matches(needle)));
+    }
+
+    /// Whether the row with id `id` matched, when it was there at the last
+    /// [`Self::sync`] for this server and filter.
+    fn get(&self, server: &str, needle: &str, id: u64) -> Option<bool> {
+        if self.server.as_deref() != Some(server) || self.needle != needle {
+            return None;
+        }
+        let ix = usize::try_from(id.checked_sub(self.first)?).ok()?;
+        self.hits.get(ix).copied()
+    }
+}
+
 /// Emitted after every mutation.
 #[derive(Debug, Clone, Copy)]
 pub struct Changed;
@@ -868,6 +952,10 @@ pub struct AppState {
     pub log_filter: LogFilter,
     /// Lowest server log level the drawer shows; `None` shows every level.
     pub log_min_level: Option<&'static str>,
+    /// The drawer's text filter as typed; empty shows every row.
+    log_query: String,
+    /// `log_query` lowercased, which rows are matched against.
+    log_needle: String,
     /// Server-initiated requests waiting for an answer, oldest first.
     pub pending: Vec<PendingRequest>,
     /// The destructive action awaiting confirmation.
@@ -889,6 +977,8 @@ pub struct AppState {
     pub oauth_timeout: Option<Duration>,
     /// The filtered middle list, see [`Self::items`].
     items: RefCell<ItemsCache>,
+    /// The rows of the selected server's log that `log_needle` matches.
+    log_hits: RefCell<LogHits>,
 }
 
 /// A destructive action waiting for the person to confirm it.
@@ -1005,7 +1095,8 @@ const MAX_LOG_ROWS: usize = 5000;
 pub const LOG_PAYLOAD_LIMIT: usize = 64 * 1024;
 /// Serialized payload bytes one server's log keeps, ~6.5 KB a row at the row
 /// cap, so a session of large results cannot hold unbounded memory. It counts
-/// compact JSON, not the parsed values, which take a few times as much.
+/// compact JSON, not the parsed values, which take a few times as much, nor
+/// the lowercased text the drawer's filter reads, about as much again.
 pub const LOG_BYTE_BUDGET: usize = 32 * 1024 * 1024;
 /// History rows kept per server (the database keeps everything).
 pub const MAX_HISTORY: usize = 500;
@@ -1084,6 +1175,8 @@ impl AppState {
             responses: Responses::default(),
             log_filter: LogFilter::All,
             log_min_level: None,
+            log_query: String::new(),
+            log_needle: String::new(),
             pending: Vec::new(),
             confirm: None,
             editing: None,
@@ -1092,6 +1185,7 @@ impl AppState {
             oauth_open: None,
             oauth_timeout: None,
             items: RefCell::default(),
+            log_hits: RefCell::default(),
         };
         if let Some(store) = store {
             state.load(&store);
@@ -1139,6 +1233,7 @@ impl AppState {
     /// Log indices of the selected server's rows that pass the filter. The
     /// drawer takes them once per frame and borrows each row it draws.
     pub fn visible_log(&self) -> Vec<usize> {
+        self.sync_log_hits();
         self.server()
             .map(|s| {
                 s.log
@@ -1189,9 +1284,85 @@ impl AppState {
         }
     }
 
-    /// Whether `row` passes the drawer's kind filter and its level filter.
+    /// The drawer's text filter as typed.
+    pub fn log_query(&self) -> &str {
+        &self.log_query
+    }
+
+    /// The drawer's text filter as rows are matched against it: lowercase,
+    /// and empty when every row passes.
+    pub fn log_needle(&self) -> &str {
+        &self.log_needle
+    }
+
+    /// Show only the log rows with `text` in their method, their agent's
+    /// name or their payload, whatever the case; empty shows every row.
+    pub fn set_log_query(&mut self, text: String, cx: &mut Context<Self>) {
+        if self.query_log(text) {
+            self.changed(cx);
+        }
+    }
+
+    /// [`Self::set_log_query`] without the notice; whether the text changed.
+    fn query_log(&mut self, text: String) -> bool {
+        if self.log_query == text {
+            return false;
+        }
+        self.log_needle = crate::find::lower(&text);
+        self.log_query = text;
+        self.expanded_log.clear();
+        true
+    }
+
+    /// Whether any of the drawer's three filters hides rows.
+    pub fn log_is_filtered(&self) -> bool {
+        self.log_filter != LogFilter::All
+            || self.log_min_level.is_some()
+            || !self.log_needle.is_empty()
+    }
+
+    /// How many messages of the selected server's log pass the drawer's
+    /// filters, and how many it holds. Messages, not rows: a reconnect's
+    /// separator was never on the wire.
+    pub fn log_counts(&self) -> (usize, usize) {
+        self.sync_log_hits();
+        self.server().map_or((0, 0), |s| {
+            s.log
+                .iter()
+                .filter(|row| !row.session_break)
+                .fold((0, 0), |(shown, total), row| {
+                    (shown + usize::from(self.log_row_passes(row)), total + 1)
+                })
+        })
+    }
+
+    /// Match the rows the selected server logged since the last frame
+    /// against the text filter, before a pass over its log reads them.
+    fn sync_log_hits(&self) {
+        if let Some(entry) = self.server().filter(|_| !self.log_needle.is_empty()) {
+            self.log_hits.borrow_mut().sync(entry, &self.log_needle);
+        }
+    }
+
+    /// Whether `row`, of the selected server's log, passes the drawer's kind
+    /// filter, its level filter and its text filter. A session separator
+    /// passes all three.
     pub fn log_row_passes(&self, row: &LogRow) -> bool {
-        self.log_filter.accepts(row) && level_passes(self.log_min_level, row)
+        self.log_filter.accepts(row)
+            && level_passes(self.log_min_level, row)
+            && self.log_text_passes(row)
+    }
+
+    /// Whether `row` has the text filter in it: read from the hits kept for
+    /// the selected server's log, and worked out for a row they do not hold.
+    fn log_text_passes(&self, row: &LogRow) -> bool {
+        let needle = self.log_needle.as_str();
+        if needle.is_empty() || row.session_break {
+            return true;
+        }
+        self.server()
+            .and_then(|s| self.log_hits.borrow().get(&s.record.id, needle, row.row_id))
+            .unwrap_or_else(|| row.matches(needle))
     }
 
     pub(crate) fn changed(&mut self, cx: &mut Context<Self>) {
@@ -4340,6 +4511,150 @@ mod tests {
         }
         state.selected_server = None;
         assert!(state.visible_log().is_empty());
+    }
+
+    /// A response to `tools/call` carrying `result`.
+    fn result_row(result: Value) -> LogRow {
+        let sink = EventSink::new(8);
+        log_row(&sink.emit(EventKind::Response {
+            direction: Direction::Inbound,
+            id: json!(7),
+            method: Some("tools/call".into()),
+            result,
+            elapsed: None,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_text_filter_shows_the_rows_with_the_text_in_them() {
+        let mut state = demo();
+        let entry = &mut state.servers[0];
+        entry.push_log(stderr_row("Booting the weather server"));
+        entry.push_log(result_row(json!({ "uri": "mock://text/Hello.txt" })));
+        entry.push_log(LogRow::session_break(time::OffsetDateTime::UNIX_EPOCH));
+        let mut agent = result_row(json!({ "ok": true }));
+        agent.agent = Some("Desk Agent".into());
+        entry.push_log(agent);
+        let shown = [
+            ("", vec![0, 1, 2, 3]),
+            // In the payload, whatever the case on either side.
+            ("HELLO.TXT", vec![1, 2]),
+            ("booting the", vec![0, 2]),
+            // In the method and in the agent's name.
+            ("Tools/Call", vec![1, 2, 3]),
+            ("desk ag", vec![2, 3]),
+            // As typed, spaces and quotes included: one text, not words.
+            ("\"uri\":\"mock", vec![1, 2]),
+            ("server weather", vec![2]),
+            ("nowhere", vec![2]),
+        ];
+        // A capital sigma is the same letter at the end of a word and inside
+        // one, in the method as in the payload.
+        let mut greek = result_row(json!({ "street": "ΟΔΟΣ" }));
+        greek.method = "ΟΣΑ".into();
+        assert!(greek.matches(&crate::find::lower("ΟΔΟΣ")));
+        assert!(greek.matches(&crate::find::lower("ΟΣ")));
+        assert!(greek.matches(&crate::find::lower("οσα")));
+        for (query, rows) in shown {
+            state.query_log(query.into());
+            assert_eq!(state.visible_log(), rows, "{query:?}");
+            let passing = rows.iter().filter(|&&ix| ix != 2).count();
+            assert_eq!(state.log_counts(), (passing, 3), "{query:?}");
+            assert_eq!(state.log_is_filtered(), !query.is_empty());
+        }
+        // With the kind filter, a row passes both or is hidden.
+        state.query_log("o".into());
+        state.log_filter = LogFilter::Stderr;
+        assert_eq!(state.visible_log(), [0, 2]);
+        assert_eq!(state.log_counts(), (1, 3));
+    }
+
+    #[test]
+    fn the_text_filter_follows_the_log_as_rows_come_and_go() {
+        let mut state = demo();
+        let other = state.add_demo_server("other", stdio("other"), Status::Off);
+        state.query_log("needle".into());
+        state.servers[0].push_log(stderr_row("a needle"));
+        state.servers[0].push_log(stderr_row("hay"));
+        assert_eq!(state.visible_log(), [0]);
+        // Rows logged after the last frame are matched on the next.
+        state.servers[0].push_log(stderr_row("another Needle"));
+        assert_eq!(state.visible_log(), [0, 2]);
+        assert_eq!(state.log_hits.borrow().hits, [true, false, true]);
+        // The oldest row left: the hits are of the rows that stayed.
+        state.servers[0].log.remove(0);
+        state.servers[0].push_log(stderr_row("hay again"));
+        assert_eq!(state.visible_log(), [1]);
+        assert_eq!(state.log_hits.borrow().hits, [false, true, false]);
+        // Cleared, and filled again under ids that carry on.
+        state.servers[0].clear_log();
+        assert!(state.visible_log().is_empty());
+        state.servers[0].push_log(stderr_row("needle once more"));
+        assert_eq!(state.visible_log(), [0]);
+        assert_eq!(state.log_counts(), (1, 1));
+        // Another server's rows share ids and are matched for themselves.
+        state.servers[other].push_log(stderr_row("hay"));
+        state.servers[other].push_log(stderr_row("needle"));
+        state.selected_server = Some(other);
+        assert_eq!(state.visible_log(), [1]);
+        // Another text is matched against every row again.
+        state.query_log("hay".into());
+        assert_eq!(state.visible_log(), [0]);
+        // A row the hits do not hold is worked out, not taken as hidden.
+        let mut stray = stderr_row("hay");
+        stray.row_id = 99;
+        let held = state
+            .log_hits
+            .borrow()
+            .get(&state.servers[other].record.id, "hay", 99);
+        assert_eq!(held, None);
+        assert!(state.log_row_passes(&stray));
+        stray = stderr_row("straw");
+        stray.row_id = 99;
+        assert!(!state.log_row_passes(&stray));
+    }
+
+    #[test]
+    fn the_text_filter_reads_a_string_as_text_and_a_cut_payload_by_its_head() {
+        let line = stderr_row("panic: \"Bad\" input");
+        assert_eq!(line.text(), "panic: \"Bad\" input");
+        assert!(line.matches("\"bad\" input"), "not as escaped JSON");
+
+        let big = result_row(json!({
+            "content": [{ "type": "text", "text": "x".repeat(LOG_PAYLOAD_LIMIT * 2) }],
+            "tail": "Needle",
+        }));
+        assert!(big.truncated.is_some());
+        assert!(
+            big.matches("{\"content\":[{\"type\""),
+            "the head, unescaped"
+        );
+        assert!(big.text().starts_with("{\"content\""));
+        assert!(!big.matches("needle"), "what was cut is not kept to match");
+        assert!(big.search.len() <= LOG_PAYLOAD_LIMIT);
+
+        let small = result_row(json!({ "Name": "Add" }));
+        assert_eq!(small.text(), "{\"Name\":\"Add\"}");
+        assert_eq!(small.search, "{\"name\":\"add\"}");
+        let empty = LogRow::new(small.at, Dir::Note, "ping".into(), Value::Null, false);
+        assert_eq!((empty.text().as_ref(), empty.search.as_str()), ("", ""));
+        assert!(empty.matches("pin") && !empty.matches("null"));
+    }
+
+    #[test]
+    fn another_text_filter_closes_the_open_rows() {
+        let mut state = demo();
+        state.servers[0].push_log(stderr_row("one"));
+        state.expanded_log = [0].into();
+        assert!(
+            !state.query_log(String::new()),
+            "the same text is no change"
+        );
+        assert_eq!(state.expanded_log, [0].into());
+        assert!(state.query_log("One".into()));
+        assert!(state.expanded_log.is_empty());
+        assert_eq!((state.log_query(), state.log_needle()), ("One", "one"));
     }
 
     #[test]

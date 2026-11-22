@@ -90,7 +90,9 @@ use:
   round-trip times, in a panel of their own under the form, split by a
   separator you drag, and every wire message in a filterable log drawer (`⌘J`,
   zoomed over the columns with `⌘⇧J`),
-  where rows unfold, each on its own, into the same tree as a response,
+  where typing in its field (`⌘F`) keeps the messages with that text in
+  their method, their agent's name or their payload and marks it in each,
+  and rows unfold, each on its own, into the same tree as a response,
   and a toggled row moves to the top of the drawer. A reconnect keeps
   the previous connection's messages above a separator, so the reason a
   server stopped is still there.
@@ -293,6 +295,7 @@ Keyboard:
 | `⌘1` … `⌘5` | Tools, Resources, Prompts, History, Server |
 | `⌘J` | Show or hide the log drawer (the panel button at the right of its header does the same, collapsed or not) |
 | `⌘⇧J` | Zoom the log drawer in over the columns, or out again (the arrows button does the same) |
+| `⌘F` | Filter the log by text: shows the drawer and puts the keyboard in its field |
 | `⌘R` / `⌘⇧R` | Connect or reconnect / disconnect (the plug on the server's row does the same) |
 | `⌘⌫` | Delete the selected server (asks first; the bin next to `+` does the same) |
 | `⌘⇧C` | Copy the whole response |

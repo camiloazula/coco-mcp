@@ -347,6 +347,7 @@ impl ToolForm {
                 let editor = self.editor_at(path, text, window, cx);
                 let why = format!("No form for this schema: {}", unknown_reason(raw));
                 let field = div()
+                    .key_context(crate::actions::CODE_EDITOR)
                     .rounded(px(3.))
                     .bg(t.field)
                     .border_1()

@@ -16,6 +16,7 @@ pub mod clip;
 pub mod clock;
 pub mod explain;
 pub mod features;
+pub mod find;
 pub mod gateway;
 pub mod menus;
 pub mod persistence;

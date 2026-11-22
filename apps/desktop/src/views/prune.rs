@@ -14,6 +14,7 @@ impl Workspace {
     pub(crate) fn forget(&mut self, gone: &Gone) {
         retain_live(&mut self.collapsed, gone);
         self.splits.forget(gone);
+        self.log_hits.forget(gone);
     }
 }
 

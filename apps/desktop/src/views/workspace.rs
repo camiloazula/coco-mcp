@@ -82,6 +82,10 @@ pub struct Workspace {
     followed: (Option<usize>, Option<usize>),
     /// Scroll and measurement state of the log drawer's rows.
     pub log_list: LogList,
+    /// The field of the log drawer's text filter.
+    pub(crate) log_search: Entity<InputState>,
+    /// Where the rows drawn under the text filter matched.
+    pub(crate) log_hits: log_drawer::Hits,
     /// Folded nodes of every JSON tree in the window, keyed by the tree's
     /// prefix plus the node's path. One set so the log drawer, a tool's
     /// schema and a response can each keep their own folds.
@@ -159,6 +163,8 @@ impl Workspace {
                 this.state.update(cx, |s, cx| s.choose_log_level(level, cx));
             },
         ));
+        let (log_search, typed) = Self::log_search_field(window, cx);
+        subscriptions.push(typed);
         let ws = Self {
             state,
             log_level,
@@ -182,6 +188,8 @@ impl Workspace {
             settings: None,
             followed: (None, None),
             log_list: LogList::default(),
+            log_search,
+            log_hits: Default::default(),
             collapsed: HashSet::new(),
             collapse_rev: 0,
             decoded: Decoded::default(),

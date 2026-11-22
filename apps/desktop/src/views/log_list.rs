@@ -42,6 +42,8 @@ pub struct LogList {
     end: u64,
     filter: LogFilter,
     min_level: Option<&'static str>,
+    /// The text filter the rows passed, lowercase.
+    needle: String,
     /// Ids of the open rows.
     expanded: BTreeSet<u64>,
     collapse_rev: u64,
@@ -60,6 +62,7 @@ impl Default for LogList {
             end: 0,
             filter: LogFilter::All,
             min_level: None,
+            needle: String::new(),
             expanded: BTreeSet::new(),
             collapse_rev: 0,
         }
@@ -79,6 +82,8 @@ pub(crate) struct LogView {
     filter: LogFilter,
     /// Lowest server log level shown, when the level filter is on.
     min_level: Option<&'static str>,
+    /// The text filter, lowercase; empty when it is off.
+    needle: String,
     /// Ids of the open rows.
     expanded: BTreeSet<u64>,
 }
@@ -94,6 +99,7 @@ impl LogView {
             visible: state.visible_log(),
             filter: state.log_filter,
             min_level: state.log_min_level,
+            needle: state.log_needle().to_owned(),
             expanded: state.expanded_log.clone(),
         }
     }
@@ -125,6 +131,7 @@ impl LogList {
         if log.server != self.server
             || log.filter != self.filter
             || log.min_level != self.min_level
+            || log.needle != self.needle
             || kept == 0
         {
             // Another server or filter, or nothing left in common: start over.
@@ -179,6 +186,7 @@ impl LogList {
         self.end = log.next;
         self.filter = log.filter;
         self.min_level = log.min_level;
+        self.needle = log.needle;
         self.expanded = log.expanded;
         self.collapse_rev = collapse_rev;
     }
@@ -198,6 +206,7 @@ mod tests {
             visible: visible.to_vec(),
             filter: LogFilter::All,
             min_level: None,
+            needle: String::new(),
             expanded: BTreeSet::new(),
         }
     }
@@ -303,6 +312,20 @@ mod tests {
         // Another server, whose row ids overlap this one's.
         list.sync(log("b", 0, 9, &[0, 1, 2, 3, 4, 5, 6, 7, 8]), 0);
         assert_eq!((list.state.item_count(), top(&list)), (9, 0));
+    }
+
+    #[test]
+    fn another_text_filter_starts_over() {
+        let mut list = LogList::default();
+        list.sync(log("a", 0, 5, &[1, 3]), 0);
+        scroll(&list, 1);
+        // A letter deleted: rows already logged pass that did not before,
+        // which no splice of appended and dropped rows accounts for.
+        let mut typed = log("a", 0, 5, &[0, 1, 2, 3, 4]);
+        typed.needle = "li".into();
+        list.sync(typed, 0);
+        assert_eq!((list.state.item_count(), top(&list)), (5, 0));
+        assert_eq!(list.row_at(4), Some(4));
     }
 
     #[test]

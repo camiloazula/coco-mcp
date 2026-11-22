@@ -2,18 +2,50 @@
 
 use super::*;
 
-/// Row `ix` of the log of the server with id `server`, which names the row
-/// to its folds and to its menu.
+/// A row as the drawer draws it.
+pub(super) struct Drawn<'a> {
+    /// Its index in its server's log.
+    pub(super) ix: usize,
+    pub(super) row: &'a LogRow,
+    /// Whether its payload is open under it.
+    pub(super) expanded: bool,
+    /// Whether the log has an agent column.
+    pub(super) with_agent: bool,
+    /// The text filter the row passed, lowercase; empty when it is off.
+    pub(super) needle: &'a str,
+    /// What the body cell shows under the filter, when the match is there.
+    pub(super) body: Option<search::Marked>,
+}
+
+/// A row of the log of the server with id `server`, which names the row to
+/// its folds and to its menu. Under the text filter the match is marked in
+/// the agent, the method and the body, the first one in each.
 pub(super) fn row(
-    ix: usize,
-    row: &LogRow,
-    expanded: bool,
+    drawn: Drawn<'_>,
     server: &SharedString,
-    with_agent: bool,
     ws: &Workspace,
     cx: &Context<Workspace>,
 ) -> AnyElement {
+    let Drawn {
+        ix,
+        row,
+        expanded,
+        with_agent,
+        needle,
+        body,
+    } = drawn;
     let t = *tokens(cx);
+    let mark = |text: &str| {
+        search::marked(
+            SharedString::from(text.to_owned()),
+            crate::find::find(text, needle),
+            &t,
+        )
+    };
+    let (body, body_hit) = match body {
+        Some((text, hit)) => (text, Some(hit)),
+        None => (SharedString::from(row.body.clone()), None),
+    };
     let entity = ws.state.clone();
     let arrow_color = match row.dir {
         Dir::Out => t.accent,
@@ -63,7 +95,7 @@ pub(super) fn row(
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .text_color(t.accent)
-                    .child(row.agent.clone().unwrap_or_default()),
+                    .child(mark(row.agent.as_deref().unwrap_or_default())),
             )
         })
         .child(
@@ -73,7 +105,7 @@ pub(super) fn row(
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
-                .child(row.method.clone()),
+                .child(mark(&row.method)),
         )
         .child(
             div()
@@ -83,7 +115,7 @@ pub(super) fn row(
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .text_color(t.muted)
-                .child(row.body.clone()),
+                .child(search::marked(body, body_hit, &t)),
         )
         .child(
             div()

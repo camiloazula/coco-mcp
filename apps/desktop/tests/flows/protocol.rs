@@ -284,7 +284,7 @@ pub fn subscription_flow() {
 pub fn log_level_flow() {
     use coco_mcp::state::LogFilter;
     let mut live = live(&["--schema", "v1"], None);
-    live.ui(|window, cx| window.click("log-header", cx));
+    live.ui(|window, cx| window.click("toggle-log", cx));
     live.ui(|window, _| assert!(window.try_find("log-level").is_some()));
     live.cx.update(|cx| {
         live.state

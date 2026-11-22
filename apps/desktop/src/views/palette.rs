@@ -12,7 +12,7 @@ use gpui_kit::{
 use crate::actions::{
     AddServer, Call, CancelCall, CheckForUpdates, ClearHistory, ClearLog, CompareSnapshotFile,
     CopyBearerToken, CopyRequest, CopyRequestCurl, CopyResponse, CopyServerConfig, DeleteServer,
-    Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot,
+    Disconnect, EditServer, ExportConfig, ExportHistory, ExportLog, ExportSnapshot, FilterLog,
     ForgetCredentials, ImportConfig, OpenSettings, Reconnect, SelectServer, ShowHistory,
     ShowPrompts, ShowResources, ShowServer, ShowTools, ToggleDisplayNames, ToggleLog,
     ToggleResponse, ToggleTheme, ToggleUpdateChecks, ZoomLog,
@@ -227,6 +227,11 @@ pub fn render(
             &["response", "result", "answer", "panel"],
         ),
         item("Clear logs", ClearLog, &["log"]),
+        item(
+            "Filter logs",
+            FilterLog,
+            &["log", "search", "find", "text", "match"],
+        ),
         item(
             if dark { "Light theme" } else { "Dark theme" },
             ToggleTheme,

@@ -550,6 +550,32 @@ artifacts, publishing nothing.
   its height. The zoom and show/hide buttons stay in the collapsed header;
   Clear, the filters and the level only show with rows. Neither flag is
   persisted.
+- The log drawer's text filter (`⌘F`, the field in its header) shows the
+  rows with the text in their method, their agent's name or their payload,
+  as typed and whatever the case, like the list's filter: one substring, no
+  syntax. It works with the kind filter and the level, and a session
+  separator passes it too. A row carries its payload's text lowercased
+  (`LogRow::search`, built on the runtime with the row: a string's own
+  text, else the compact JSON, the kept head of a cut payload), and which
+  rows match is kept per server and filter (`state::LogHits`), matched once
+  per row as it is logged, because the header counts the passing rows and
+  the drawer lists them on every frame. A full log, 32 MB, is matched again
+  in a few milliseconds when the text changes. The match is marked in the
+  row (`find.rs`); one the preview does not reach is shown as an excerpt of
+  the payload around it, printed once per row drawn (`log_drawer::Hits`).
+  The filter, the copies and the marks all lower a text one character at a
+  time (`find::lower`): `str::to_lowercase` treats a word's last sigma
+  apart, and a copy made with it would disagree with the mark. Esc does in
+  the field what it does in the list's filter, and leaves its text and the
+  drawer alone; the field's button empties it. gpui-kit binds `⌘F` in every
+  text field to a search only a code editor has, and a field without one
+  keeps the key, so `⌘F` is bound to the filter in a field's context too,
+  outside a dialog and outside the `CodeEditor` context the raw editors are
+  drawn in, which keep their search. Another text closes the open rows, as another kind or level
+  does. Below `search::ROOMY` the level's deprecation note gives way to the
+  field, so the header's buttons stay in a window at its smallest. The
+  field takes clicks for itself: the header toggles the drawer from
+  anywhere else on it.
 - The log drawer follows its newest row (`FollowMode::Tail`) until it is
   scrolled up. Rows open independently of each other (`expanded_log` is a
   set of row ids), so a request reads beside its response. The row a click

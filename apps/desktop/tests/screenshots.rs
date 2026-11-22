@@ -450,7 +450,7 @@ mod macos {
     ) {
         use coco_mcp::calls::ResponseStatus;
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("log-header", cx);
+            window.click("toggle-log", cx);
             window.click(("mode", 0usize), cx);
             window.render_frame(cx);
         })
@@ -2160,7 +2160,7 @@ mod macos {
         // The drawer follows the newest rows; the Errors filter keeps both
         // sessions short enough for the separator to stay in view.
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("log-header", cx);
+            window.click("toggle-log", cx);
             window.render_frame(cx);
             window.click(LogFilter::Errors.label(), cx);
             window.render_frame(cx);
@@ -2290,7 +2290,7 @@ mod macos {
         });
         let root = cx
             .update_window(handle.into(), |_, window, cx| {
-                window.click("log-header", cx);
+                window.click("toggle-log", cx);
                 window.render_frame(cx);
                 window.click(coco_mcp::state::LogFilter::Requests.label(), cx);
                 window.render_frame(cx);
@@ -3078,7 +3078,7 @@ mod macos {
         .unwrap();
         snap(cx, handle, "65-prompt-answer");
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("log-header", cx);
+            window.click("toggle-log", cx);
             window.render_frame(cx);
             // Filter tabs and Clear sit inside the header: they must not
             // bubble up to its toggle and close the drawer.
@@ -3515,7 +3515,7 @@ mod macos {
             "the export writes the head, not the payload"
         );
         cx.update_window(handle.into(), |_, window, cx| {
-            window.click("log-header", cx);
+            window.click("toggle-log", cx);
             window.render_frame(cx);
         })
         .unwrap();
@@ -4410,6 +4410,53 @@ mod macos {
         }
     }
 
+    /// At the window's smallest the drawer's text filter gives way, the
+    /// header keeps its buttons, and on a server whose level is deprecated
+    /// the note makes room for the field.
+    fn narrow_log_header_flow() {
+        let modern = |state: &mut AppState| {
+            let mut snapshot = serde_json::to_value(state.servers[0].snapshot().unwrap()).unwrap();
+            snapshot["protocolVersion"] = json!("2026-07-28");
+            snapshot["capabilities"]["logging"] = json!({});
+            state.servers[0].set_snapshot(Some(serde_json::from_value(snapshot).unwrap()));
+        };
+        for (width, deprecated, note) in [
+            (800., false, false),
+            (800., true, false),
+            (960., true, true),
+        ] {
+            let mut cx = context();
+            let mut state = demo_state(true);
+            state.drawer_open = true;
+            if deprecated {
+                modern(&mut state);
+            }
+            let handle = cx
+                .open_window(size(px(width), px(500.)), |window, cx| {
+                    let state = cx.new(|_| state);
+                    let workspace = cx.new(|cx| Workspace::new(state, window, cx));
+                    cx.new(|cx| Root::new(workspace, window, cx))
+                })
+                .unwrap();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let what = format!("{width} wide, deprecated: {deprecated}");
+                let toggle = window.find("toggle-log").bounds();
+                assert!(toggle.right() <= px(width - 12.), "{what}: {toggle:?}");
+                let field = window.find("log-filter").bounds();
+                assert!(field.size.width >= px(112.), "{what}: {field:?}");
+                let count = window.find("log-count").bounds();
+                assert!(count.right() <= field.left(), "{what}: {count:?} {field:?}");
+                assert_eq!(
+                    window.try_find("log-level-deprecated").is_some(),
+                    note,
+                    "{what}"
+                );
+            })
+            .unwrap();
+        }
+    }
+
     pub fn run() {
         if std::env::var_os("COCO_TIMING").is_some() {
             timing_flow();
@@ -4462,6 +4509,8 @@ mod macos {
         crate::interaction::log_level_filter_flow();
         crate::interaction::double_click_server_flow();
         crate::interaction::log_zoom_flow();
+        crate::interaction::log_text_filter_flow();
+        narrow_log_header_flow();
         crate::interaction::plain_text_flow();
         crate::interaction::markdown_result_flow();
         crate::unhappy::failed_call_flow();
